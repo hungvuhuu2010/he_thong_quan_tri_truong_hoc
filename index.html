@@ -1,0 +1,1393 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hệ thống Quản trị Đa năng & Nền nếp Multi-Tenant</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+</head>
+<body>
+
+  <!-- MÀN HÌNH ĐĂNG NHẬP CHUNG -->
+  <div id="login-screen" class="container">
+    <h2>ĐĂNG NHẬP HỆ THỐNG</h2>
+    <form id="login-form">
+      <div>
+        <label for="email">Email:</label><br>
+        <input type="email" id="email" required placeholder="nhapemail@domain.com">
+      </div>
+      <br>
+      <div>
+        <label for="password">Mật khẩu:</label><br>
+        <input type="password" id="password" required placeholder="******">
+      </div>
+      <br>
+      <button type="submit" id="btn-login">Đăng nhập</button>
+    </form>
+    <p id="login-error" style="color: red;"></p>
+  </div>
+
+  <!-- MÀN HÌNH CHÍNH SAU ĐĂNG NHẬP -->
+  <div id="app-screen" class="container" style="display: none;">
+    <header style="display: flex; justify-content: space-between; align-items: center; background: #f8f9fa; padding: 10px 15px; border-radius: 6px; border: 1px solid #dee2e6;">
+      <div>
+        <h3 style="margin: 0;">Xin chào, <span id="user-display-name">...</span> (<span id="user-role">...</span>)</h3>
+        <p style="margin: 5px 0 0 0; color: #6c757d;">Đơn vị: <span id="user-org">...</span></p>
+      </div>
+      <div>
+        <button onclick="openChangePasswordModal()" style="padding: 6px 12px; margin-right: 8px; cursor: pointer; background: #ffc107; border: none; border-radius: 4px; font-weight: bold;"><i class="fa-solid fa-key"></i> Đổi mật khẩu</button>
+        <button id="btn-logout" style="padding: 6px 12px; cursor: pointer; background: #dc3545; color: white; border: none; border-radius: 4px; font-weight: bold;"><i class="fa-solid fa-right-from-bracket"></i> Đăng xuất</button>
+      </div>
+    </header>
+    <hr>
+  </div>  
+    <main id="main-content">
+
+      <!-- =========================================================
+           1. SYSTEM OWNER PANEL
+           ========================================================= -->
+      <div id="owner-panel" style="display: none;">
+        <h2>BẢNG QUẢN TRỊ HỆ THỐNG (SYSTEM OWNER)</h2>
+        <hr>
+        <section>
+          <h3>1. Tạo Trường / Đơn vị mới</h3>
+          <form id="form-create-org">
+            <label>Mã trường (ID):</label>
+            <input type="text" id="org-code" placeholder="VD: TRUONG_01" required>
+            <label>Tên trường:</label>
+            <input type="text" id="org-name" placeholder="VD: Trường THPT Chuyên ABC" required>
+            <button type="submit">Tạo Đơn vị</button>
+          </form>
+          <p id="org-msg" style="color: green;"></p>
+        </section>
+        <br><hr><br>
+        <section>
+          <h3>2. Tạo tài khoản ADMIN cấp trường</h3>
+          <form id="form-create-admin">
+            <label>Chọn Trường / Đơn vị:</label>
+            <select id="admin-org-select" required><option value="">-- Chọn đơn vị --</option></select>
+            <br><br>
+            <label>Họ tên Hiệu trưởng/Admin:</label>
+            <input type="text" id="admin-name" placeholder="VD: Nguyễn Văn A" required>
+            <br><br>
+            <label>Email đăng nhập:</label>
+            <input type="email" id="admin-email" placeholder="admin@truong.edu.vn" required>
+            <br><br>
+            <label>Mật khẩu khởi tạo:</label>
+            <input type="password" id="admin-password" placeholder="******" required minlength="6">
+            <!-- 🌟 BỔ SUNG INPUT NHẬP NIÊN KHÓA/NĂM HỌC BAN ĐẦU -->
+			<label>Năm học / Niên khóa khởi tạo ban đầu:</label>
+			<input type="text" id="admin-initial-year" placeholder="VD: 2026-2027 hoặc 2026" required style="padding: 6px; width: 100%; box-sizing: border-box; margin-top: 4px; margin-bottom: 12px;">
+			<br><br>
+            <button type="submit">Tạo tài khoản ADMIN</button>
+          </form>
+          <p id="admin-msg" style="color: green;"></p>
+        </section>
+      </div>
+
+	<!-- =========================================================
+     2. SCHOOL / ORGANIZATION ADMIN PANEL (4 THỂ ĐẢM BẢO TÍNH MỞ RỘNG)
+     ========================================================= -->
+		<div id="admin-panel" style="display: none;">
+			<!-- KHU VỰC TIÊU ĐỀ & CỤM QUẢN LÝ NIÊN KHÓA CANH PHẢI -->
+			<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px; background: #f8f9fa; padding: 10px 15px; border-radius: 6px; border: 1px solid #dee2e6;">
+			  
+			  <!-- TIÊU ĐỀ BẢNG QUẢN TRỊ BÊN TRÁI -->
+			  <h2 style="margin: 0; color: #333; font-size: 1.2em;">
+				<i class="fa-solid fa-gauge-high"></i> BẢNG QUẢN TRỊ ĐƠN VỊ & CẤU HÌNH ĐA NĂNG
+			  </h2>
+
+			  <!-- KHỐI CHỌN & THÊM NĂM HỌC CANH PHẢI -->
+			  <div style="display: flex; align-items: center; gap: 8px;">
+				<select id="select-academic-year" onchange="onAcademicYearChange(this.value)" style="padding: 6px 10px; border-radius: 4px; border: 1px solid #ccc; font-weight: bold; background: #fff; cursor: pointer;">
+				  <option value="">-- Đang tải năm học --</option>
+				</select>
+				<button type="button" onclick="promptAddNewAcademicYear()" style="padding: 6px 10px; background: #198754; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.9em;" title="Thêm năm học mới">
+				  <i class="fa-solid fa-plus"></i> Thêm năm học
+				</button>
+			  </div>
+
+			</div>
+
+		  <!-- KHỐI 1: THANH ĐIỀU HƯỚNG NGANG 5 THẺ ADMIN -->
+			<div style="width: 100%; background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 10px; margin-bottom: 15px; box-sizing: border-box;">
+			  <ul style="list-style: none; padding: 0; margin: 0; display: flex; gap: 6px; width: 100%;">
+				
+				<li style="flex: 1;">
+				  <button id="btn-tab-entities" onclick="switchAdminTab('entities')" style="width: 100%; text-align: center; padding: 10px 4px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; background-color: #0d6efd; color: white; font-size: 0.9em; white-space: nowrap;">
+					<i class="fa-solid fa-users"></i> 1. Danh sách nhân sự
+				  </button>
+				</li>
+				
+				<li style="flex: 1;">
+				  <button id="btn-tab-assignments" onclick="switchAdminTab('assignments')" style="width: 100%; text-align: center; padding: 10px 4px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; background-color: transparent; color: #333; font-size: 0.9em; white-space: nowrap;">
+					<i class="fa-solid fa-sitemap"></i> 2. Phân công chuyên môn
+				  </button>
+				</li>
+				
+				<li style="flex: 1;">
+				  <button id="btn-tab-schema" onclick="switchAdminTab('schema')" style="width: 100%; text-align: center; padding: 10px 4px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; background-color: transparent; color: #333; font-size: 0.9em; white-space: nowrap;">
+					<i class="fa-solid fa-sliders"></i> 3. Nhiệm vụ bổ SUNG
+				  </button>
+				</li>
+				
+				<li style="flex: 1;">
+				  <button id="btn-tab-kpi-config" onclick="switchAdminTab('kpi-config')" style="width: 100%; text-align: center; padding: 10px 4px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; background-color: transparent; color: #333; font-size: 0.9em; white-space: nowrap;">
+					<i class="fa-solid fa-triangle-exclamation"></i> 4. Quy tắc KPI
+				  </button>
+				</li>
+				
+				<li style="flex: 1;">
+				  <button id="btn-tab-grid" onclick="switchAdminTab('grid')" style="width: 100%; text-align: center; padding: 10px 4px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; background-color: transparent; color: #333; font-size: 0.9em; white-space: nowrap;">
+					<i class="fa-solid fa-chart-pie"></i> 5. Tổng hợp số liệu
+				  </button>
+				</li>
+
+			  </ul>
+			</div>
+
+			<!-- NỘI DUNG CHÍNH CỦA ADMIN -->
+		  <div style="flex: 1; min-width: 0; background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px;">
+			  
+			  <!-- =========================================================
+				   THẺ 1: QUẢN LÝ THÔNG TIN ĐỐI TƯỢNG (DANH XƯNG CÓ THỂ MỞ RỘNG)
+				   ========================================================= -->
+			  <section id="admin-sec-entities">
+				<h3><i class="fa-solid fa-users"></i> Thẻ 1: Quản lý Danh mục Đối tượng & Cấu hình Danh xưng</h3>
+				
+				<!-- SECTION 1.1: CẤU HÌNH DANH XƯNG ĐƠN VỊ -->
+				<details style="border: 1px solid #ccc; padding: 12px; border-radius: 6px; margin-bottom: 15px; background: #fdfdfd;">
+				  <summary style="font-weight: bold; cursor: pointer; color: #0d6efd;">
+					1.1 Định nghĩa Chủ thể - Khách thể
+				  </summary>
+				  <div style="margin-top: 10px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+					<div>
+					  <label><b>Danh xưng chủ thể:</b></label><br>
+					  <input type="text" id="label-role-teacher" value="Giáo viên" placeholder="VD: Giáo viên, Trưởng phòng, Bác sĩ..." style="padding: 6px; width: 200px;">
+					</div>
+					<div>
+					  <label><b>Danh xưng khách thể:</b></label><br>
+					  <input type="text" id="label-role-student" value="Học sinh" placeholder="VD: Học sinh, Nhân viên, Bệnh nhân..." style="padding: 6px; width: 200px;">
+					</div>
+					<div style="margin-top: 18px;">
+					  <button type="button" onclick="saveCustomLabels()" style="padding: 6px 14px; background: #198754; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+						<i class="fa-solid fa-floppy-disk"></i> Lưu danh xưng
+					  </button>
+					</div>
+				  </div>
+				</details>
+
+				<!-- SECTION 1.2: IMPORT EXCEL & QUẢN LÝ DỮ LIỆU CÓ NÚT SỬA/XÓA VÀ KÍCH HOẠT TÀI KHOẢN -->
+				<details style="border: 1px solid #ccc; padding: 12px; border-radius: 6px;">
+				  <summary style="font-weight: bold; cursor: pointer; color: #0d6efd;">
+					1.2 Import &amp; Quản lý Danh sách Thực thể
+				  </summary>
+				  <div style="margin-top: 10px;">
+					
+					<div style="background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 15px; border: 1px solid #dee2e6;">
+					  <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap; margin-bottom: 8px;">
+						<label><b>Chọn loại đối tượng:</b></label>
+						<select id="entity-type-selector" style="padding: 6px;">
+						  <option value="TEACHER">Giáo viên (Phân nhóm theo Tổ/Đơn vị)</option>
+						  <option value="STUDENT">Học sinh (Phân nhóm theo Lớp/Nhóm)</option>
+						</select>
+						<input type="file" id="excel-file-input" accept=".xlsx, .xls" style="padding: 6px;">
+						<button onclick="uploadEntityExcel()" style="padding: 6px 16px; background: #0d6efd; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+						  <i class="fa-solid fa-upload"></i> Import Excel
+						</button>
+						<button type="button" onclick="downloadDynamicExcelTemplate()" style="padding: 4px 10px; background: #198754; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.85em;">
+						  <i class="fa-solid fa-file-excel"></i> Tải mẫu Excel
+						</button>
+					  </div>
+					</div>
+
+					<!-- TÌM KIẾM THỰC THỂ & NÚT KÍCH HOẠT TÀI KHOẢN DANH SÁCH LỌC -->
+					<div style="margin-bottom: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+					  <input type="text" id="entity-search-input" placeholder="Tìm kiếm theo Mã, Tên, Tổ/Lớp..." style="padding: 6px 10px; width: 250px; border: 1px solid #ccc; border-radius: 4px;">
+					  <button type="button" onclick="filterEntityListLocal()" style="padding: 6px 14px; background: #0d6efd; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+						<i class="fa-solid fa-magnifying-glass"></i> Tìm
+					  </button>
+					  <button type="button" onclick="resetAndReloadAdminEntityList()" style="padding: 6px 12px; cursor: pointer; border-radius: 4px; border: 1px solid #ccc; background: #f8f9fa;">
+						<i class="fa-solid fa-rotate"></i> Làm mới
+					  </button>
+
+					  <!-- NÚT KÍCH HOẠT TÀI KHOẢN DÀNH CHO CÁC ĐỐI TƯỢNG ĐANG HIỂN THỊ TRONG DANH SÁCH LỌC -->
+					  <button type="button" onclick="activateFilteredAccounts()" style="padding: 6px 14px; background: #198754; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; margin-left: auto;">
+						<i class="fa-solid fa-user-check"></i> Kích hoạt tài khoản danh sách lọc
+					  </button>
+					</div>                  
+
+					<!-- BẢNG DANH SÁCH CÓ NÚT SỬA & XÓA TRÊN TỪNG DÒNG -->
+					<div style="max-height: 350px; overflow-y: auto; overflow-x: auto; border: 1px solid #dee2e6; border-radius: 6px;">
+					  <table border="1" cellpadding="8" cellspacing="0" style="width: 100%; border-collapse: collapse;">
+						<thead>
+						  <tr style="background-color: #e9ecef; position: sticky; top: 0; z-index: 2;">
+							<th>Mã Định Danh</th>
+							<th>Họ và Tên</th>
+							<th>Tổ / Lớp / Đơn vị</th>
+							<th>Email</th>
+							<th style="width: 140px; text-align: center;">Thao tác</th>
+						  </tr>
+						</thead>
+						<tbody id="entity-table-body">
+						  <!-- Dữ liệu render động -->
+						</tbody>
+					  </table>
+					</div>
+				  </div>
+				</details>
+			  </section>
+
+
+			  <!-- =========================================================
+				   THẺ 2: QUẢN LÝ PHÂN CÔNG CHUYÊN MÔN (CHỦ NHIỆM & BỘ MÔN)
+				   ========================================================= -->
+			  <section id="admin-sec-assignments" style="display: none;">
+				<h3><i class="fa-solid fa-sitemap"></i> Thẻ 2: Quản lý Phân công Chuyên môn & Phạm vi Quản lý</h3>
+				
+				<!-- KHỐI 1 CẢI TIẾN: CHỌN NHÂN SỰ DẠNG LISTBOX BẤM CHỌN NHANH -->
+				  <div style="background: #f8f9fa; padding: 12px; border-radius: 6px; border: 1px solid #dee2e6; margin-bottom: 15px;">
+					<h4 style="margin-top: 0; color: #0d6efd;">
+					  <i class="fa-solid fa-user-check"></i> 1. Chọn Nhân sự / Giáo viên cần phân công:
+					</h4>
+					
+					<div style="display: flex; gap: 15px; flex-wrap: wrap;">
+					  
+					  <!-- CỘT 1: LỌC THEO TỔ CHUYÊN MÔN / ĐƠN VỊ -->
+						<div style="width: 220px;">
+						  <label><b>Lọc Tổ chuyên môn:</b></label><br>
+						  <select id="select-group-category" onchange="filterMembersByCategoryList()" style="padding: 6px; width: 100%; margin-top: 4px; border-radius: 4px; border: 1px solid #ccc;">
+							<option value="">-- Tất cả Tổ chuyên môn --</option>
+						  </select>
+						</div>
+
+					  <!-- CỘT 2: KHUNG CUỘN DANH SÁCH NHÂN SỰ CÓ Ô TÌM KIẾM NHANH -->
+					  <div style="flex: 1; min-width: 280px;">
+						<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+						  <label><b>Danh sách Nhân sự (Click chọn 1 người):</b></label>
+						  <input type="text" id="assign-member-search" oninput="filterMembersByKeywordList()" placeholder="🔍 Tìm tên hoặc mã..." style="padding: 3px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85em; width: 160px;">
+						</div>
+
+						<!-- KHUNG CUỘN RADIO LISTBOX -->
+						<div id="assign-members-radio-container" style="max-height: 160px; overflow-y: auto; border: 1px solid #ccc; padding: 6px; border-radius: 4px; background: #fff;">
+						  <label class="assign-member-item" style="display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; margin-bottom: 3px; cursor: pointer; border-radius: 4px; transition: background 0.2s; background: transparent;" onmouseover="this.style.background='#f0f4f9'" onmouseout="if(!this.querySelector('input').checked) this.style.background='transparent'">
+							<div>
+							  <input type="radio" name="assign_member_radio" class="rb-assign-member" value="GV001" onchange="onAssignMemberRadioChange('GV001', this)" style="margin-right: 8px;">
+							  <b>[GV001]</b> Nguyễn Thị A
+							</div>
+							<span style="font-size: 0.8em; background: #e9ecef; color: #495057; padding: 1px 6px; border-radius: 3px;">Hóa</span>
+						  </label>
+						  
+						  <label class="assign-member-item" style="display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; margin-bottom: 3px; cursor: pointer; border-radius: 4px; transition: background 0.2s; background: transparent;" onmouseover="this.style.background='#f0f4f9'" onmouseout="if(!this.querySelector('input').checked) this.style.background='transparent'">
+							<div>
+							  <input type="radio" name="assign_member_radio" class="rb-assign-member" value="GV002" onchange="onAssignMemberRadioChange('GV002', this)" style="margin-right: 8px;">
+							  <b>[GV002]</b> Bùi Văn X
+							</div>
+							<span style="font-size: 0.8em; background: #e9ecef; color: #495057; padding: 1px 6px; border-radius: 3px;">Lý</span>
+						  </label>
+						  
+						  <label class="assign-member-item" style="display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; margin-bottom: 3px; cursor: pointer; border-radius: 4px; transition: background 0.2s; background: transparent;" onmouseover="this.style.background='#f0f4f9'" onmouseout="if(!this.querySelector('input').checked) this.style.background='transparent'">
+							<div>
+							  <input type="radio" name="assign_member_radio" class="rb-assign-member" value="GV003" onchange="onAssignMemberRadioChange('GV003', this)" style="margin-right: 8px;">
+							  <b>[GV003]</b> Lê Đình V
+							</div>
+							<span style="font-size: 0.8em; background: #e9ecef; color: #495057; padding: 1px 6px; border-radius: 3px;">Sinh</span>
+						  </label>
+						</div>
+					  </div>
+
+					</div>
+				  </div>
+
+				<div style="border: 1px solid #ccc; padding: 15px; border-radius: 6px; background: #fff;">
+  
+				  <!-- MÔ HÌNH PHÂN CÔNG ĐA DẠNG -->
+				  <div style="display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 15px;">
+					
+					<!-- MA TRẬN 1: PHÂN CÔNG CHỦ NHIỆM / QUẢN LÝ CHÍNH (ĐỔ DỮ LIỆU ĐỘNG TỪ FIREBASE) -->
+					<div style="flex: 1; min-width: 300px; border: 1px solid #b6d4fe; background: #f4f8ff; padding: 12px; border-radius: 6px;">
+					  <h4 style="margin-top: 0; color: #0d6efd;"><i class="fa-solid fa-user-tie"></i> 2. Phân công Chủ nhiệm / Quản lý chính:</h4>
+					  <p style="font-size: 0.85em; color: #6c757d; margin-bottom: 8px;">Cho phép chọn nhiều Lớp/Tổ cho 1 người, hoặc gán nhiều người đồng quản lý:</p>
+					  
+					  <!-- Ô TÌM KIẾM THỜI GIAN THỰC MA TRẬN 1 -->
+					  <input type="text" oninput="filterCheckboxesByKeyword(this, 'homeroom-classes-checkboxes')" placeholder="🔍 Tìm nhanh Lớp hoặc Tổ/Đơn vị..." style="width: 100%; padding: 5px 8px; margin-bottom: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85em; box-sizing: border-box;">
+
+					  <!-- CONTAINER KHUNG CUỘN (JS TỰ NẠP DANH SÁCH TỪ FIREBASE) -->
+					  <div id="homeroom-classes-checkboxes" style="max-height: 150px; overflow-y: auto; border: 1px solid #ccc; padding: 8px; border-radius: 4px; background: #fff;">
+						<i style="color:#6c757d; font-size:0.9em;">Đang tải danh sách Lớp/Tổ từ cơ sở dữ liệu...</i>
+					  </div>
+					</div>
+
+					<!-- MA TRẬN 2: PHÂN CÔNG GIẢNG DẠY BỘ MÔN (ĐỔ DỮ LIỆU ĐỘNG TỪ FIREBASE) -->
+					<div style="flex: 1; min-width: 300px; border: 1px solid #d1e7dd; background: #f4fbf7; padding: 12px; border-radius: 6px;">
+					  <h4 style="margin-top: 0; color: #198754;"><i class="fa-solid fa-book-open"></i> 3. Phân công Lớp giảng dạy / Phụ trách:</h4>
+					  <p style="font-size: 0.85em; color: #6c757d; margin-bottom: 8px;">Tích chọn các lớp được quyền nhập nền nếp / đánh giá nghiệp vụ:</p>
+					  
+					  <!-- Ô TÌM KIẾM THỜI GIAN THỰC MA TRẬN 2 -->
+					  <input type="text" oninput="filterCheckboxesByKeyword(this, 'teaching-classes-checkboxes')" placeholder="🔍 Tìm nhanh lớp giảng dạy..." style="width: 100%; padding: 5px 8px; margin-bottom: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85em; box-sizing: border-box;">
+
+					  <!-- CONTAINER KHUNG CUỘN (JS TỰ NẠP DANH SÁCH TỪ FIREBASE) -->
+					  <div id="teaching-classes-checkboxes" style="max-height: 150px; overflow-y: auto; border: 1px solid #ccc; padding: 8px; border-radius: 4px; background: #fff;">
+						<i style="color:#6c757d; font-size:0.9em;">Đang tải danh sách Lớp/Tổ từ cơ sở dữ liệu...</i>
+					  </div>
+					</div>
+
+				  </div>
+
+				  <button type="button" onclick="saveTeachingAssignments()" style="padding: 10px 20px; background: #0d6efd; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+					<i class="fa-solid fa-floppy-disk"></i> Lưu phân công chuyên môn
+				  </button>
+				</div>
+
+			  </section>
+
+
+			  <!-- =========================================================
+				   THẺ 3: CHỨC NĂNG CHÍNH (SCHEMA, MODULE, GÁN BÀI TOÁN)
+				   ========================================================= -->
+			  <section id="admin-sec-schema" style="display: none;">
+				<h3><i class="fa-solid fa-sliders"></i> Thẻ 3: Khởi tạo Trường dữ liệu, Bài toán Module & Phân công Nhiệm vụ</h3>
+				
+				<!-- SECTION 3.1: ĐỊNH NGHĨA TRƯỜNG SCHEMA -->
+				<details style="border: 1px solid #ccc; padding: 10px; border-radius: 6px; margin-bottom: 15px;">
+				  <summary style="font-weight: bold; cursor: pointer; color: #0d6efd;">
+					3.1 Thêm, sửa, xóa các trường thông tin dữ liệu (Field Definitions)
+				  </summary>
+				  
+				  <!-- FORM THÊM / CẬP NHẬT TRƯỜNG THÔNG TIN CÓ CẤU HÌNH KPI -->
+					<form id="form-add-field" onsubmit="handleFieldFormSubmit(event)" style="background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #dee2e6; margin-bottom: 15px;">
+					  <input type="hidden" id="field-edit-mode" value="CREATE">
+					  
+					  <!-- Hàng 1: Mã trường & Tên hiển thị -->
+					  <div style="display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 12px;">
+						<div style="flex: 1; min-width: 180px;">
+						  <label><b>Mã trường (Key):</b></label><br>
+						  <input type="text" id="field-key" placeholder="VD: loiDiMuon" required style="width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; margin-top: 4px;">
+						</div>
+						<div style="flex: 1; min-width: 200px;">
+						  <label><b>Tên hiển thị:</b></label><br>
+						  <input type="text" id="field-label" placeholder="VD: Đi muộn" required style="width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; margin-top: 4px;">
+						</div>
+					  </div>
+
+					  <!-- Hàng 2: Kiểu dữ liệu -->
+					  <div style="margin-bottom: 12px;">
+						<label><b>Kiểu dữ liệu:</b></label><br>
+						<select id="field-type" onchange="handleFieldTypeChange(this)" style="width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 4px; margin-top: 4px;">
+						  <option value="text">Văn bản (Text)</option>
+						  <option value="number">Số (Number)</option>
+						  <option value="date">Ngày (Date)</option>
+						  <option value="boolean">Logic / Tích chọn (Boolean - Có/Không)</option>
+						  <option value="options">Danh sách lựa chọn (Options / Multi-choice)</option>
+						</select>
+					  </div>
+
+					  <!-- Hàng 3: Khung nhập danh sách tùy chọn (Mặc định ẩn, chỉ hiện khi chọn 'options') -->
+					  <div id="field-options-group" style="display: none; margin-bottom: 12px; background: #fff; padding: 10px; border-radius: 6px; border: 1px dashed #ced4da;">
+						<label style="font-size: 0.9em; color: #495057;"><b>Các giá trị lựa chọn (cách nhau bằng dấu phẩy):</b></label><br>
+						<input type="text" id="field-options-values" oninput="generateKpiOptionsRows()" placeholder="Ví dụ: 5 phút, 10 phút, 15 phút, 30 phút" style="width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; margin-top: 4px;">
+					  </div>
+
+					  <!-- Hàng 4: KHỐI CẤU HÌNH THI ĐUA & CẢNH BÁO KPI (Cố định ở dưới, không bị đẩy lung tung) -->
+					  <fieldset style="border: 1px solid #fd7e14; padding: 10px 12px; border-radius: 6px; background: #fff9f5; margin-bottom: 12px;">
+						<legend style="color: #fd7e14; font-weight: bold; font-size: 0.95em;">
+						  <i class="fa-solid fa-triangle-exclamation"></i> Cấu hình Cảnh báo KPI & Điểm thi đua:
+						</legend>
+						
+						<div style="margin-bottom: 8px;">
+						  <label style="cursor: pointer; font-weight: bold; color: #d63384;">
+							<input type="checkbox" id="field-is-kpi" onchange="toggleKPISettings(this.checked)"> Đánh dấu là Trường tính điểm KPI / Cảnh báo
+						  </label>
+						</div>
+
+						<div id="kpi-settings-container" style="display: flex; margin-top: 10px; padding-top: 8px; border-top: 1px dashed #f8d7da;">
+						  <div style="display: flex; gap: 12px; flex-wrap: wrap; width: 100%;">
+							
+							<div style="flex: 1; min-width: 90px;">
+							  <label style="font-size: 0.85em;"><b>Điểm cộng/trừ/Lần:</b></label><br>
+							  <input type="number" id="field-score-weight" step="0.5" value="-1" placeholder="VD: -1" style="width: 100%; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; margin-top: 2px;">
+							</div>
+
+							<div style="flex: 1; min-width: 90px;">
+							  <label style="font-size: 0.85em;"><b>Ngưỡng Tuần:</b></label><br>
+							  <input type="number" id="field-kpi-weekly" value="3" placeholder="VD: 3" style="width: 100%; padding: 4px 6px; border: 1px solid #ffc107; border-radius: 4px; background: #fffdf5; box-sizing: border-box; margin-top: 2px;">
+							  <small style="color: #856404; font-size: 0.75em;">🟡 Vàng</small>
+							</div>
+
+							<div style="flex: 1; min-width: 90px;">
+							  <label style="font-size: 0.85em;"><b>Ngưỡng Tháng:</b></label><br>
+							  <input type="number" id="field-kpi-monthly" value="5" placeholder="VD: 5" style="width: 100%; padding: 4px 6px; border: 1px solid #dc3545; border-radius: 4px; background: #fff8f8; box-sizing: border-box; margin-top: 2px;">
+							  <small style="color: #721c24; font-size: 0.75em;">🔴 Đỏ</small>
+							</div>
+
+						  </div>
+						</div>
+						<!-- Khu vực bảng cấu hình KPI chi tiết cho kiểu options -->
+						<div id="kpi-options-matrix-container" style="display: none; margin-top: 10px; border-top: 1px dashed #ffab76; padding-top: 8px;">
+						  <label style="font-size: 0.85em; color: #fd7e14; font-weight: bold;">
+							<i class="fa-solid fa-sliders"></i> Cấu hình mức điểm & ngưỡng riêng cho từng lựa chọn:
+						  </label>
+						  <div id="kpi-options-rows-wrapper" style="margin-top: 4px;">
+							<!-- Các dòng input sẽ tự động sinh ra ở đây -->
+						  </div>
+						</div>
+					  </fieldset>
+
+					  <!-- Hàng 5: Cụm nút thao tác (Thêm trường, Xuất mẫu, Import Excel, Hủy) -->
+					  <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+						<button type="submit" id="btn-submit-field" style="padding: 6px 16px; background: #0d6efd; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+						  Thêm trường thông tin
+						</button>
+						
+						<button type="button" onclick="exportSchemaFieldsTemplateExcel()" style="padding: 6px 12px; background: #198754; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.9em;">
+						  <i class="fa-solid fa-file-excel"></i> Xuất file mẫu
+						</button>
+						
+						<label style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: #ffc107; color: #000; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.9em;" title="Chọn file Excel(.xlsx)">
+						  <i class="fa-solid fa-file-arrow-up"></i> Import Excel
+						  <input type="file" id="excel-schema-file-input" accept=".xlsx, .xls, .csv" style="display: none;" onchange="importSchemaFieldsFromExcel(event)">
+						</label>
+
+						<button type="button" id="btn-cancel-edit-field" onclick="resetFormFieldState()" style="display: none; padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+						  Hủy bỏ
+						</button>
+					  </div>
+					</form>
+
+				  <br>
+				  <h4>Danh sách trường thông tin đã định nghĩa:</h4>
+
+					<!-- Ô TÌM KIẾM BỔ SUNG -->
+					<div style="margin-bottom: 8px;">
+					  <input type="text" 
+							 id="schema-fields-search-input" 
+							 oninput="filterSchemaFieldsList()" 
+							 placeholder="🔍 Tìm theo Mã trường, Tên hiển thị..." 
+							 style="width: 100%; padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 0.9em;">
+					</div>
+
+					<div style="max-height: 200px; overflow-y: auto;">
+					  <ul id="schema-fields-list" style="list-style: none; padding: 0; margin: 0;">
+						<li>Đang tải...</li>
+					  </ul>
+					</div>
+				</details>
+
+				<!-- SECTION 3.2: TẠO BÀI TOÁN MODULE -->
+				<details style="border: 1px solid #ccc; padding: 10px; border-radius: 6px; margin-bottom: 15px;">
+				  <summary style="font-weight: bold; cursor: pointer; color: #0d6efd;">
+					3.2 Cấu hình & Khởi tạo Bài toán Module
+				  </summary>
+				  
+				  <form id="form-create-module" style="margin-top: 10px;">
+				  <input type="hidden" id="module-edit-mode" value="CREATE">
+
+				  <label>Mã bài toán (Mã CSDL viết không dấu):</label><br>
+				  <input type="text" id="mod-id" placeholder="VD: MOD_NEN_NEP" required style="padding: 6px; width: 300px;"><br><br>
+				  
+				  <label>Tên bài toán thống kê:</label><br>
+				  <input type="text" id="mod-name" placeholder="VD: Theo dõi Nền nếp Học sinh" required style="padding: 6px; width: 300px;"><br><br>
+
+				  <label><b>Đối tượng áp dụng bài toán này:</b></label><br>
+				  <select id="mod-target-type" required style="padding: 6px; width: 300px; margin-bottom: 15px;">
+					<option value="STUDENT">Đối tượng nhóm (VD: Học sinh theo Lớp)</option>
+					<option value="TEACHER">Đối tượng quản lý (VD: Giáo viên theo Tổ)</option>
+				  </select><br><br>
+
+				  <div style="margin-bottom: 15px;">     
+					<fieldset style="padding: 10px; border-radius: 6px; border: 1px solid #ccc; background: #fafafa;">
+					  <legend style="color: #0d6efd; font-weight: bold;">Tích chọn các trường thông tin cho vào bài toán:</legend>
+					  
+					  <!-- THANH TÌM KIẾM VÀ NÚT THAO TÁC NHANH -->
+					  <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap;">
+						<input type="text" 
+							   id="mod-fields-search-input" 
+							   oninput="filterModuleFieldsCheckboxes()" 
+							   placeholder="🔍 Tìm trường thông tin..." 
+							   style="flex: 1; min-width: 180px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85em;">
+						
+						<button type="button" onclick="selectAllModuleFields(true)" style="padding: 3px 8px; font-size: 0.8em; cursor: pointer; background: #e7f1ff; color: #0d6efd; border: 1px solid #b6d4fe; border-radius: 3px; font-weight: bold;">
+						  <i class="fa-solid fa-check-double"></i> Chọn tất cả
+						</button>
+						
+						<button type="button" onclick="selectAllModuleFields(false)" style="padding: 3px 8px; font-size: 0.8em; cursor: pointer; background: #f8f9fa; color: #6c757d; border: 1px solid #ccc; border-radius: 3px;">
+						  <i class="fa-solid fa-xmark"></i> Bỏ chọn
+						</button>
+					  </div>
+
+					  <!-- KHUNG CUỘN DANH SÁCH CHECKBOX -->
+					  <div id="module-fields-checkboxes" style="max-height: 160px; overflow-y: auto; border: 1px solid #dee2e6; padding: 8px; border-radius: 4px; background: #fff;">
+						<i>Đang tải danh sách...</i>
+					  </div>
+					</fieldset>
+				  </div>
+
+				  <div style="display: flex; gap: 10px;">
+					<!-- 🌟 ĐÃ ĐỔI TYPE THÀNH BUTTON VÀ GỌI HÀM TRỰC TIẾP QUA ONCLICK -->
+					<button type="button" id="btn-submit-module" onclick="createModule()" style="padding: 8px 16px; background: #198754; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Khởi tạo Bài toán Module</button>
+					<button type="button" id="btn-cancel-edit-module" onclick="resetModuleFormState()" style="display: none; padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Hủy sửa</button>
+				  </div>
+				</form>
+
+				  <br><hr><br>
+				  <h4>Các Bài toán Module hiện có:</h4>
+				  <div style="margin-bottom: 15px;">
+					  <fieldset style="padding: 10px; border-radius: 6px; border: 1px solid #ccc; background: #fafafa;">
+						<legend style="color: #198754; font-weight: bold;">Danh sách các Bài toán Module đã tạo (Cho phép Sửa / Xóa):</legend>
+						
+						<!-- THANH TÌM KIẾM CÁC MODULE BÀI TOÁN -->
+						<div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+						  <input type="text" 
+								 id="modules-list-search-input" 
+								 oninput="filterModulesListContainer()" 
+								 placeholder="🔍 Tìm theo Mã bài toán hoặc Tên bài toán..." 
+								 style="flex: 1; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85em;">
+						  
+						  <button type="button" 
+								  onclick="resetModulesListSearch()" 
+								  style="padding: 3px 8px; font-size: 0.8em; cursor: pointer; background: #f8f9fa; color: #6c757d; border: 1px solid #ccc; border-radius: 3px;">
+							<i class="fa-solid fa-rotate-left"></i> Xóa tìm kiếm
+						  </button>
+						</div>
+
+						<!-- KHUNG CUỘN DANH SÁCH MODULE -->
+						<div style="max-height: 200px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 4px; background: #fff; padding: 6px;">
+						  <div id="modules-list-container">Đang tải...</div>
+						</div>
+					  </fieldset>
+					</div>
+				</details>
+
+				<!-- SECTION 3.3: PHÂN CÔNG NHIỆM VỤ THEO BÀI TOÁN MODULE -->
+				<details style="border: 1px solid #ccc; padding: 12px; border-radius: 6px; background: #fff;">
+				  <summary style="font-weight: bold; cursor: pointer; color: #0d6efd;">
+					3.3 Phân công Nhiệm vụ Nhập liệu theo Bài toán Module & Rà soát
+				  </summary>
+
+				  <form id="form-assign-permission" style="margin-top: 10px;">
+					
+					<!-- BƯỚC 1: KHỐI CHỌN GIÁO VIÊN / HỌC SINH DẠNG LISTBOX TÌM KIẾM NHANH -->
+					  <div style="background: #f8f9fa; padding: 12px; border-radius: 6px; border: 1px solid #dee2e6; margin-bottom: 15px;">
+						<h4 style="margin-top: 0; color: #0d6efd;">
+						  <i class="fa-solid fa-user-check"></i> 1. Chọn Nhân sự / Giáo viên cần phân công:
+						</h4>
+						
+						<div style="display: flex; gap: 15px; flex-wrap: wrap;">
+						  
+						  <!-- CỘT 1: LỌC THEO TỔ CHUYÊN MÔN / ĐƠN VỊ -->
+						  <div style="width: 220px;">
+							<label><b>Lọc Tổ / Đơn vị:</b></label><br>
+							<select id="select-card3-group-category" onchange="filterCard3MembersByCategory()" style="padding: 6px; width: 100%; margin-top: 4px; border-radius: 4px; border: 1px solid #ccc;">
+							  <option value="">-- Tất cả Tổ/Đơn vị --</option>
+							</select>
+						  </div>
+
+						  <!-- CỘT 2: KHUNG CUỘN DANH SÁCH NHÂN SỰ TẠI THẺ 3 -->
+						  <div style="flex: 1; min-width: 280px;">
+							<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+							  <label><b>Danh sách Nhân sự (Click chọn 1 người):</b></label>
+							  <input type="text" id="card3-member-search" oninput="filterCard3MembersByKeyword()" placeholder="🔍 Tìm tên hoặc mã..." style="padding: 3px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85em; width: 160px;">
+							</div>
+
+							<!-- KHUNG CUỘN RADIO LISTBOX CỦA THẺ 3 -->
+							<div id="card3-members-radio-container" style="max-height: 160px; overflow-y: auto; border: 1px solid #ccc; padding: 6px; border-radius: 4px; background: #fff;">
+							  <i style="color: #6c757d; font-size: 0.9em;">Đang tải danh sách nhân sự...</i>
+							</div>
+						  </div>
+
+						</div>
+					  </div>
+
+					<!-- BƯỚC 2: TÍCH CHỌN MODULE BÀI TOÁN -->
+					<fieldset style="border: 1px solid #198754; padding: 10px; border-radius: 6px; background: #fafafa; margin-bottom: 15px;">
+					  <legend style="color: #198754; font-weight: bold;">2. Tích chọn các Bài toán Module cấp quyền thực hiện:</legend>
+
+						  <!-- THANH TÌM KIẾM THỜI GIAN THỰC VÀ NÚT CHỌN NHANH -->
+						  <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap;">
+							<input type="text" 
+								   id="assign-mod-search-input" 
+								   oninput="filterAssignModulesCheckboxes()" 
+								   placeholder="🔍 Tìm theo Mã hoặc Tên Bài toán Module..." 
+								   style="flex: 1; min-width: 200px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85em;">
+							
+							<button type="button" 
+									onclick="selectAllAssignModules(true)" 
+									style="padding: 3px 8px; font-size: 0.8em; cursor: pointer; background: #e7f1ff; color: #0d6efd; border: 1px solid #b6d4fe; border-radius: 3px; font-weight: bold;">
+							  <i class="fa-solid fa-check-double"></i> Chọn tất cả
+							</button>
+
+							<button type="button" 
+									onclick="selectAllAssignModules(false)" 
+									style="padding: 3px 8px; font-size: 0.8em; cursor: pointer; background: #f8f9fa; color: #6c757d; border: 1px solid #ccc; border-radius: 3px;">
+							  <i class="fa-solid fa-xmark"></i> Bỏ chọn
+							</button>
+						  </div>
+
+						  <!-- KHUNG CUỘN DANH SÁCH CHECKBOX MODULE -->
+						  <div id="assign-modules-checkboxes" style="max-height: 160px; overflow-y: auto; background: #fff; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+							<p style="color: #6c757d; margin: 0;"><i>Đang tải danh sách bài toán...</i></p>
+						  </div>				  
+					  
+					  
+					</fieldset>
+
+					<button type="submit" style="padding: 10px 20px; background: #0d6efd; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+					  <i class="fa-solid fa-floppy-disk"></i> Lưu phân công nhiệm vụ
+					</button>
+				  </form>
+
+				  <p id="assign-msg" style="color: green; margin-top: 8px;"></p>
+
+				  <br><hr><br>
+
+				  <!-- BẢNG RÀ SOÁT ĐÃ PHÂN CÔNG (CÓ KHUNG BỌC BẢO VỆ CHỐNG TRÀN) -->
+				  <div style="background: #e7f1ff; padding: 10px; border-radius: 6px; margin-bottom: 10px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+					<label style="font-weight: bold; color: #084298;"><i class="fa-solid fa-filter"></i> Lọc rà soát theo Module:</label>
+					<select id="select-assigned-filter-module" onchange="loadAssignedUsersListByModule()" style="padding: 6px; font-weight: bold; border-radius: 4px; border: 1px solid #0d6efd;"></select>
+					<button type="button" onclick="loadAssignedUsersListByModule()" style="padding: 6px 12px; cursor: pointer; border-radius: 4px; border: 1px solid #ccc; background: #fff;">
+					  <i class="fa-solid fa-rotate"></i> Làm mới
+					</button>
+				  </div>
+
+				  <div style="width: 100%; overflow-x: auto; border: 1px solid #dee2e6; border-radius: 6px; box-sizing: border-box;">
+					<table border="1" cellpadding="8" cellspacing="0" style="width: 100%; min-width: 650px; border-collapse: collapse; table-layout: fixed; box-sizing: border-box;">
+					  <thead>
+						<tr style="background-color: #e9ecef;">
+						  <th style="width: 20%; text-align: left;">Họ và Tên</th>
+						  <th style="width: 10%; text-align: left;">Tổ/Lớp</th>
+						  <th style="width: 70%; text-align: left;">Module Đã Gán</th>
+						</tr>
+					  </thead>
+					  <tbody id="assigned-users-table-body">
+						<tr><td colspan="3" style="text-align: center;">Đang tải...</td></tr>
+					  </tbody>
+					</table>
+				  </div>
+
+				</details>
+			  </section>
+
+
+
+			  <!-- THẺ 4 MỚI: CẤU HÌNH THI ĐUA KPI CẤP 2 (CHÈN TRƯỚC THẺ GRID) -->
+				<!-- NỘI DUNG THẺ 4: MA TRẬN CẤU HÌNH THI ĐUA 4 MỨC -->
+				<section id="admin-sec-kpi-config" style="display: none;">
+				  <h3><i class="fa-solid fa-layer-group" style="color: #0d6efd;"></i> Thẻ 4: Ma trận Ngưỡng Khống chế Thi đua Tháng</h3>
+
+				    <div style="border: 1px solid #dee2e6; padding: 18px; border-radius: 8px; background: #fff; margin-bottom: 20px;">
+						<!-- Chú thích chung -->
+						<p style="font-size: 0.9em; color: #6c757d; margin-top: 0; line-height: 1.5;">
+							Hệ thống xếp loại mặc định là <b>🟢 Tốt</b>. Nếu cá nhân chạm vào bất kỳ ngưỡng nào cùng hàng, hệ thống sẽ tự động hạ bậc xếp loại tương ứng. (Kiểm tra từ <b>Chưa đạt ➔ Đạt ➔ Khá</b>).
+						</p>
+
+						<form id="form-kpi-rules-config" onsubmit="event.preventDefault(); saveMonthlyKPIRulesConfig();">
+							
+							<!-- 🌟 MA TRẬN 1: DÀNH CHO HỌC SINH -->
+							<div style="margin-bottom: 25px;">
+								<h4 style="color: #0d6efd; margin-bottom: 10px; border-bottom: 2px solid #e7f1ff; padding-bottom: 5px;">
+									<i class="fa-solid fa-user-graduate"></i> Ma trận Ngưỡng KPI: HỌC SINH
+								</h4>
+								<table border="1" cellpadding="10" cellspacing="0" style="width: 100%; border-collapse: collapse; text-align: center;">
+									<thead>
+										<tr style="background-color: #f8f9fa;">
+											<th style="width: 25%;">Hạ bậc Xếp loại</th>
+											<th>1. Số tuần 🟡 Cảnh báo Vàng (≥)</th>
+											<th>2. Tổng lượt vi phạm (≥)</th>
+											<th>3. Tổng điểm trừ (≥)</th>
+										</tr>
+									</thead>
+									<tbody>
+										<!-- Lớp 1: Khá -->
+										<tr style="background-color: #f0f8ff;">
+											<td><b style="color: #0d6efd;">🔵 Rớt xuống loại KHÁ</b></td>
+											<td><input type="number" id="cfg-student-kha-weeks" value="1" min="1" style="width: 80px; padding: 4px;"> tuần</td>
+											<td><input type="number" id="cfg-student-kha-count" value="5" min="1" style="width: 80px; padding: 4px;"> lượt</td>
+											<td><input type="number" id="cfg-student-kha-score" value="5" step="0.5" style="width: 80px; padding: 4px;"> điểm</td>
+										</tr>
+										<!-- Lớp 2: Đạt -->
+										<tr style="background-color: #fffdf5;">
+											<td><b style="color: #fd7e14;">🟠 Rớt xuống loại ĐẠT</b></td>
+											<td><input type="number" id="cfg-student-dat-weeks" value="2" min="1" style="width: 80px; padding: 4px;"> tuần</td>
+											<td><input type="number" id="cfg-student-dat-count" value="10" min="1" style="width: 80px; padding: 4px;"> lượt</td>
+											<td><input type="number" id="cfg-student-dat-score" value="10" step="0.5" style="width: 80px; padding: 4px;"> điểm</td>
+										</tr>
+										<!-- Lớp 3: Chưa đạt -->
+										<tr style="background-color: #fff8f8;">
+											<td><b style="color: #dc3545;">🔴 Rớt loại CHƯA ĐẠT</b></td>
+											<td><input type="number" id="cfg-student-chuadat-weeks" value="3" min="1" style="width: 80px; padding: 4px;"> tuần</td>
+											<td><input type="number" id="cfg-student-chuadat-count" value="15" min="1" style="width: 80px; padding: 4px;"> lượt</td>
+											<td><input type="number" id="cfg-student-chuadat-score" value="15" step="0.5" style="width: 80px; padding: 4px;"> điểm</td>
+										</tr>
+									</tbody>
+								</table>
+							</div>
+							<br><br>
+
+							<!-- 🌟 MA TRẬN 2: DÀNH CHO GIÁO VIÊN / NHÂN SỰ -->
+							<div style="margin-bottom: 15px;">
+								<h4 style="color: #198754; margin-bottom: 10px; border-bottom: 2px solid #d1e7dd; padding-bottom: 5px;">
+									<i class="fa-solid fa-chalkboard-user"></i> Ma trận Ngưỡng KPI: GIÁO VIÊN / NHÂN SỰ
+								</h4>
+								<table border="1" cellpadding="10" cellspacing="0" style="width: 100%; border-collapse: collapse; text-align: center;">
+									<thead>
+										<tr style="background-color: #f8f9fa;">
+											<th style="width: 25%;">Hạ bậc Xếp loại</th>
+											<th>1. Số tuần 🟡 Cảnh báo Vàng (≥)</th>
+											<th>2. Tổng lượt vi phạm (≥)</th>
+											<th>3. Tổng điểm trừ (≥)</th>
+										</tr>
+									</thead>
+									<tbody>
+										<!-- Lớp 1: Khá -->
+										<tr style="background-color: #f0fdf4;">
+											<td><b style="color: #0d6efd;">🔵 Rớt xuống loại KHÁ</b></td>
+											<td><input type="number" id="cfg-teacher-kha-weeks" value="1" min="1" style="width: 80px; padding: 4px;"> tuần</td>
+											<td><input type="number" id="cfg-teacher-kha-count" value="2" min="1" style="width: 80px; padding: 4px;"> lượt</td>
+											<td><input type="number" id="cfg-teacher-kha-score" value="2" step="0.5" style="width: 80px; padding: 4px;"> điểm</td>
+										</tr>
+										<!-- Lớp 2: Đạt -->
+										<tr style="background-color: #fffdf5;">
+											<td><b style="color: #fd7e14;">🟠 Rớt xuống loại ĐẠT</b></td>
+											<td><input type="number" id="cfg-teacher-dat-weeks" value="2" min="1" style="width: 80px; padding: 4px;"> tuần</td>
+											<td><input type="number" id="cfg-teacher-dat-count" value="4" min="1" style="width: 80px; padding: 4px;"> lượt</td>
+											<td><input type="number" id="cfg-teacher-dat-score" value="4" step="0.5" style="width: 80px; padding: 4px;"> điểm</td>
+										</tr>
+										<!-- Lớp 3: Chưa đạt -->
+										<tr style="background-color: #fff8f8;">
+											<td><b style="color: #dc3545;">🔴 Rớt loại CHƯA ĐẠT</b></td>
+											<td><input type="number" id="cfg-teacher-chuadat-weeks" value="3" min="1" style="width: 80px; padding: 4px;"> tuần</td>
+											<td><input type="number" id="cfg-teacher-chuadat-count" value="6" min="1" style="width: 80px; padding: 4px;"> lượt</td>
+											<td><input type="number" id="cfg-teacher-chuadat-score" value="6" step="0.5" style="width: 80px; padding: 4px;"> điểm</td>
+										</tr>
+									</tbody>
+								</table>
+							</div>
+
+							<!-- Nút lưu chung cho cả 2 ma trận -->
+							<div style="display: flex; justify-content: flex-end; margin-top: 15px;">
+								<button type="submit" style="padding: 10px 24px; background: #0d6efd; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+									<i class="fa-solid fa-floppy-disk"></i> Lưu Ma trận Ngưỡng
+								</button>
+							</div>
+						</form>
+					</div>
+				</section>
+			  <!-- =========================================================
+				   THẺ 5: BẢNG TỔNG HỢP & NHẬT KÝ VẾT AUDIT LOG
+				   ========================================================= -->
+			    <!-- THẺ 5: BẢNG TỔNG HỢP & BÁO CÁO THI ĐUA KPI (TỐI ƯU QUOTA) -->
+				<section id="admin-sec-grid" style="display: none;">
+				  <h3><i class="fa-solid fa-chart-pie"></i> Thẻ 5: Tổng hợp Số liệu & Báo cáo Thi đua KPI</h3>
+
+				  <!-- BỘ LỌC DÙNG CHUNG: CHỌN BÀI TOÁN MODULE & NÚT LÀM MỚI BẮT BUỘC -->
+				  <div style="background: #e7f1ff; padding: 12px; border-radius: 6px; border: 1px solid #b6d4fe; margin-bottom: 15px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; justify-content: space-between;">
+					<div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+					  <div style="min-width: 200px;">
+							<label style="color: #084298;"><b>Chọn Bài toán Module:</b></label><br>
+							<select id="select-grid-module" 
+									onfocus="loadModulesIntoSelect()" 
+									onchange="window.currentModuleIdGlobal = this.value; reloadAllGridSections(true);" 
+									style="padding: 6px; width: 100%; border-radius: 4px; border: 1px solid #0d6efd; margin-top: 4px; font-weight: bold; color: #0d6efd;">
+							</select>
+						</div>
+					</div>
+
+					<!-- NÚT LÀM MỚI BẮT BUỘC (GIẢI PHÁP B) -->
+					<div>
+					  <small id="grid-cache-time-badge" style="color: #6c757d; font-style: italic; display: block; margin-top: 4px; text-align: right;"></small>
+					</div>
+				  </div>
+
+				  <!-- SECTION 5.1: XEM THEO NGÀY (LẮNG NGHE REALTIME - GIẢI PHÁP A) -->
+					<details  open style="border: 1px solid #ccc; padding: 12px; border-radius: 6px; margin-bottom: 15px; background: #fff;">
+					  <summary style="font-weight: bold; cursor: pointer; color: #0d6efd;">
+						5.1 Theo dõi Nhật ký Chi tiết Theo Ngày (📡 Cập nhật thời gian thực - Realtime)
+					  </summary>
+					  <div style="margin-top: 10px;">
+						
+						<!-- THANH ĐIỀU KHIỂN: THÊM NÚT XUẤT BẢNG DỮ LIỆU NGÀY -->
+						<div style="display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; background: #f8f9fa; padding: 8px 12px; border-radius: 6px; border: 1px solid #dee2e6;">
+						  <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+							<label><b>Chọn Ngày xem:</b></label>
+							<input type="date" id="grid-sec1-date-select" onchange="loadGridSection1Daily()" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+						  </div>
+
+						  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+							<small id="sec1-cache-time-badge" style="color: #6c757d; font-style: italic; font-size: 0.85em;"></small>
+							
+							<!-- NÚT XUẤT EXCEL NGÀY -->
+							<button type="button" onclick="exportGridTableToExcel('sec1')" style="padding: 6px 12px; background: #198754; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.88em;">
+							  <i class="fa-solid fa-file-excel"></i> Xuất dữ liệu Ngày
+							</button>
+						  </div>
+						</div>
+
+						<div style="width: 100%; overflow-x: auto; border: 1px solid #dee2e6; border-radius: 6px;">
+						  <table id="grid-sec1-table" border="1" cellpadding="8" cellspacing="0" style="width: 100%; min-width: 750px; border-collapse: collapse; table-layout: fixed;">
+							<thead>
+							  <tr style="background-color: #e9ecef;">
+								<th style="width: 12%;">Mã ID</th>
+								<th style="width: 20%;">Họ và tên</th>
+								<th style="width: 13%; text-align: center;">Tổng lượt</th>
+								<th>Nội dung chi tiết nhật ký trong ngày</th>
+							  </tr>
+							</thead>
+							<tbody id="grid-sec1-body-rows">
+							  <tr><td colspan="4" style="text-align: center; color: #6c757d;"> Vui long chọn 1 Bài toán Module cụ thể ở trên </td></tr>
+							</tbody>
+						  </table>
+						</div>
+					  </div>
+					</details>
+				  
+						<!-- SECTION 4.2: BÁO CÁO CHI TIẾT CÁC TRƯỜNG KPI THEO TUẦN -->
+						<!-- SECTION 5.2: BÁO CÁO CHI TIẾT CÁC TRƯỜNG KPI THEO TUẦN -->
+<details style="border: 1px solid #fd7e14; padding: 12px; border-radius: 6px; margin-bottom: 15px; background: #fff;">
+  <summary style="font-weight: bold; cursor: pointer; color: #d63384;">
+    5.2 Báo cáo Chi tiết Vi phạm KPI & Cảnh báo Thi đua Theo Tuần
+  </summary>
+  <div style="margin-top: 10px;">
+    
+    <!-- THANH ĐIỀU KHIỂN & LỌC -->
+    <div style="display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; background: #fffdf5; padding: 8px 12px; border-radius: 6px; border: 1px solid #ffeba0;">
+      
+      <!-- Nhóm chọn ngày & tìm kiếm lớp -->
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+        <div>
+          <label style="font-size: 0.9em;"><b>Chọn Ngày thuộc Tuần:</b></label><br>
+          <input type="date" id="grid-sec2-date-select" onchange="loadGridSection2Weekly(false)" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc; margin-top: 2px;">
+        </div>
+
+        <div>
+          <label style="font-size: 0.9em;"><b>Lọc Lớp / Tổ:</b></label><br>
+          <input type="text" id="grid-sec2-filter-class" placeholder="VD: 10A1, Tổ 1..." oninput="filterGridSection2Table()" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc; margin-top: 2px; width: 140px;">
+        </div>
+
+        <span id="grid-sec2-week-range-label" style="font-weight: bold; color: #d63384; align-self: flex-end; padding-bottom: 4px;"></span>
+      </div>
+
+      <!-- Nhóm nút bấm thao tác -->
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; align-self: flex-end;">
+        <small id="sec2-cache-time-badge" style="color: #856404; font-style: italic; font-size: 0.85em;"></small>
+        
+        <button type="button" onclick="loadGridSection2Weekly(true)" style="padding: 6px 12px; background: #fd7e14; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.88em;">
+          <i class="fa-solid fa-arrows-rotate"></i> Cập nhật
+        </button>
+
+        <!-- MENU HOẶC NHÓM NÚT XUẤT EXCEL ĐA LỰA CHỌN -->
+        <div style="display: inline-flex; border-radius: 4px; overflow: hidden; border: 1px solid #198754;">
+          <button type="button" onclick="exportGridTableToExcel('sec2', 'current')" style="padding: 6px 10px; background: #198754; color: white; border: none; font-weight: bold; cursor: pointer; font-size: 0.85em;" title="Xuất dữ liệu của bảng đang hiển thị">
+            <i class="fa-solid fa-file-excel"></i> Xuất Bảng Này
+          </button>
+          <button type="button" onclick="exportGridTableToExcel('sec2', 'allsheets')" style="padding: 6px 10px; background: #157347; color: white; border: none; border-left: 1px solid #198754; font-weight: bold; cursor: pointer; font-size: 0.85em;" title="Xuất toàn trường thành 1 file nhiều Sheet theo lớp">
+            <i class="fa-solid fa-file-zipper"></i> Xuất Toàn Trường
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- BẢNG HIỂN THỊ DỮ LIỆU -->
+    <div style="width: 100%; overflow-x: auto; border: 1px solid #dee2e6; border-radius: 6px; background: #fff;">
+      <table id="grid-sec2-table" border="1" cellpadding="8" cellspacing="0" style="width: 100%; min-width: 900px; border-collapse: collapse;">
+        <thead>
+          <tr id="grid-sec2-header-row" style="background-color: #fff3cd; color: #664d03;">
+            <th style="width: 90px;">Mã ID</th>
+            <th style="width: 170px;">Thực thể</th>
+            <th style="width: 100px; text-align: center;">Tổng lượt</th>
+            <th style="width: 110px; text-align: center;">Tổng điểm trừ</th>
+            <th style="width: 130px; text-align: center;">Cảnh báo Tuần</th>
+          </tr>
+        </thead>
+        <tbody id="grid-sec2-body-rows">
+          <tr><td colspan="10" style="text-align: center; color: #6c757d;">Đang tải dữ liệu tuần...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</details>
+
+						<!-- SECTION 4.3: BÁO CÁO MA TRẬN TỔNG HỢP KPI THEO THÁNG -->
+						<details style="border: 1px solid #dc3545; padding: 12px; border-radius: 6px; margin-bottom: 15px; background: #fff;">
+						  <summary style="font-weight: bold; cursor: pointer; color: #dc3545;">
+							5.3 Báo cáo Ma trận Tổng hợp KPI & Đánh giá Thi đua Theo Tháng
+						  </summary>
+						  <div style="margin-top: 10px;">
+							
+							<!-- THANH ĐIỀU KHIỂN: THÊM NÚT XUẤT BẢNG DỮ LIỆU THÁNG & KHUNG LỌC -->
+							<div style="display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; background: #fff8f8; padding: 8px 12px; border-radius: 6px; border: 1px solid #f5c2c7;">
+							  <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+								<label><b>Chọn Tháng báo cáo:</b></label>
+								<input type="month" id="grid-sec3-month-select" onchange="loadGridSection3Monthly(false)" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+								
+								<!-- 🌟 BỔ SUNG KHUNG LỌC LỚP/TÊN TƯƠNG TỰ TUẦN -->
+								<label style="margin-left: 10px;"><b>Lọc:</b></label>
+							    <input type="text" id="grid-sec3-filter-class" placeholder="VD: 10A1, Tên..." oninput="filterGridSection3Table()" onkeydown="filterGridSection3Table(event)" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc; width: 140px;">
+							  </div>
+
+							  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+								<small id="sec3-cache-time-badge" style="color: #842029; font-style: italic; font-size: 0.85em;"></small>
+								
+								<button type="button" onclick="loadGridSection3Monthly(true)" style="padding: 6px 12px; background: #dc3545; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.88em;">
+								  <i class="fa-solid fa-arrows-rotate"></i> Cập nhật Tháng
+								</button>
+
+								<!-- NÚT XUẤT EXCEL THÁNG -->
+								<button type="button" onclick="exportGridTableToExcel('sec3')" style="padding: 6px 12px; background: #198754; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.88em;">
+								  <i class="fa-solid fa-file-excel"></i> Xuất dữ liệu Tháng
+								</button>
+							  </div>
+							</div>
+
+							<div style="width: 100%; overflow-x: auto; border: 1px solid #dee2e6; border-radius: 6px; background: #fff;">
+							  <table id="grid-sec3-table" border="1" cellpadding="8" cellspacing="0" style="width: 100%; min-width: 950px; border-collapse: collapse;">
+								<thead>
+								  <tr id="grid-sec3-header-row" style="background-color: #f8d7da; color: #842029;">
+									<th style="width: 100px;">Mã ID</th>
+									<th style="width: 180px;">Thực thể</th>
+									<th style="width: 100px; text-align: center;">Tổng lượt</th>
+									<th style="width: 110px; text-align: center;">Tổng điểm trừ</th>
+									<th style="width: 130px; text-align: center;">Xếp loại Tháng</th>
+								  </tr>
+								</thead>
+								<tbody id="grid-sec3-body-rows">
+								  <tr><td colspan="10" style="text-align: center; color: #6c757d;">Đang tính toán ma trận KPI tháng...</td></tr>
+								</tbody>
+							  </table>
+							</div>
+						  </div>
+						</details>
+					<!-- SECTION 5.4: TRA CỨU & XUẤT PHIẾU ĐỐI SOÁT CHI TIẾT CÁ NHÂN -->
+					<details open style="border: 1px solid #0d6efd; padding: 12px; border-radius: 6px; margin-bottom: 15px; background: #fff;">
+					  <summary style="font-weight: bold; cursor: pointer; color: #0d6efd;">
+						5.4 Tra cứu & Xuất Phiếu đối soát chi tiết sự việc theo cá nhân
+					  </summary>
+					  <div style="margin-top: 10px;">
+						
+						<!-- THANH TÌM KIẾM CÁ NHÂN -->
+						<div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: #f8f9fa; padding: 10px; border-radius: 6px; border: 1px solid #dee2e6; margin-bottom: 15px;">
+						  <input type="text" id="lookup-entity-keyword" placeholder="Nhập Mã định danh hoặc Tên (VD: HS1001)..." style="flex: 1; min-width: 250px; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+						  <button type="button" onclick="searchIndividualAuditSheet()" style="padding: 8px 16px; background: #0d6efd; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+							<i class="fa-solid fa-magnifying-glass"></i> Tra cứu Phiếu
+						  </button>
+						  <button type="button" onclick="printIndividualAuditSheet()" style="padding: 8px 16px; background: #198754; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+							<i class="fa-solid fa-print"></i> In / Xuất Phiếu đối soát
+						  </button>
+						</div>
+
+						<!-- KHUNG HIỂN THỊ PHIẾU ĐỐI SOÁT (PRINTABLE CONTAINER) -->
+						<div id="printable-audit-sheet" style="background: #ffffff; border: 2px solid #333; padding: 25px; border-radius: 8px; max-width: 800px; margin: 0 auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
+						  
+						  <!-- TIÊU ĐỀ PHIẾU -->
+						  <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px double #333; padding-bottom: 10px;">
+							<h2 style="margin: 0; color: #000; text-transform: uppercase; letter-spacing: 1px;">PHIẾU ĐỐI SOÁT NỀN NẾP & LỖI KPI</h2>
+							<small id="sheet-date-range-label" style="font-style: italic; color: #555;">(Kỳ đối soát: Tất cả dữ liệu)</small>
+						  </div>
+
+						  <!-- THÔNG TIN NHÂN SỰ -->
+						  <div style="font-size: 1.05em; line-height: 1.8; margin-bottom: 15px; border-bottom: 1px dashed #ccc; padding-bottom: 10px;">
+							<div><b>1) Họ và tên (HS/GV):</b> <span id="sheet-entity-name" style="color: #0d6efd; font-weight: bold;">--</span></div>
+							<div><b>2) Lớp/Tổ:</b> <span id="sheet-entity-category">--</span></div>
+							<div><b>3) Mã định danh:</b> <span id="sheet-entity-id" style="font-family: monospace; font-weight: bold;">--</span></div>
+							<div><b>4) Tổng kết thi đua:</b> <span id="sheet-entity-rank">--</span></div>
+						  </div>
+
+						  <!-- DANH SÁCH CHI TIẾT CÁC LỖI (MỖI LỖI 1 DÒNG) -->
+						  <div style="font-size: 1em;">
+							<div style="font-weight: bold; margin-bottom: 8px; color: #dc3545;">5) Chi tiết các lỗi vi phạm bị ghi nhận:</div>
+							
+							<div id="sheet-violations-list" style="padding-left: 10px;">
+							  <i style="color: #6c757d;">Nhập Mã định danh hoặc Tên ở trên và bấm "Tra cứu Phiếu" để hiển thị dữ liệu.</i>
+							</div>
+						  </div>
+
+						  <!-- CHỮ KÝ XÁC NHẬN -->
+						  <div style="margin-top: 30px; display: flex; justify-content: space-between; text-align: center; font-size: 0.9em; padding-top: 15px; border-top: 1px solid #eee;">
+							<div style="width: 45%;">
+							  <b>Người khiếu nại / Xác nhận</b><br>
+							  <i>(Ký và ghi rõ họ tên)</i>
+							</div>
+							<div style="width: 45%;">
+							  <b>Ban Giám hiệu / TĐN xác nhận</b><br>
+							  <i>(Ký và đóng dấu)</i>
+							</div>
+						  </div>
+
+						</div>
+
+					  </div>
+					</details>
+				  
+				</section>
+			</div>
+		  </div>
+		</div>
+          <!-- =========================================================
+           3. EMPLOYEE PANEL (GIÁO VIÊN)
+           ========================================================= -->
+		<div id="employee-panel" style="display: none;">
+
+			<!-- THANH CHỌN NĂM HỌC & MODULE -->
+			<div id="module-selector-bar" style="background: #e7f1ff; padding: 12px; border-radius: 6px; margin-bottom: 15px; border: 1px solid #b6d4fe; display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+				<!-- Chọn Năm học -->
+				<div style="display: flex; align-items: center; gap: 5px;">
+					<label style="font-weight: bold; color: #084298;"><i class="fa-solid fa-calendar-days"></i> Năm học:</label>
+					<select id="emp-academic-year-select" onchange="switchEmployeeAcademicYear()" style="padding: 6px 12px; font-weight: bold; border-radius: 4px; border: 1px solid #0d6efd; background: #fff;"></select>
+				</div>
+
+				<!-- Chọn Nhiệm vụ / Module -->
+				<div style="display: flex; align-items: center; gap: 5px; flex: 1; min-width: 250px;">
+					<label style="font-weight: bold; color: #084298;"><i class="fa-solid fa-list-check"></i> Nhiệm vụ đang mở:</label>
+					<select id="emp-module-select" onchange="switchEmployeeModule()" style="padding: 6px 12px; font-weight: bold; border-radius: 4px; border: 1px solid #0d6efd; background: #fff; flex: 1;"></select>
+				</div>
+			</div>
+
+			<!-- THANH ĐIỀU HƯỚNG TAB EMPLOYEE (5 THẺ) -->
+			<div style="display: flex; gap: 8px; margin-bottom: 15px; flex-wrap: wrap; border-bottom: 2px solid #dee2e6; padding-bottom: 10px;">
+				<button type="button" id="btn-emp-tab-1" onclick="switchEmpTab(1)" style="padding: 8px 16px; background: #0d6efd; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+					<i class="fa-solid fa-pen-to-square"></i> 1. Nhập liệu hàng ngày
+				</button>
+				<button type="button" id="btn-emp-tab-2" onclick="switchEmpTab(2)" style="padding: 8px 16px; background: #e9ecef; color: #333; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+					<i class="fa-solid fa-clock-rotate-left"></i> 2. Nhật ký cá nhân
+				</button>
+				<button type="button" id="btn-emp-tab-3" onclick="switchEmpTab(3)" style="padding: 8px 16px; background: #e9ecef; color: #333; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+					<i class="fa-solid fa-shield-halved"></i> 3. Nhật ký biến động
+				</button>
+				<!-- THẺ 4: LỚP CHỦ NHIỆM (Ẩn/Hiện động) -->
+				<button type="button" id="btn-emp-tab-4" onclick="switchEmpTab(4)" style="padding: 8px 16px; background: #e9ecef; color: #333; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+					<i class="fa-solid fa-graduation-cap"></i> 4. Lớp Chủ nhiệm
+				</button>
+				<!-- THẺ 5: TỔ CHUYÊN MÔN (Ẩn/Hiện động) -->
+				<button type="button" id="btn-emp-tab-5" onclick="switchEmpTab(5)" style="padding: 8px 16px; background: #e9ecef; color: #333; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+					<i class="fa-solid fa-users-gear"></i> 5. Tổ chuyên môn
+				</button>
+			</div>
+
+			<!-- ========================================================= -->
+			<!-- NỘI DUNG THẺ 1: NHẬP LIỆU HÀNG NGÀY (GỘP TRọn VẸN TÌM KIẾM, NÚT, BẢNG VÀ THÔNG BÁO) -->
+			<!-- ========================================================= -->
+			<div id="emp-tab-sec-1" style="display: block;">
+				
+				<!-- Khung tìm kiếm & Nút thao tác hàng loạt -->
+				<div style="background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #dee2e6; margin-bottom: 15px;">
+					<div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+						<input type="text" 
+							   id="emp-live-search-input" 
+							   oninput="searchAndRenderTodayPersonnelRecords()" 
+							   placeholder="Gõ Tên, mã HS/GV hoặc Lớp/Tổ (VD: 10A1)..."
+							   style="flex: 1; min-width: 250px; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 1em;">
+					  
+						<!-- Nút Lưu Tất Cả -->
+						<button type="button" 
+								onclick="saveAllEmployeeEntries()" 
+								style="padding: 10px 20px; background: #198754; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.95em; box-shadow: 0 2px 5px rgba(0,0,0,0.15);">
+							<i class="fa-solid fa-floppy-disk"></i> LƯU TẤT CẢ THAY ĐỔI
+						</button>
+
+						<!-- Nút Làm Mới -->
+						<button type="button" 
+								onclick="refreshAndRenderEmployeeData()" 
+								style="padding: 10px 14px; background: #f8f9fa; color: #333; border: 1px solid #ccc; border-radius: 4px; font-weight: bold; cursor: pointer;"
+								title="Làm mới dữ liệu">
+							<i class="fa-solid fa-arrows-rotate"></i> Làm mới
+						</button>
+					</div>
+				</div>
+			
+				<!-- Bảng dữ liệu tương ứng bài toán -->
+				<div style="max-height: 450px; overflow-y: auto; overflow-x: auto; border: 1px solid #dee2e6; border-radius: 6px; margin-bottom: 10px; background: #fff;">
+					<table border="1" cellpadding="8" cellspacing="0" style="width: 100%; border-collapse: collapse; min-width: 800px;">
+						<thead>
+							<tr id="emp-entry-table-header" style="background-color: #e9ecef; position: sticky; top: 0; z-index: 2;">
+								<th style="width: 100px;">Mã ID</th>
+								<th style="width: 180px;">Họ và Tên</th>
+								<th style="width: 100px;">Tổ / Lớp</th>
+								<!-- Các trường dữ liệu/KPI động của Bài toán Module sẽ tự sinh ra ở đây -->
+								<th style="width: 120px; text-align: center;">Thao tác</th>
+							</tr>
+						</thead>
+						<tbody id="emp-entry-table-body">
+							<tr><td colspan="4" style="text-align: center; color: #6c757d;">Đang tải danh sách thực thể...</td></tr>
+						</tbody>
+					</table>
+				</div>
+
+				<!-- Dòng thông báo lưu thành công nằm trọn gọn gàng trong Thẻ 1 -->
+				<p id="emp-save-msg" style="font-weight: bold; margin-top: 8px; font-size: 0.95em; min-height: 20px;"></p>
+			</div>
+
+			<!-- NỘI DUNG THẺ 2: NHẬT KÝ CÁ NHÂN (Placeholder) -->
+			<div id="emp-tab-sec-2" style="display: none;">
+				<div style="padding: 20px; background: #fff; border: 1px solid #dee2e6; border-radius: 6px;">
+					<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
+						<h3 style="color: #084298; margin: 0;"><i class="fa-solid fa-clock-rotate-left"></i> Nhật ký thao tác cá nhân của bạn</h3>
+						<div style="display: flex; align-items: center; gap: 8px;">
+							<label for="emp-my-audit-date-select" style="font-size: 0.9em; font-weight: bold; color: #555;">Chọn ngày:</label>
+							<input type="date" id="emp-my-audit-date-select" style="padding: 5px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.9em;" onchange="loadMyAuditLogsTimeline()">
+							<button type="button" onclick="loadMyAuditLogsTimeline()" style="padding: 5px 12px; background: #0d6efd; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">Xem</button>
+						</div>
+					</div>
+					
+					<!-- Khu vực hiển thị nhật ký cá nhân -->
+					<div id="my-audit-logs-timeline">
+						<p style="color: #6c757d; font-style: italic; text-align: center; padding: 15px;">Vui lòng chọn ngày để xem lịch sử thao tác của bạn...</p>
+					</div>
+				</div>
+			</div>
+
+			<!-- NỘI DUNG THẺ 3: NHẬT KÝ BIẾN ĐỘNG (Placeholder) -->
+			<div id="emp-tab-sec-3" style="display: none;">
+				<div style="padding: 20px; background: #fff; border: 1px solid #dee2e6; border-radius: 6px;">
+					<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
+						<h3 style="color: #084298; margin: 0;"><i class="fa-solid fa-shield-halved"></i> Nhật ký biến động nhiệm vụ</h3>
+						<div style="display: flex; align-items: center; gap: 8px;">
+							<label for="emp-audit-date-select" style="font-size: 0.9em; font-weight: bold; color: #555;">Chọn ngày:</label>
+							<input type="date" id="emp-audit-date-select" style="padding: 5px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.9em;" onchange="loadAuditLogsTimeline()">
+							<button type="button" onclick="loadAuditLogsTimeline()" style="padding: 5px 12px; background: #0d6efd; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">Xem</button>
+						</div>
+					</div>
+					
+					<!-- Khu vực chứa danh sách nhật ký được gom nhóm -->
+					<div id="audit-logs-timeline">
+						<p style="color: #6c757d; font-style: italic;">Vui lòng chọn ngày để xem lịch sử biến động...</p>
+					</div>
+				</div>
+			</div>
+
+			<!-- NỘI DUNG THẺ 4: LỚP CHỦ NHIỆM (CHỈ ĐỌC) -->
+			<div id="emp-tab-sec-4" style="display: none;">
+				<!-- Tiêu đề và Thanh công cụ chọn chế độ xem -->
+				<div style="background: #e7f1ff; padding: 12px; border-radius: 6px; border: 1px solid #b6d4fe; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+					<div>
+						<h3 style="margin: 0; color: #084298;"><i class="fa-solid fa-school"></i> Theo dõi nền nếp Lớp Chủ nhiệm</h3>
+						<p style="margin: 5px 0 0; font-size: 0.9em; color: #052c65;">Bảng tổng hợp lỗi KPI của học sinh trong lớp phụ trách để giáo viên chủ nhiệm nắm bắt và nhắc nhở (Chỉ đọc).</p>
+					</div>
+					<div style="display: flex; gap: 8px; align-items: center;">
+						<!-- Bộ chọn chế độ: Ngày / Tuần / Tháng -->
+						<select id="emp-homeroom-mode-select" onchange="loadHomeroomClassData()" style="padding: 6px 10px; border-radius: 4px; border: 1px solid #0d6efd; font-weight: bold; color: #0d6efd; background: #fff;">
+							<option value="daily">📅 Tổng hợp Ngày</option>
+							<option value="weekly">📊 Tổng hợp Tuần</option>
+							<option value="monthly">🗓️ Tổng hợp Tháng (Ma trận KPI)</option>
+						</select>
+						<button type="button" onclick="loadHomeroomClassData(true)" style="padding: 6px 10px; background: #0d6efd; color: white; border: none; border-radius: 4px; cursor: pointer;" title="Làm mới dữ liệu">
+							<i class="fa-solid fa-rotate"></i> Làm mới
+						</button>
+					</div>
+				</div>
+
+				<!-- Thông tin lớp và trạng thái cache -->
+				<div style="margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+					<div id="emp-homeroom-info-badge" style="font-size: 0.9em; color: #495057; font-weight: 500;">
+						Đang hiển thị cho lớp: <span id="emp-homeroom-class-name" style="color: #0d6efd; font-weight: bold;">--</span>
+					</div>
+					<small id="emp-homeroom-cache-badge" style="color: #6c757d; font-style: italic;"></small>
+				</div>
+
+				<!-- Bảng dữ liệu -->
+				<div style="max-height: 450px; overflow-y: auto; overflow-x: auto; border: 1px solid #dee2e6; border-radius: 6px;">
+					<table border="1" cellpadding="8" cellspacing="0" style="width: 100%; border-collapse: collapse; background: #fff; min-width: 700px;">
+						<thead>
+							<tr id="emp-homeroom-header-row" style="background-color: #e9ecef; position: sticky; top: 0; z-index: 2;">
+								<th style="width: 90px;">Mã ID</th>
+								<th style="width: 170px;">Họ và Tên</th>
+								<th style="width: 100px;">Lớp</th>
+								<!-- Các cột KPI động sẽ tự sinh ra ở đây -->
+								<th style="width: 110px; text-align: center;">Tổng lượt</th>
+								<th style="width: 100px; text-align: center;">Tổng điểm</th>
+								<th style="width: 120px; text-align: center;">Xếp loại</th>
+							</tr>
+						</thead>
+						<tbody id="emp-homeroom-body-rows">
+							<tr><td colspan="10" style="text-align: center; color: #6c757d;">Đang tải dữ liệu lớp chủ nhiệm...</td></tr>
+						</tbody>
+					</table>
+				</div>
+			</div>
+
+			<!-- NỘI DUNG THẺ 5: TỔ CHUYÊN MÔN (CHỈ ĐỌC) -->
+			<div id="emp-tab-sec-5" style="display: none;">
+				<div style="background: #fff3cd; padding: 12px; border-radius: 6px; border: 1px solid #ffecb5; margin-bottom: 15px;">
+					<h3 style="margin: 0; color: #664d03;"><i class="fa-solid fa-users-gear"></i> Theo dõi thi đua Thành viên Tổ chuyên môn</h3>
+					<p style="margin: 5px 0 0; font-size: 0.9em; color: #514002;">Bảng tổng hợp vi phạm của các thành viên trong tổ để tổ trưởng đôn đốc và nhắc nhở đồng nghiệp (Chỉ đọc).</p>
+				</div>
+				<div style="max-height: 450px; overflow-y: auto; overflow-x: auto; border: 1px solid #dee2e6; border-radius: 6px;">
+					<table border="1" cellpadding="8" cellspacing="0" style="width: 100%; border-collapse: collapse; background: #fff; min-width: 700px;">
+						<thead>
+							<tr id="emp-dept-header-row" style="background-color: #e9ecef; position: sticky; top: 0; z-index: 2;">
+								<th style="width: 100px;">Mã ID</th>
+								<th style="width: 180px;">Họ và Tên</th>
+								<th style="width: 120px;">Tổ chuyên môn</th>
+								<!-- Các trường KPI sẽ tự sinh động ở đây -->
+								<th style="width: 120px; text-align: center;">Tổng số lỗi</th>
+							</tr>
+						</thead>
+						<tbody id="emp-dept-body-rows">
+							<tr><td colspan="4" style="text-align: center; color: #6c757d;">Đang tải dữ liệu tổ chuyên môn...</td></tr>
+						</tbody>
+					</table>
+				</div>
+			</div>
+
+		</div>
+	</main>
+
+
+        
+	<!-- MODAL SỬA THÔNG TIN THỰC THỂ ĐƠN LẺ -->
+	<div id="change-password-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 9999;">
+    <div style="background: white; padding: 25px; border-radius: 8px; width: 100%; max-width: 400px;">
+      <h3 style="margin-top: 0; color: #0d6efd;"><i class="fa-solid fa-key"></i> Đổi Mật Khẩu Cá Nhân</h3>
+      <form id="form-change-password">
+        <!-- 🌟 THÊM Ô NHẬP MẬT KHẨU CŨ / MẬT KHẨU TẠM -->
+        <label>Mật khẩu hiện tại (hoặc mật khẩu tạm):</label><br>
+        <input type="password" id="old-password" required placeholder="******" style="width: 100%; padding: 8px; margin-top: 5px;"><br><br>
+
+        <label>Mật khẩu mới:</label><br>
+        <input type="password" id="new-password" required minlength="6" placeholder="******" style="width: 100%; padding: 8px; margin-top: 5px;"><br><br>
+
+        <label>Xác nhận mật khẩu mới:</label><br>
+        <input type="password" id="confirm-password" required minlength="6" placeholder="******" style="width: 100%; padding: 8px; margin-top: 5px;"><br><br>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+          <button type="button" onclick="closeChangePasswordModal()" style="padding: 8px 16px; cursor: pointer;">Hủy</button>
+          <button type="submit" style="padding: 8px 16px; background: #198754; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Lưu Mật Khẩu</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+  
+	<!-- 1. NÚT BAY CẦU CỨU TRỢ GIÚP (FAB) -->
+	<button type="button" 
+			id="btn-fab-help" 
+			onclick="openHelpModal()" 
+			title="Cần hỗ trợ nhập liệu"
+			style="position: fixed; bottom: 25px; right: 25px; width: 56px; height: 56px; border-radius: 50%; background: #dc3545; color: white; border: none; box-shadow: 0 4px 10px rgba(0,0,0,0.3); cursor: pointer; z-index: 9999; display: flex; align-items: center; justify-content: center; font-size: 1.4em;">
+	  <i class="fa-solid fa-hand-holding-hand"></i>
+	</button>
+
+	<!-- 2. MODAL TÌM KIẾM ĐỒNG ĐỘI HỖ TRỢ -->
+		<div id="help-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 10000;">
+		  <div style="background: white; padding: 25px; border-radius: 8px; width: 100%; max-width: 480px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);">
+			
+			<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+			  <h3 style="margin: 0; color: #dc3545;">
+				<i class="fa-solid fa-hand-holding-hand"></i> Trợ Giúp Nhập Liệu
+			  </h3>
+			  <button type="button" onclick="closeHelpModal()" style="border: none; background: none; font-size: 1.2em; cursor: pointer; color: #6c757d;">&times;</button>
+			</div>
+
+			<!-- 1. KHU VỰC DÀNH CHO CHỦ THỂ GỐC (isPrimaryAssignee === true) -->
+			<div id="primary-owner-view" style="display: none;">
+			  <!-- TAB CHUYỂN ĐỔI: GỬI NHỜ / ĐANG HỖ TRỢ -->
+			  <div style="display: flex; gap: 10px; margin-bottom: 15px; border-bottom: 2px solid #dee2e6;">
+				<button type="button" id="btn-help-tab-1" onclick="switchHelpSubTab(1)" style="padding: 8px 12px; font-weight: bold; border: none; background: none; border-bottom: 3px solid #0d6efd; color: #0d6efd; cursor: pointer;">1. Nhờ người mới</button>
+				<button type="button" id="btn-help-tab-2" onclick="switchHelpSubTab(2)" style="padding: 8px 12px; font-weight: bold; border: none; background: none; color: #6c757d; cursor: pointer;">2. Đang hỗ trợ (Thu hồi)</button>
+			  </div>
+
+			  <!-- SUB TAB 1: TÌM KIẾM & GỬI NHỜ -->
+			  <div id="help-sub-tab-1">
+				<p style="font-size: 0.9em; color: #6c757d; margin-top: 0;">Gõ tên hoặc email đồng nghiệp để chia sẻ quyền nhập bài toán hiện tại:</p>
+				
+				<input type="text" 
+					   id="help-user-search-input" 
+					   onkeyup="filterHelpUserList()" 
+					   placeholder="Gõ tên hoặc email đồng nghiệp..." 
+					   style="width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; margin-bottom: 10px;">
+
+				<div id="help-user-list-container" style="max-height: 200px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 4px; padding: 5px; margin-bottom: 15px;">
+				  <i style="color: #6c757d; font-size: 0.9em;">Đang tải danh sách...</i>
+				</div>
+
+				<div style="display: flex; justify-content: flex-end; gap: 10px;">
+				  <button type="button" onclick="closeHelpModal()" style="padding: 8px 16px; cursor: pointer; border: 1px solid #ccc; background: #f8f9fa; border-radius: 4px;">Hủy</button>
+				  <button type="button" onclick="confirmSendHelpRequest()" style="padding: 8px 16px; background: #198754; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+					<i class="fa-solid fa-paper-plane"></i> Gửi Yêu Cầu
+				  </button>
+				</div>
+			  </div>
+
+			  <!-- SUB TAB 2: DANH SÁCH ĐANG HỖ TRỢ & NÚT THU HỒI -->
+			  <div id="help-sub-tab-2" style="display: none;">
+				<p style="font-size: 0.9em; color: #6c757d; margin-top: 0;">Danh sách đồng nghiệp đang hỗ trợ bạn bài toán này. Bấm <b>Thu hồi</b> khi hoàn thành:</p>
+				
+				<div id="active-assistants-container" style="max-height: 220px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 4px; padding: 5px; margin-bottom: 15px;">
+				  <i style="color: #6c757d; font-size: 0.9em;">Đang tải...</i>
+				</div>
+
+				<div style="display: flex; justify-content: flex-end;">
+				  <button type="button" onclick="closeHelpModal()" style="padding: 8px 16px; cursor: pointer; border: 1px solid #ccc; background: #f8f9fa; border-radius: 4px;">Đóng</button>
+				</div>
+			  </div>
+			</div>
+
+			<!-- 2. KHU VỰC DÀNH CHO NGƯỜI HỖ TRỢ (isPrimaryAssignee !== true) -->
+			<div id="assistant-only-view" style="display: none; text-align: center; padding: 10px 0;">
+			  <div style="background: #e7f1ff; border: 1px solid #b6d4fe; border-radius: 6px; padding: 15px; margin-bottom: 20px;">
+				<p style="margin: 0; color: #084298; font-weight: 500;">
+				  <i class="fa-solid fa-circle-info"></i> Bạn đang tham gia nhập liệu trợ giúp bài toán này.
+				</p>
+				<small style="color: #6c757d; display: block; margin-top: 5px;">
+				  Nếu công việc đã xong, bạn có thể tự rút khỏi nhiệm vụ bằng nút bên dưới.
+				</small>
+			  </div>
+
+			  <div style="display: flex; justify-content: center; gap: 10px;">
+				<button type="button" onclick="closeHelpModal()" style="padding: 8px 16px; cursor: pointer; border: 1px solid #ccc; background: #f8f9fa; border-radius: 4px;">Đóng</button>
+				<button type="button" onclick="selfQuitSupport()" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+				  <i class="fa-solid fa-right-from-bracket"></i> Trả lại nhiệm vụ / Dừng hỗ trợ
+				</button>
+			  </div>
+			</div>
+
+		  </div>
+		</div>
+		
+			<!-- 🌟 MODAL SỬA THÔNG TIN THỰC THỂ (HỌC SINH / NHÂN SỰ) -->
+		<div id="edit-entity-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 9999;">
+			<div style="background: white; padding: 25px; border-radius: 8px; width: 100%; max-width: 450px; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">
+				<h3 style="margin-top: 0; color: #ffc107; display: flex; align-items: center; gap: 8px;">
+					<i class="fa-solid fa-pen-to-square"></i> Chỉnh sửa thông tin
+				</h3>
+				
+				<form id="form-edit-entity" onsubmit="event.preventDefault(); saveEditedEntityRecord();">
+					<!-- Lưu mã ID cũ để đối chiếu -->
+					<input type="hidden" id="edit-entity-old-id">
+
+					<div style="margin-bottom: 12px;">
+						<label style="font-weight: 500; font-size: 0.9em;">Mã ID:</label><br>
+						<input type="text" id="edit-entity-id" readonly style="width: 100%; padding: 8px; margin-top: 4px; border: 1px solid #ccc; border-radius: 4px; background: #e9ecef; color: #6c757d;">
+					</div>
+
+					<div style="margin-bottom: 12px;">
+						<label style="font-weight: 500; font-size: 0.9em;">Họ và Tên <span style="color: red;">*</span>:</label><br>
+						<input type="text" id="edit-entity-name" required placeholder="Nhập họ và tên..." style="width: 100%; padding: 8px; margin-top: 4px; border: 1px solid #ccc; border-radius: 4px;">
+					</div>
+
+					<div style="margin-bottom: 12px;">
+						<label style="font-weight: 500; font-size: 0.9em;">Tổ / Lớp / Danh mục:</label><br>
+						<input type="text" id="edit-entity-category" placeholder="Nhập tổ hoặc lớp..." style="width: 100%; padding: 8px; margin-top: 4px; border: 1px solid #ccc; border-radius: 4px;">
+					</div>
+
+					<div style="margin-bottom: 20px;">
+						<label style="font-weight: 500; font-size: 0.9em;">Email:</label><br>
+						<input type="email" id="edit-entity-email" placeholder="Nhập email..." style="width: 100%; padding: 8px; margin-top: 4px; border: 1px solid #ccc; border-radius: 4px;">
+					</div>
+
+					<div style="display: flex; justify-content: flex-end; gap: 10px;">
+						<button type="button" onclick="document.getElementById('edit-entity-modal').style.display='none';" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Hủy</button>
+						<button type="button" onclick="saveEditedEntityRecord()" style="padding: 8px 16px; background: #198754; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Lưu thay đổi</button>
+					</div>
+				</form>
+			</div>
+		</div>
+</body>
+</html>
