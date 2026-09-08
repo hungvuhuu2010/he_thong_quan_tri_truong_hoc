@@ -4653,10 +4653,10 @@ async function initGridCard5() {
 		const headerRow = document.getElementById("grid-sec2-header-row");
 		const dateInput = document.getElementById("grid-sec2-date-select");
 		const filterInput = document.getElementById("grid-sec2-filter-class");
+		const targetTypeSelect = document.getElementById("grid-sec2-target-type"); // 🌟 Thẻ select đối tượng
 
 		if (!tableBody || !dateInput) return;
 
-		// Mặc định lấy ngày hôm nay nếu chưa chọn ngày
 		if (!dateInput.value) {
 			dateInput.value = new Date().toLocaleDateString('en-CA');
 		}
@@ -4664,9 +4664,12 @@ async function initGridCard5() {
 		const selectedDateStr = dateInput.value;
 		const filterKeyword = filterInput ? filterInput.value.trim().toLowerCase() : "";
 
-		// 🌟 Tính toán ngày Đầu tuần (Thứ Hai) và Cuối tuần (Chủ Nhật) của ngày được chọn
+		// 🌟 Lấy targetType trực tiếp từ thẻ select (STUDENT hoặc TEACHER)
+		const targetType = targetTypeSelect ? targetTypeSelect.value : "STUDENT";
+
+		// Tính toán ngày Đầu tuần (Thứ Hai) và Cuối tuần (Chủ Nhật)
 		const inputDate = new Date(selectedDateStr);
-		const dayOfWeek = inputDate.getDay(); // 0: Chủ nhật, 1: Thứ 2...
+		const dayOfWeek = inputDate.getDay();
 		const diffToMonday = inputDate.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
 		
 		const monday = new Date(inputDate);
@@ -4677,14 +4680,12 @@ async function initGridCard5() {
 		const mondayStr = monday.toLocaleDateString('en-CA');
 		const sundayStr = sunday.toLocaleDateString('en-CA');
 
-		// 🌟 1. Lấy OrgId chuẩn từ biến toàn cục
 		const orgId = window.currentOrgIdGlobal;
 		if (!orgId) {
 			tableBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: red;">Chưa xác định được thông tin đơn vị (OrgId).</td></tr>';
 			return;
 		}
 
-		// 🌟 2. Lấy AcademicYearId chuẩn
 		let academicYearId = "";
 		const yearsArr = window.currentAcademicYearsGlobal;
 		if (Array.isArray(yearsArr) && yearsArr.length > 0) {
@@ -4699,16 +4700,13 @@ async function initGridCard5() {
 			return;
 		}
 
-		// 🌟 3. Nhận diện đối tượng (STUDENT hay TEACHER)
-		const isTeacherQuery = typeof keywordIsTeacher === 'function' ? keywordIsTeacher(filterKeyword) : false;
-		const targetType = isTeacherQuery ? "TEACHER" : "STUDENT";
-
+		// Cache key phân tách chuẩn theo targetType (student/teacher) và khoảng tuần
 		const cacheKey = `${academicYearId}_${targetType.toLowerCase()}_weekly_${mondayStr}_to_${sundayStr}`;
 		
 		if (!forceRefresh && typeof cachedGridWeeklyData !== 'undefined' && cachedGridWeeklyData[cacheKey]) {
 			renderWeeklyTable(cachedGridWeeklyData[cacheKey], filterKeyword);
 			const badge = document.getElementById("sec2-cache-time-badge");
-			if (badge) badge.innerText = `⚡ Dùng Cache RAM (${targetType} - Tuần ${mondayStr} đến ${sundayStr})`;
+			if (badge) badge.innerText = `⚡ Dùng Cache RAM (${targetType === "TEACHER" ? "Giáo viên" : "Học sinh"} - Tuần ${mondayStr} đến ${sundayStr})`;
 			return;
 		}
 
@@ -4717,7 +4715,6 @@ async function initGridCard5() {
 		try {
 			const db = firebase.firestore();
 
-			// 🌟 4. Lấy danh sách module phù hợp với targetType
 			const modulesSnapshot = await db.collection("organizations")
 				.doc(orgId)
 				.collection("modules")
@@ -4725,11 +4722,10 @@ async function initGridCard5() {
 				.get();
 
 			if (modulesSnapshot.empty) {
-				tableBody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: #6c757d;">Không tìm thấy bài toán module nào cho nhóm (${targetType}).</td></tr>`;
+				tableBody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: #6c757d;">Không tìm thấy bài toán module nào cho nhóm (${targetType === "TEACHER" ? "Giáo viên" : "Học sinh"}).</td></tr>`;
 				return;
 			}
 
-			// Quét cấu hình KPI từ các module
 			let kpiFieldsMap = {};
 			modulesSnapshot.forEach(modDoc => {
 				const modData = modDoc.data();
@@ -4749,7 +4745,7 @@ async function initGridCard5() {
 
 			const kpiFieldsList = Object.values(kpiFieldsMap);
 
-			// 🌟 5. Dựng tiêu đề cột động
+			// Dựng tiêu đề cột động phù hợp với Học sinh (Lớp) hoặc Giáo viên (Tổ chuyên môn)
 			let headerHtml = `
 				<th style="width: 90px;">Mã định danh</th>
 				<th style="width: 170px;">Họ và tên</th>
@@ -4766,7 +4762,6 @@ async function initGridCard5() {
 			`;
 			if (headerRow) headerRow.innerHTML = headerHtml;
 
-			// 🌟 6.1: Tải bảng users để tra cứu tên và lớp
 			let usersMap = {};
 			try {
 				const usersSnap = await db.collection("organizations").doc(orgId).collection("users").get();
@@ -4781,7 +4776,7 @@ async function initGridCard5() {
 				console.warn("Không tải được bảng users:", e);
 			}
 
-			// 🌟 6.2: Lấy toàn bộ records và lọc theo khoảng thời gian trong tuần
+			// 🌟 6.2: Lấy records và LỌC chuẩn xác theo khoảng thời gian từ Thứ Hai đến Chủ Nhật của tuần
 			let allRecords = [];
 			for (const modDoc of modulesSnapshot.docs) {
 				const recordsSnap = await db.collection("organizations")
@@ -4795,18 +4790,16 @@ async function initGridCard5() {
 
 				recordsSnap.forEach(recDoc => {
 					const recData = recDoc.data();
-					const recDate = recData.date || "";
+					const recDate = recData.date || ""; // Định dạng chuẩn "YYYY-MM-DD"
 					
-					// Chỉ lấy các bản ghi nằm trong khoảng từ Thứ Hai đến Chủ Nhật của tuần
+					// 🌟 CHẶN ĐIỀU KIỆN: Chỉ lấy các bản ghi nằm trong tuần được chọn
 					if (recDate && recDate >= mondayStr && recDate <= sundayStr) {
 						allRecords.push({ id: recDoc.id, ...recData });
 					}
 				});
 			}
 
-			// 🌟 7. Tổng hợp dữ liệu theo entityId
 			let summaryMap = {};
-			
 			allRecords.forEach(data => {
 				const entityId = data.entityId || data.targetId || data.id.split('_')[0];
 				
@@ -4824,19 +4817,12 @@ async function initGridCard5() {
 					};
 				}
 
-				// Duyệt qua các cột KPI để tính tổng số lần phát sinh trong tuần
 				kpiFieldsList.forEach(kpiField => {
 					const fKey = kpiField.id;
 					let val = data[fKey];
 
 					if (val !== undefined && val !== null && val !== "") {
-						let countInc = 0;
-						if (Array.isArray(val)) {
-							countInc = val.length; // Đếm số lượng mốc/lựa chọn trong mảng
-						} else {
-							countInc = 1;
-						}
-
+						let countInc = Array.isArray(val) ? val.length : 1;
 						summaryMap[entityId].kpiCounts[fKey] = (summaryMap[entityId].kpiCounts[fKey] || 0) + countInc;
 						summaryMap[entityId].totalScore += countInc * kpiField.scoreWeight;
 					}
@@ -5005,10 +4991,10 @@ async function initGridCard5() {
 		const headerRow = document.getElementById("grid-sec3-header-row");
 		const monthInput = document.getElementById("grid-sec3-month-select");
 		const filterInput = document.getElementById("grid-sec3-filter-class");
+		const targetTypeSelect = document.getElementById("grid-sec3-target-type"); // 🌟 Thẻ select đối tượng
 
 		if (!tableBody || !monthInput) return;
 
-		// Mặc định lấy tháng hiện tại (định dạng YYYY-MM) nếu chưa chọn
 		if (!monthInput.value) {
 			monthInput.value = new Date().toLocaleDateString('en-CA').substring(0, 7);
 		}
@@ -5016,14 +5002,15 @@ async function initGridCard5() {
 		const selectedMonth = monthInput.value; // Ví dụ: "2026-09"
 		const filterKeyword = filterInput ? filterInput.value.trim().toLowerCase() : "";
 
-		// 🌟 1. Lấy OrgId chuẩn
+		// 🌟 Lấy targetType trực tiếp từ thẻ select (STUDENT hoặc TEACHER)
+		const targetType = targetTypeSelect ? targetTypeSelect.value : "STUDENT";
+
 		const orgId = window.currentOrgIdGlobal;
 		if (!orgId) {
 			tableBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: red;">Chưa xác định được thông tin đơn vị (OrgId).</td></tr>';
 			return;
 		}
 
-		// 🌟 2. Lấy AcademicYearId chuẩn
 		let academicYearId = "";
 		const yearsArr = window.currentAcademicYearsGlobal;
 		if (Array.isArray(yearsArr) && yearsArr.length > 0) {
@@ -5038,29 +5025,28 @@ async function initGridCard5() {
 			return;
 		}
 
-		// 🌟 3. Nhận diện đối tượng (STUDENT hay TEACHER)
-		const isTeacherQuery = typeof keywordIsTeacher === 'function' ? keywordIsTeacher(filterKeyword) : false;
-		const targetType = isTeacherQuery ? "TEACHER" : "STUDENT";
-
+		// Cache key chuẩn theo targetType (student/teacher) và tháng
 		const cacheKey = `${academicYearId}_${targetType.toLowerCase()}_monthly_${selectedMonth}`;
 		
 		if (!forceRefresh && typeof cachedGridMonthlyData !== 'undefined' && cachedGridMonthlyData[cacheKey]) {
 			renderMonthlyTable(cachedGridMonthlyData[cacheKey], filterKeyword);
 			const badge = document.getElementById("sec3-cache-time-badge");
-			if (badge) badge.innerText = `⚡ Dùng Cache RAM (${targetType} - Tháng ${selectedMonth})`;
+			if (badge) badge.innerText = `⚡ Dùng Cache RAM (${targetType === "TEACHER" ? "Giáo viên" : "Học sinh"} - Tháng ${selectedMonth})`;
 			return;
 		}
 
-		tableBody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: #6c757d;">⏳ Đang quét dữ liệu tháng ${selectedMonth}...</td></tr>`;
+		tableBody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: #6c757d;">⏳ Đang quét ma trận KPI tháng ${selectedMonth} (${targetType === "TEACHER" ? "Giáo viên" : "Học sinh"})...</td></tr>`;
 
 		try {
 			const db = firebase.firestore();
 
 			const yearDocRef = db.collection("organizations").doc(orgId).collection("academicYears").doc(academicYearId);
-			const yearDocSnap = await yearDocRef.get();
-			const kpiRules = yearDocSnap.exists ? (yearDocSnap.data().monthlyKpiRules || {}) : {};
+			
+			// 🌟 Đọc cấu hình ma trận KPI từ sub-collection KPIconfig (phân tách rõ student và teacher)
+			const configDocId = targetType === "TEACHER" ? "teacher" : "student";
+			const kpiConfigSnap = await yearDocRef.collection("KPIconfig").doc(configDocId).get();
+			const kpiRules = kpiConfigSnap.exists ? kpiConfigSnap.data() : {};
 
-			// 🌟 4. Lấy danh sách module thuộc tổ chức có targetType phù hợp
 			const modulesSnapshot = await db.collection("organizations")
 				.doc(orgId)
 				.collection("modules")
@@ -5068,7 +5054,7 @@ async function initGridCard5() {
 				.get();
 
 			if (modulesSnapshot.empty) {
-				tableBody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: #6c757d;">Không tìm thấy bài toán module nào cho nhóm (${targetType}).</td></tr>`;
+				tableBody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: #6c757d;">Không tìm thấy bài toán module nào cho nhóm (${targetType === "TEACHER" ? "Giáo viên" : "Học sinh"}).</td></tr>`;
 				return;
 			}
 
@@ -5091,7 +5077,7 @@ async function initGridCard5() {
 
 			const kpiFieldsList = Object.values(kpiFieldsMap);
 
-			// 🌟 5. Dựng tiêu đề cột động cho bảng Tháng
+			// Dựng tiêu đề cột động phù hợp
 			let headerHtml = `
 				<th style="width: 90px;">Mã ID</th>
 				<th style="width: 170px;">Thực thể</th>
@@ -5107,7 +5093,6 @@ async function initGridCard5() {
 			`;
 			if (headerRow) headerRow.innerHTML = headerHtml;
 
-			// 🌟 6.1: Tải trước bảng users để tra cứu tên và lớp chuẩn xác
 			let usersMap = {};
 			try {
 				const usersSnap = await db.collection("organizations").doc(orgId).collection("users").get();
@@ -5122,108 +5107,110 @@ async function initGridCard5() {
 				console.warn("Không tải được bảng users:", e);
 			}
 
-			// 🌟 6.2: Lấy records và LỌC theo tháng được chọn (dựa vào trường `date` định dạng YYYY-MM-DD bắt đầu bằng `selectedMonth`)
 			let allRecords = [];
 			for (const modDoc of modulesSnapshot.docs) {
 				const recordsSnap = await yearDocRef.collection("modulesData").doc(modDoc.id).collection("records").get();
 				recordsSnap.forEach(recDoc => {
 					const recData = recDoc.data();
-					const recDate = recData.date || ""; // Chuỗi "YYYY-MM-DD"
+					const recDate = recData.date || ""; 
 					
-					// Chỉ lấy các bản ghi có ngày thuộc tháng được chọn (ví dụ "2026-09")
 					if (recDate && recDate.startsWith(selectedMonth)) {
 						allRecords.push({ id: recDoc.id, ...recData });
 					}
 				});
 			}
 
-			// 🌟 7. Tổng hợp dữ liệu theo thực thể và tính số tuần vi phạm thực tế
-            let summaryMap = {};
-            
-            allRecords.forEach(data => {
-                const entityId = data.entityId || data.targetId || data.id.split('_')[0];
-                const recDate = data.date || ""; // Định dạng "YYYY-MM-DD"
-                
-                const userInfo = usersMap[entityId] || {};
-                const entityName = userInfo.fullName || data.fullName || data.targetName || entityId;
-                const entityClass = userInfo.category || data.className || data.category || data.targetClass || "Chưa phân loại";
+			let summaryMap = {};
+			allRecords.forEach(data => {
+				const entityId = data.entityId || data.targetId || data.id.split('_')[0];
+				const recDate = data.date || "";
+				
+				const userInfo = usersMap[entityId] || {};
+				const entityName = userInfo.fullName || data.fullName || data.targetName || entityId;
+				const entityClass = userInfo.category || data.className || data.category || data.targetClass || "Chưa phân loại";
 
-                if (!summaryMap[entityId]) {
-                    summaryMap[entityId] = {
-                        id: entityId,
-                        name: entityName,
-                        className: entityClass,
-                        totalCount: 0,
-                        totalScore: 0,
-                        distinctWeeks: new Set(), // Dùng Set để lưu các tuần có phát sinh vi phạm
-                        kpiCounts: {}
-                    };
-                }
+				if (!summaryMap[entityId]) {
+					summaryMap[entityId] = {
+						id: entityId,
+						name: entityName,
+						className: entityClass,
+						totalCount: 0,
+						totalScore: 0,
+						distinctWeeks: new Set(),
+						kpiCounts: {}
+					};
+				}
 
-                // Tính số tuần trong năm từ ngày phát sinh (ISO week number đơn giản hoặc gom theo tuần)
-                if (recDate) {
-                    const d = new Date(recDate);
-                    // Lấy số tuần trong năm (hoặc dùng tuần của tháng)
-                    const weekNum = Math.ceil(d.getDate() / 7); 
-                    summaryMap[entityId].distinctWeeks.add(`${selectedMonth}-W${weekNum}`);
-                }
+				if (recDate) {
+					const d = new Date(recDate);
+					const weekNum = Math.ceil(d.getDate() / 7); 
+					summaryMap[entityId].distinctWeeks.add(`${selectedMonth}-W${weekNum}`);
+				}
 
-                // Duyệt qua các trường KPI
-                kpiFieldsList.forEach(kpiField => {
-                    const fKey = kpiField.id;
-                    let val = data[fKey];
+				kpiFieldsList.forEach(kpiField => {
+					const fKey = kpiField.id;
+					let val = data[fKey];
 
-                    if (val !== undefined && val !== null && val !== "") {
-                        let countInc = Array.isArray(val) ? val.length : 1;
-                        summaryMap[entityId].totalCount += countInc;
-                        summaryMap[entityId].totalScore += countInc * kpiField.scoreWeight;
-                        summaryMap[entityId].kpiCounts[fKey] = (summaryMap[entityId].kpiCounts[fKey] || 0) + countInc;
-                    }
-                });
-            });
+					if (val !== undefined && val !== null && val !== "") {
+						let countInc = Array.isArray(val) ? val.length : 1;
+						summaryMap[entityId].totalCount += countInc;
+						summaryMap[entityId].totalScore += countInc * kpiField.scoreWeight;
+						summaryMap[entityId].kpiCounts[fKey] = (summaryMap[entityId].kpiCounts[fKey] || 0) + countInc;
+					}
+				});
+			});
 
-            // 🌟 Tự động nhận diện tiền tố ID ô input dựa vào đối tượng (TEACHER hay STUDENT)
-            const prefix = targetType === "TEACHER" ? "cfg-teacher" : "cfg-student";
-			
-			// 🌟 Ưu tiên đọc trực tiếp từ Firestore (kpiRules), nếu chưa có mới fallback về ô input hoặc giá trị mặc định
-            const khaRule = kpiRules.kha || {};
-            const datRule = kpiRules.dat || {};
-            const chuadatRule = kpiRules.chuadat || {};
+			const prefix = targetType === "TEACHER" ? "cfg-teacher" : "cfg-student";
+			const khaRule = kpiRules.kha || {};
+			const datRule = kpiRules.dat || {};
+			const chuadatRule = kpiRules.chuadat || {};
 
-            const ruleKhaWeeks = Number(khaRule.weeks) || Number(document.getElementById("cfg-student-kha-weeks")?.value) || 2;
-            const ruleKhaCount = Number(khaRule.count) || Number(document.getElementById("cfg-student-kha-count")?.value) || 5;
-            const ruleKhaScore = Number(khaRule.score) || Number(document.getElementById("cfg-student-kha-score")?.value) || 5;
+			const ruleKhaWeeks = Number(khaRule.weeks) || Number(document.getElementById(`${prefix}-kha-weeks`)?.value) || 2;
+			const ruleKhaCount = Number(khaRule.count) || Number(document.getElementById(`${prefix}-kha-count`)?.value) || 5;
+			const ruleKhaScore = Number(khaRule.score) || Number(document.getElementById(`${prefix}-kha-score`)?.value) || 5;
 
-            const ruleDatWeeks = Number(datRule.weeks) || Number(document.getElementById("cfg-student-dat-weeks")?.value) || 3;
-            const ruleDatCount = Number(datRule.count) || Number(document.getElementById("cfg-student-dat-count")?.value) || 10;
-            const ruleDatScore = Number(datRule.score) || Number(document.getElementById("cfg-student-dat-score")?.value) || 10;
+			const ruleDatWeeks = Number(datRule.weeks) || Number(document.getElementById(`${prefix}-dat-weeks`)?.value) || 3;
+			const ruleDatCount = Number(datRule.count) || Number(document.getElementById(`${prefix}-dat-count`)?.value) || 10;
+			const ruleDatScore = Number(datRule.score) || Number(document.getElementById(`${prefix}-dat-score`)?.value) || 10;
 
-            const ruleChuadatWeeks = Number(chuadatRule.weeks) || Number(document.getElementById("cfg-student-chuadat-weeks")?.value) || 4;
-            const ruleChuadatCount = Number(chuadatRule.count) || Number(document.getElementById("cfg-student-chuadat-count")?.value) || 15;
-            const ruleChuadatScore = Number(chuadatRule.score) || Number(document.getElementById("cfg-student-chuadat-score")?.value) || 15;
+			const ruleChuadatWeeks = Number(chuadatRule.weeks) || Number(document.getElementById(`${prefix}-chuadat-weeks`)?.value) || 4;
+			const ruleChuadatCount = Number(chuadatRule.count) || Number(document.getElementById(`${prefix}-chuadat-count`)?.value) || 15;
+			const ruleChuadatScore = Number(chuadatRule.score) || Number(document.getElementById(`${prefix}-chuadat-score`)?.value) || 15;
 
-            // Soi chiếu Ma trận Ngưỡng để xếp loại chuẩn xác
-            const processedList = Object.values(summaryMap).map(item => {
-                let rank = "🟢 Tốt";
-                let badgeStyle = "background: #d1e7dd; color: #0f5132;";
+			const processedList = Object.values(summaryMap).map(item => {
+				let rank = "🟢 Tốt";
+				let badgeStyle = "background: #d1e7dd; color: #0f5132;";
 
-                const weeksCount = item.distinctWeeks.size; // Số tuần thực tế có vi phạm
-                const absScore = Math.abs(item.totalScore);
+				const weeksCount = item.distinctWeeks.size;
+				const absScore = Math.abs(item.totalScore);
+				const totalCount = item.totalCount;
 
-                // Kiểm tra mức: Chưa đạt -> Đạt -> Khá -> Tốt
-                if (weeksCount >= ruleChuadatWeeks || item.totalCount >= ruleChuadatCount || absScore >= ruleChuadatScore) {
-                    rank = "🔴 Chưa đạt";
-                    badgeStyle = "background: #f8d7da; color: #842029;";
-                } else if (weeksCount >= ruleDatWeeks || item.totalCount >= ruleDatCount || absScore >= ruleDatScore) {
-                    rank = "🟠 Đạt";
-                    badgeStyle = "background: #fff3cd; color: #664d03;";
-                } else if (weeksCount >= ruleKhaWeeks || item.totalCount >= ruleKhaCount || absScore >= ruleKhaScore) {
-                    rank = "🔵 Khá";
-                    badgeStyle = "background: #cff4fc; color: #055160;";
-                }
+				// 🌟 Logic xét duyệt: Bắt buộc phải đạt ngưỡng Lượt HOẶC Điểm trừ tương ứng, 
+				// đồng thời số tuần vi phạm phải từ bằng hoặc vượt cấu hình trở lên.
+				if (
+					(totalCount >= ruleChuadatCount || absScore >= ruleChuadatScore) && 
+					(weeksCount >= ruleChuadatWeeks)
+				) {
+					rank = "🔴 Chưa đạt";
+					badgeStyle = "background: #f8d7da; color: #842029;";
+				} 
+				else if (
+					(totalCount >= ruleDatCount || absScore >= ruleDatCount) && 
+					(weeksCount >= ruleDatWeeks)
+				) {
+					rank = "🟠 Đạt";
+					badgeStyle = "background: #fff3cd; color: #664d03;";
+				} 
+				else if (
+					(totalCount >= ruleKhaCount || absScore >= ruleKhaScore) && 
+					(weeksCount >= ruleKhaWeeks)
+				) {
+					rank = "🔵 Khá";
+					badgeStyle = "background: #cff4fc; color: #055160;";
+				}
 
-                return { ...item, weeks: weeksCount, rank, badgeStyle };
-            });
+				return { ...item, weeks: weeksCount, rank, badgeStyle };
+			});
 
 			const resultObj = { fields: kpiFieldsList, data: processedList };
 			
