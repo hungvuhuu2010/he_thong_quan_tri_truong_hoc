@@ -860,12 +860,21 @@
       <!-- Nhóm chọn ngày & tìm kiếm lớp -->
       <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
         <div>
-          <label style="font-size: 0.9em;"><b>Chọn Ngày thuộc Tuần:</b></label><br>
+          <label style="font-size: 0.9em;"><b>Chọn Ngày thuộc Tuần:</b></label>
           <input type="date" id="grid-sec2-date-select" onchange="loadGridSection2Weekly(false)" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc; margin-top: 2px;">
         </div>
 
+		<!-- Thêm thẻ chọn đối tượng -->
+		<div>
+			<label style="font-size: 0.9em;"><b>Đối tượng:</b></label>
+			<select id="grid-sec2-target-type" onchange="loadGridSection2Weekly(true)" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc; margin-top: 2px;">
+				<option value="STUDENT">Học sinh</option>
+				<option value="TEACHER">Giáo viên</option>
+			</select>
+		</div>
+
         <div>
-          <label style="font-size: 0.9em;"><b>Lọc Lớp / Tổ:</b></label><br>
+          <label style="font-size: 0.9em;"><b>Lọc Lớp / Tổ:</b></label>
           <input type="text" id="grid-sec2-filter-class" placeholder="VD: 10A1, Tổ 1..." oninput="filterGridSection2Table()" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc; margin-top: 2px; width: 140px;">
         </div>
 
@@ -926,8 +935,18 @@
 								<label><b>Chọn Tháng báo cáo:</b></label>
 								<input type="month" id="grid-sec3-month-select" onchange="loadGridSection3Monthly(false)" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
 								
+								
+								<!-- Thêm thẻ chọn đối tượng cho Tháng -->
+								<div>
+									<label style="font-size: 0.9em;"><b>Đối tượng:</b></label>
+									<select id="grid-sec3-target-type" onchange="loadGridSection3Monthly(false)" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc; margin-top: 2px;">
+										<option value="STUDENT">Học sinh</option>
+										<option value="TEACHER">Giáo viên</option>
+									</select>
+								</div>
+								
 								<!-- 🌟 BỔ SUNG KHUNG LỌC LỚP/TÊN TƯƠNG TỰ TUẦN -->
-								<label style="margin-left: 10px;"><b>Lọc:</b></label>
+								<label style="margin-left: 10px;"><b>Lọc Lớp/Tổ:</b></label>
 							    <input type="text" id="grid-sec3-filter-class" placeholder="VD: 10A1, Tên..." oninput="filterGridSection3Table()" onkeydown="filterGridSection3Table(event)" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc; width: 140px;">
 							  </div>
 
@@ -964,7 +983,7 @@
 						  </div>
 						</details>
 					<!-- SECTION 5.4: TRA CỨU & XUẤT PHIẾU ĐỐI SOÁT CHI TIẾT CÁ NHÂN -->
-					<details open style="border: 1px solid #0d6efd; padding: 12px; border-radius: 6px; margin-bottom: 15px; background: #fff;">
+					<details style="border: 1px solid #0d6efd; padding: 12px; border-radius: 6px; margin-bottom: 15px; background: #fff;">
 					  <summary style="font-weight: bold; cursor: pointer; color: #0d6efd;">
 						5.4 Tra cứu & Xuất Phiếu đối soát chi tiết sự việc theo cá nhân
 					  </summary>
