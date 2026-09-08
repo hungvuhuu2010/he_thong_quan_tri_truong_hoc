@@ -4531,14 +4531,24 @@ async function initGridCard5() {
 				fieldLabelMap[f.key] = f.label || f.key;
 			});
 
-			// 3. Đường dẫn chuẩn xác tới auditLogs của module
+			// Lấy ngày được chọn trên giao diện (mặc định lấy ngày hôm nay nếu chưa có)
+			const dateInput = document.getElementById("grid-sec1-date-select") || document.getElementById("grid-sec2-date-select");
+			const selectedDateStr = dateInput ? dateInput.value : new Date().toLocaleDateString('en-CA');
+
+			if (!selectedDateStr) {
+				tableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: red;">Vui lòng chọn ngày cần xem nhật ký.</td></tr>';
+				return;
+			}
+
+			// 3. Đường dẫn chuẩn xác tới auditLogs của module (Có kết hợp bộ lọc .where theo ngày)
 			const auditLogsRef = db.collection("organizations")
 								   .doc(orgId)
 								   .collection("academicYears")
 								   .doc(academicYearId)
 								   .collection("modulesData")
 								   .doc(moduleId)
-								   .collection("auditLogs");
+								   .collection("auditLogs")
+								   .where("date", "==", selectedDateStr); // 🌟 Lọc chính xác theo ngày được chọn
 
 			// 4. Lắng nghe realtime collection `auditLogs`
 			currentDailyUnsubscribe = auditLogsRef.onSnapshot(snapshot => {
