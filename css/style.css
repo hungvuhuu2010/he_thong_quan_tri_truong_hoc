@@ -1,30 +1,144 @@
+/* --- BIẾN MÀU SẮC & GIAO DIỆN CHUNG --- */
+:root {
+  --primary-color: #0d6efd;
+  --success-color: #198754;
+  --danger-color: #dc3545;
+  --warning-color: #ffc107;
+  --bg-color: #f4f6f9;
+  --card-bg: #ffffff;
+  --text-color: #333333;
+  --border-color: #dee2e6;
+}
+
 body {
   font-family: Arial, sans-serif;
   margin: 0;
-  padding: 15px;
-  background-color: #f4f6f9;
+  padding: 10px;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  box-sizing: border-box;
 }
 
+/* --- CONTAINER THÍCH ỨNG RESPONSIVE --- */
 .container {
   max-width: 1200px;
   margin: 0 auto;
-  background: #ffffff;
-  padding: 20px;
+  background: var(--card-bg);
+  padding: 15px;
   border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-sizing: border-box;
 }
 
+/* --- BẢNG BIỂU (THÊM THANH CUỘN NGANG KHI MÀN HÌNH NHỎ) --- */
 table {
   width: 100%;
   border-collapse: collapse;
 }
 
 th, td {
-  border: 1px solid #dee2e6;
-  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  padding: 8px 10px;
   text-align: left;
+  font-size: 0.95em;
 }
 
 th {
   background-color: #e9ecef;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+}
+
+/* --- FORM & INPUT TƯƠNG TÍCH THIẾT BỊ DI ĐỘNG --- */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="date"],
+input[type="month"],
+input[type="number"],
+select,
+textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+  font-size: 16px; /* Chặn tự động zoom trên iOS Safari */
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
+
+button {
+  cursor: pointer;
+  padding: 8px 14px;
+  border-radius: 4px;
+  font-weight: bold;
+  border: none;
+  font-size: 0.95em;
+  transition: opacity 0.2s;
+}
+
+button:hover {
+  opacity: 0.9;
+}
+
+/* --- MEDIA QUERIES TỐI ƯU CHO ĐIỆN THOẠI & MÁY TÍNH --- */
+
+/* Màn hình nhỏ (Điện thoại dọc: dưới 768px) */
+@media screen and (max-width: 767px) {
+  body {
+    padding: 5px;
+  }
+  
+  .container {
+    padding: 10px;
+    border-radius: 4px;
+  }
+
+  /* Biến các cụm flex thành cột dọc trên mobile */
+  header, 
+  .flex-responsive, 
+  #login-screen form, 
+  #owner-panel form {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+
+  /* Điều chỉnh thanh điều hướng tab Admin / Employee trên di động */
+  #admin-panel ul[style*="display: flex"],
+  div[style*="display: flex; gap: 8px; margin-bottom: 15px; flex-wrap: wrap;"] {
+    flex-direction: column;
+    gap: 6px !important;
+  }
+
+  #admin-panel ul li,
+  div[style*="display: flex; gap: 8px; margin-bottom: 15px; flex-wrap: wrap;"] button {
+    width: 100% !important;
+  }
+  
+  /* Modal chiếm gần trọn màn hình di động */
+  div[style*="position: fixed"] > div {
+    width: 95% !important;
+    max-width: 100% !important;
+    padding: 15px !important;
+    margin: 10px;
+  }
+}
+
+/* Màn hình lớn (Máy tính / Tablet ngang: từ 768px trở lên) */
+@media screen and (min-width: 768px) {
+  body {
+    padding: 20px;
+  }
+  
+  .container {
+    padding: 25px;
+  }
 }

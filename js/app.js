@@ -2683,43 +2683,165 @@ async function handleCreateSchoolAdmin(event) {
 		}
 	}
 
-	function generateKpiOptionsRows() {
-	  const rawText = document.getElementById("field-options-values").value;
+	function generateKpiOptionsRows(existingKpiOptions = {}) {
+	  const rawText = document.getElementById("field-options-values")?.value || "";
 	  const container = document.getElementById("kpi-options-rows-wrapper");
+
 	  if (!container) return;
 
-	  const options = rawText.split(",").map(i => i.trim()).filter(i => i.length > 0);
+	  const options = rawText
+		.split(",")
+		.map(item => item.trim())
+		.filter(item => item.length > 0);
 
 	  if (options.length === 0) {
-		container.innerHTML = '<div style="color: #6c757d; font-size: 0.85em; font-style: italic;">Chưa có giá trị lựa chọn nào. Hãy nhập các giá trị ở trên (cách nhau bởi dấu phẩy).</div>';
+		container.innerHTML = `
+		  <div style="color: #6c757d; font-size: 0.85em; font-style: italic;">
+			Chưa có giá trị lựa chọn nào. Hãy nhập các giá trị ở trên (cách nhau bởi dấu phẩy).
+		  </div>
+		`;
 		return;
 	  }
 
 	  let html = `
-		<table style="width: 100%; font-size: 0.85em; border-collapse: collapse; margin-top: 6px;">
+		<table style="
+		  width: 100%;
+		  border-collapse: collapse;
+		  margin-top: 10px;
+		  font-size: 0.9em;
+		">
 		  <thead>
-			<tr style="background: #ffe5d0; color: #fd7e14; text-align: left;">
-			  <th style="padding: 4px; border: 1px solid #ffab76;">Giá trị lựa chọn</th>
-			  <th style="padding: 4px; border: 1px solid #ffab76; width: 80px;">Điểm (+/-)</th>
-			  <th style="padding: 4px; border: 1px solid #ffab76; width: 90px;">Ngưỡng Tuần</th>
-			  <th style="padding: 4px; border: 1px solid #ffab76; width: 90px;">Ngưỡng Tháng</th>
+			<tr style="background: #f8f9fa;">
+			  <th style="
+				border: 1px solid #dee2e6;
+				padding: 8px;
+				text-align: left;
+			  ">
+				Giá trị lựa chọn
+			  </th>
+
+			  <th style="
+				border: 1px solid #dee2e6;
+				padding: 8px;
+				text-align: center;
+			  ">
+				Điểm (+/-)
+			  </th>
+
+			  <th style="
+				border: 1px solid #dee2e6;
+				padding: 8px;
+				text-align: center;
+			  ">
+				Ngưỡng Tuần
+			  </th>
+
+			  <th style="
+				border: 1px solid #dee2e6;
+				padding: 8px;
+				text-align: center;
+			  ">
+				Ngưỡng Tháng
+			  </th>
 			</tr>
 		  </thead>
+
 		  <tbody>
 	  `;
 
-	  options.forEach((opt, index) => {
+	  options.forEach((opt) => {
+		const existing = existingKpiOptions[opt] || {};
+
+		const scoreWeight =
+		  existing.scoreWeight !== undefined
+			? existing.scoreWeight
+			: -1;
+
+		const kpiWeekly =
+		  existing.kpiWeekly !== undefined
+			? existing.kpiWeekly
+			: 3;
+
+		const kpiMonthly =
+		  existing.kpiMonthly !== undefined
+			? existing.kpiMonthly
+			: 5;
+
 		html += `
-		  <tr>
-			<td style="padding: 4px; border: 1px solid #ddd; background: #fff; font-weight: 500;">${opt}</td>
-			<td style="padding: 4px; border: 1px solid #ddd;"><input type="number" step="0.5" value="-1" class="kpi-opt-weight" data-option="${opt}" style="width: 100%; padding: 2px 4px; border: 1px solid #ccc; border-radius: 3px;"></td>
-			<td style="padding: 4px; border: 1px solid #ddd;"><input type="number" value="3" class="kpi-opt-weekly" data-option="${opt}" style="width: 100%; padding: 2px 4px; border: 1px solid #ccc; border-radius: 3px;"></td>
-			<td style="padding: 4px; border: 1px solid #ddd;"><input type="number" value="5" class="kpi-opt-monthly" data-option="${opt}" style="width: 100%; padding: 2px 4px; border: 1px solid #ccc; border-radius: 3px;"></td>
+		  <tr
+			class="kpi-option-row-item"
+			data-option-value="${opt.replace(/"/g, '&quot;')}"
+		  >
+			<td style="
+			  border: 1px solid #dee2e6;
+			  padding: 8px;
+			">
+			  ${opt}
+			</td>
+
+			<td style="
+			  border: 1px solid #dee2e6;
+			  padding: 8px;
+			  text-align: center;
+			">
+			  <input
+				type="number"
+				step="0.5"
+				value="${scoreWeight}"
+				class="opt-score-weight"
+				data-option="${opt.replace(/"/g, '&quot;')}"
+				style="
+				  width: 80px;
+				  padding: 4px;
+				  box-sizing: border-box;
+				"
+			  >
+			</td>
+
+			<td style="
+			  border: 1px solid #dee2e6;
+			  padding: 8px;
+			  text-align: center;
+			">
+			  <input
+				type="number"
+				value="${kpiWeekly}"
+				class="opt-kpi-weekly"
+				data-option="${opt.replace(/"/g, '&quot;')}"
+				style="
+				  width: 80px;
+				  padding: 4px;
+				  box-sizing: border-box;
+				"
+			  >
+			</td>
+
+			<td style="
+			  border: 1px solid #dee2e6;
+			  padding: 8px;
+			  text-align: center;
+			">
+			  <input
+				type="number"
+				value="${kpiMonthly}"
+				class="opt-kpi-monthly"
+				data-option="${opt.replace(/"/g, '&quot;')}"
+				style="
+				  width: 80px;
+				  padding: 4px;
+				  box-sizing: border-box;
+				"
+			  >
+			</td>
 		  </tr>
 		`;
 	  });
 
-	  html += `</tbody></table>`;
+	  html += `
+		  </tbody>
+		</table>
+	  `;
+
 	  container.innerHTML = html;
 	}
 	// 2. Hàm khởi tạo khi Admin chuyển sang Thẻ 3 (Schema)
@@ -2973,41 +3095,230 @@ async function handleCreateSchoolAdmin(event) {
 		}
 	}
 
-	// 7. Đưa dữ liệu lên Form để Sửa trường
+	// 7. Đưa 	dữ liệu lên Form để Sửa trường
 	function editSchemaField(key) {
-	  const field = cachedSchemaFields.find(f => f.key === key);
+	  console.log("=== EDIT SCHEMA FIELD ===");
+	  console.log("Key cần sửa:", key);
+
+	  // ==========================================
+	  // 1. Tìm field trong danh sách đã cache
+	  // ==========================================
+	  const field = cachedSchemaFields.find(
+		f => f.key === key
+	  );
+
 	  if (!field) {
-		alert("Không tìm thấy thông tin trường!");
+		console.error("Không tìm thấy field:", key);
+		alert("Không tìm thấy trường thông tin cần sửa!");
 		return;
 	  }
 
-	  document.getElementById("field-edit-mode").value = "EDIT";
-	  
-	  // Khóa ô Mã trường (Key) khi ở chế độ sửa để tránh lỗi lệch cấu trúc dữ liệu
-	  const keyInput = document.getElementById("field-key");
-	  keyInput.value = field.key;
-	  keyInput.readOnly = true;
-	  keyInput.style.background = "#e9ecef";
+	  console.log("Field tìm được:", field);
 
-	  document.getElementById("field-label").value = field.label || "";
-	  document.getElementById("field-type").value = field.type || "number";
+	  // ==========================================
+	  // 2. Chuyển form sang chế độ EDIT
+	  // ==========================================
+	  const editModeInput =
+		document.getElementById("field-edit-mode");
 
-	  const isKpiCheckbox = document.getElementById("field-is-kpi");
-	  isKpiCheckbox.checked = !!field.isKpi;
-	  toggleKPISettings(isKpiCheckbox.checked);
+	  if (editModeInput) {
+		editModeInput.value = "EDIT";
+	  }
 
-	  document.getElementById("field-score-weight").value = field.scoreWeight ?? -1;
-	  document.getElementById("field-kpi-weekly").value = field.kpiWeekly ?? 3;
-	  document.getElementById("field-kpi-monthly").value = field.kpiMonthly ?? 5;
+	  // ==========================================
+	  // 3. Nạp KEY
+	  // ==========================================
+	  const keyInput =
+		document.getElementById("field-key");
 
-	  // Đổi nhãn nút submit và hiển thị nút hủy
-	  document.getElementById("btn-submit-field").textContent = "Cập nhật trường";
-	  document.getElementById("btn-cancel-edit-field").style.display = "inline-block";
+	  if (keyInput) {
+		keyInput.value = field.key || "";
 
-	  // Cuộn màn hình lên đầu form cho dễ thao tác
-	  document.getElementById("form-add-field").scrollIntoView({ behavior: 'smooth' });
+		// Khi sửa không cho thay đổi key
+		keyInput.readOnly = true;
+		keyInput.style.background = "#e9ecef";
+		keyInput.style.cursor = "not-allowed";
+	  }
+
+	  // ==========================================
+	  // 4. Nạp LABEL
+	  // ==========================================
+	  const labelInput =
+		document.getElementById("field-label");
+
+	  if (labelInput) {
+		labelInput.value = field.label || "";
+	  }
+
+	  // ==========================================
+	  // 5. Nạp TYPE
+	  // ==========================================
+	  const typeSelect =
+		document.getElementById("field-type");
+
+	  if (typeSelect) {
+		typeSelect.value = field.type || "text";
+	  }
+
+	  // ==========================================
+	  // 6. Nạp trạng thái KPI
+	  // ==========================================
+	  const isKpiCheckbox =
+		document.getElementById("field-is-kpi");
+
+	  if (isKpiCheckbox) {
+		isKpiCheckbox.checked = !!field.isKpi;
+
+		// Hiện/ẩn khu vực KPI
+		toggleKPISettings(isKpiCheckbox.checked);
+	  }
+
+	  // ==========================================
+	  // 7. Nạp Score Weight mặc định
+	  // ==========================================
+	  const scoreWeightInput =
+		document.getElementById("field-score-weight");
+
+	  if (scoreWeightInput) {
+		scoreWeightInput.value =
+		  field.scoreWeight !== undefined &&
+		  field.scoreWeight !== null
+			? field.scoreWeight
+			: -1;
+	  }
+
+	  // ==========================================
+	  // 8. Nạp KPI Weekly mặc định
+	  // ==========================================
+	  const kpiWeeklyInput =
+		document.getElementById("field-kpi-weekly");
+
+	  if (kpiWeeklyInput) {
+		kpiWeeklyInput.value =
+		  field.kpiWeekly !== undefined &&
+		  field.kpiWeekly !== null
+			? field.kpiWeekly
+			: 3;
+	  }
+
+	  // ==========================================
+	  // 9. Nạp KPI Monthly mặc định
+	  // ==========================================
+	  const kpiMonthlyInput =
+		document.getElementById("field-kpi-monthly");
+
+	  if (kpiMonthlyInput) {
+		kpiMonthlyInput.value =
+		  field.kpiMonthly !== undefined &&
+		  field.kpiMonthly !== null
+			? field.kpiMonthly
+			: 5;
+	  }
+
+	  // ==========================================
+	  // 10. Nạp OPTIONS
+	  // ==========================================
+	  const optionsInput =
+		document.getElementById("field-options-values");
+
+	  if (optionsInput) {
+		if (Array.isArray(field.options)) {
+		  optionsInput.value = field.options.join(", ");
+		} else {
+		  optionsInput.value = "";
+		}
+	  }
+
+	  // ==========================================
+	  // 11. Xử lý hiển thị khu vực OPTIONS
+	  // ==========================================
+	  const optionsGroup =
+		document.getElementById("field-options-group");
+
+	  if (optionsGroup) {
+		if (field.type === "options") {
+		  optionsGroup.style.display = "block";
+		} else {
+		  optionsGroup.style.display = "none";
+		}
+	  }
+
+	  // ==========================================
+	  // 12. Tạo lại ma trận KPI OPTIONS
+	  // ==========================================
+	  const kpiMatrix =
+		document.getElementById("kpi-options-rows-wrapper");
+
+	  if (
+		field.type === "options" &&
+		field.isKpi
+	  ) {
+		if (kpiMatrix) {
+		  kpiMatrix.style.display = "block";
+		}
+
+		// field.kpiOptions là dữ liệu đã lưu trên Firestore
+		const existingKpiOptions =
+		  field.kpiOptions &&
+		  typeof field.kpiOptions === "object"
+			? field.kpiOptions
+			: {};
+
+		console.log(
+		  "KPI Options đã lưu:",
+		  existingKpiOptions
+		);
+
+		// Nạp lại bảng KPI
+		generateKpiOptionsRows(
+		  existingKpiOptions
+		);
+
+	  } else {
+		if (kpiMatrix) {
+		  kpiMatrix.innerHTML = "";
+		}
+	  }
+
+	  // ==========================================
+	  // 13. Đổi tên nút Submit
+	  // ==========================================
+	  const submitButton =
+		document.getElementById("btn-submit-field");
+
+	  if (submitButton) {
+		submitButton.textContent = "Cập nhật trường";
+	  }
+
+	  // ==========================================
+	  // 14. Hiện nút Hủy sửa
+	  // ==========================================
+	  const cancelButton =
+		document.getElementById(
+		  "btn-cancel-edit-field"
+		);
+
+	  if (cancelButton) {
+		cancelButton.style.display = "inline-block";
+	  }
+
+	  // ==========================================
+	  // 15. Cuộn lên form
+	  // ==========================================
+	  const form =
+		document.getElementById("form-add-field");
+
+	  if (form) {
+		form.scrollIntoView({
+		  behavior: "smooth",
+		  block: "start"
+		});
+	  }
+
+	  console.log("=== ĐÃ NẠP DỮ LIỆU SỬA FIELD ===");
 	}
 
+	
 	// 8. Hủy bỏ chế độ sửa, trả form về trạng thái thêm mới
 	function resetFormFieldState() {
 	  document.getElementById("field-edit-mode").value = "CREATE";
@@ -3593,40 +3904,200 @@ async function handleCreateSchoolAdmin(event) {
 	//======SỬA XÓA BÀI TOÁN======//
 	// Đổ thông tin bài toán ngược lại lên form để chỉnh sửa
 	function editModule(modId) {
-	  const mod = cachedModulesList.find(m => m.id === modId);
-	  if (!mod) return;
+	  console.log("=== EDIT MODULE ===");
+	  console.log("Module ID:", modId);
 
-	  // Chuyển chế độ form thành EDIT
-	  const modeInput = document.getElementById("module-edit-mode");
-	  if (modeInput) modeInput.value = "EDIT";
+	  // ==========================================
+	  // 1. Tìm bài toán trong cache
+	  // ==========================================
+	  const mod = cachedModulesList.find(
+		m => m.id === modId
+	  );
 
-	  const idInput = document.getElementById("mod-id");
+	  if (!mod) {
+		console.error("Không tìm thấy bài toán:", modId);
+		alert("Không tìm thấy bài toán module cần sửa!");
+		return;
+	  }
+
+	  console.log("Module tìm được:", mod);
+
+	  // ==========================================
+	  // 2. Chuyển form sang chế độ EDIT
+	  // ==========================================
+	  const modeInput =
+		document.getElementById("module-edit-mode");
+
+	  if (modeInput) {
+		modeInput.value = "EDIT";
+	  }
+
+	  // ==========================================
+	  // 3. Nạp MÃ BÀI TOÁN
+	  // ==========================================
+	  const idInput =
+		document.getElementById("mod-id");
+
 	  if (idInput) {
-		idInput.value = mod.id;
-		idInput.disabled = true; // Khóa mã bài toán không cho sửa khi đang ở chế độ chỉnh sửa
+		idInput.value = mod.id || "";
+
+		// Không cho sửa mã bài toán khi đang EDIT
+		idInput.disabled = true;
 	  }
 
-	  const nameInput = document.getElementById("mod-name");
-	  if (nameInput) nameInput.value = mod.name || "";
+	  // ==========================================
+	  // 4. Nạp TÊN BÀI TOÁN
+	  // ==========================================
+	  const nameInput =
+		document.getElementById("mod-name");
 
-	  const targetTypeSelect = document.getElementById("mod-target-type");
-	  if (targetTypeSelect) targetTypeSelect.value = mod.targetType || "STUDENT";
-
-	  // Render lại danh sách checkbox và tích chọn sẵn các trường đã lưu của bài toán này
-	  if (typeof renderModuleFieldsCheckboxes === 'function') {
-		renderModuleFieldsCheckboxes(mod.fields || []);
+	  if (nameInput) {
+		nameInput.value = mod.name || "";
 	  }
 
-	  // Đổi nhãn nút submit và hiển thị nút hủy sửa
-	  const btnSubmit = document.getElementById("btn-submit-module");
-	  if (btnSubmit) btnSubmit.textContent = "Cập nhật Bài toán Module";
+	  // ==========================================
+	  // 5. Nạp ĐỐI TƯỢNG
+	  // ==========================================
+	  const targetTypeSelect =
+		document.getElementById("mod-target-type");
 
-	  const btnCancel = document.getElementById("btn-cancel-edit-module");
-	  if (btnCancel) btnCancel.style.display = "inline-block";
+	  if (targetTypeSelect) {
+		targetTypeSelect.value =
+		  mod.targetType || "STUDENT";
+	  }
 
-	  // Cuộn màn hình lên đầu form để dễ thao tác
-	  const formElem = document.getElementById("form-create-module");
-	  if (formElem) formElem.scrollIntoView({ behavior: 'smooth' });
+	  // ==========================================
+	  // 6. LẤY DANH SÁCH KEY CÁC TRƯỜNG ĐÃ LƯU
+	  // ==========================================
+	  //
+	  // mod.fields hiện đang được lưu dạng:
+	  //
+	  // [
+	  //   {
+	  //     key: "ho_ten",
+	  //     label: "Họ và tên",
+	  //     type: "text",
+	  //     ...
+	  //   },
+	  //   {
+	  //     key: "lop",
+	  //     label: "Lớp",
+	  //     type: "options",
+	  //     ...
+	  //   }
+	  // ]
+	  //
+	  // Nhưng renderModuleFieldsCheckboxes()
+	  // cần mảng:
+	  //
+	  // ["ho_ten", "lop"]
+	  //
+	  // ==========================================
+
+	  let selectedFieldKeys = [];
+
+	  if (Array.isArray(mod.fields)) {
+
+		selectedFieldKeys = mod.fields
+		  .map(field => {
+
+			// Trường hợp field được lưu dạng object
+			if (
+			  field &&
+			  typeof field === "object"
+			) {
+			  return field.key || null;
+			}
+
+			// Trường hợp dữ liệu cũ chỉ lưu key dạng string
+			if (typeof field === "string") {
+			  return field;
+			}
+
+			return null;
+		  })
+		  .filter(key => key);
+
+	  }
+
+	  console.log(
+		"Các field đã lưu của module:",
+		selectedFieldKeys
+	  );
+
+	  // ==========================================
+	  // 7. RENDER TOÀN BỘ DANH SÁCH FIELD
+	  // ==========================================
+	  //
+	  // Đây là điểm quan trọng:
+	  //
+	  // KHÔNG chỉ render các field đã chọn.
+	  //
+	  // Phải render toàn bộ cachedSchemaFields.
+	  //
+	  // Các field đã có trong module -> được CHECKED
+	  // Các field chưa có -> để trống
+	  //
+	  // Admin có thể:
+	  // + Tích thêm field
+	  // + Bỏ tích field cũ
+	  // + Giữ nguyên field đang có
+	  //
+	  // ==========================================
+
+	  if (
+		typeof renderModuleFieldsCheckboxes ===
+		"function"
+	  ) {
+		renderModuleFieldsCheckboxes(
+		  selectedFieldKeys
+		);
+	  }
+
+	  // ==========================================
+	  // 8. Đổi tên nút SUBMIT
+	  // ==========================================
+	  const btnSubmit =
+		document.getElementById(
+		  "btn-submit-module"
+		);
+
+	  if (btnSubmit) {
+		btnSubmit.textContent =
+		  "Cập nhật Bài toán Module";
+	  }
+
+	  // ==========================================
+	  // 9. Hiện nút HỦY SỬA
+	  // ==========================================
+	  const btnCancel =
+		document.getElementById(
+		  "btn-cancel-edit-module"
+		);
+
+	  if (btnCancel) {
+		btnCancel.style.display =
+		  "inline-block";
+	  }
+
+	  // ==========================================
+	  // 10. Cuộn lên form
+	  // ==========================================
+	  const formElem =
+		document.getElementById(
+		  "form-create-module"
+		);
+
+	  if (formElem) {
+		formElem.scrollIntoView({
+		  behavior: "smooth",
+		  block: "start"
+		});
+	  }
+
+	  console.log(
+		"=== ĐÃ NẠP MODULE VÀO FORM ==="
+	  );
 	}
 	
 	// Xóa bài toán module khỏi Firestore và Cache RAM
@@ -4614,517 +5085,1375 @@ async function initGridCard5() {
 	// 4. SECTION 5.2: BÁO CÁO TUẦN (CÓ CACHE)
 	// ==========================================
 
-async function loadGridSection2Weekly(forceRefresh = false) {
-	const tableBody = document.getElementById("grid-sec2-body-rows");
-	const headerRow = document.getElementById("grid-sec2-header-row");
-	const dateInput = document.getElementById("grid-sec2-date-select");
-	const filterInput = document.getElementById("grid-sec2-filter-class");
-	const targetTypeSelect = document.getElementById("grid-sec2-target-type");
-
-	if (!tableBody || !dateInput) return;
-
-	// =========================================================
-	// 1. NGÀY ĐƯỢC CHỌN
-	// =========================================================
-	if (!dateInput.value) {
-		dateInput.value = new Date().toLocaleDateString("en-CA");
-	}
-
-	const selectedDateStr = dateInput.value;
-	const filterKeyword = filterInput
-		? filterInput.value.trim().toLowerCase()
-		: "";
-
-	// STUDENT / TEACHER
-	const targetType = targetTypeSelect
-		? targetTypeSelect.value
-		: "STUDENT";
-
-	// =========================================================
-	// 2. TÍNH TUẦN: THỨ HAI -> CHỦ NHẬT
-	// =========================================================
-	const inputDate = new Date(selectedDateStr);
-
-	if (isNaN(inputDate.getTime())) {
-		tableBody.innerHTML = `
-			<tr>
-				<td colspan="10" style="text-align:center;color:red;">
-					Ngày được chọn không hợp lệ.
-				</td>
-			</tr>
-		`;
-		return;
-	}
-
-	const dayOfWeek = inputDate.getDay();
-
-	const diffToMonday =
-		inputDate.getDate() -
-		dayOfWeek +
-		(dayOfWeek === 0 ? -6 : 1);
-
-	const monday = new Date(inputDate);
-	monday.setDate(diffToMonday);
-
-	const sunday = new Date(monday);
-	sunday.setDate(monday.getDate() + 6);
-
-	const mondayStr = monday.toLocaleDateString("en-CA");
-	const sundayStr = sunday.toLocaleDateString("en-CA");
-
-	// =========================================================
-	// 3. ORG + NĂM HỌC
-	// =========================================================
-	const orgId = window.currentOrgIdGlobal;
-
-	if (!orgId) {
-		tableBody.innerHTML = `
-			<tr>
-				<td colspan="10" style="text-align:center;color:red;">
-					Chưa xác định được thông tin đơn vị (OrgId).
-				</td>
-			</tr>
-		`;
-		return;
-	}
-
-	let academicYearId = "";
-
-	const yearsArr = window.currentAcademicYearsGlobal;
-
-	if (Array.isArray(yearsArr) && yearsArr.length > 0) {
-		const lastYearItem = yearsArr[yearsArr.length - 1];
-
-		academicYearId = String(
-			typeof lastYearItem === "object" && lastYearItem !== null
-				? (
-					lastYearItem.id ||
-					lastYearItem.name ||
-					lastYearItem.year
-				)
-				: lastYearItem
-		).trim();
-
-	} else if (window.currentAcademicYearIdGlobal) {
-		academicYearId =
-			String(window.currentAcademicYearIdGlobal).trim();
-	}
-
-	if (!academicYearId) {
-		tableBody.innerHTML = `
-			<tr>
-				<td colspan="10" style="text-align:center;color:red;">
-					Chưa xác định được năm học hiện tại.
-				</td>
-			</tr>
-		`;
-		return;
-	}
-
-	// =========================================================
-	// 4. CACHE
-	//
-	// _v2_allusers để không dùng lại cache cũ chỉ chứa
-	// những người có lỗi.
-	// =========================================================
-	const cacheKey =
-		`${academicYearId}_${targetType.toLowerCase()}_weekly_${mondayStr}_to_${sundayStr}_v2_allusers`;
-
-	if (
-		!forceRefresh &&
-		typeof cachedGridWeeklyData !== "undefined" &&
-		cachedGridWeeklyData[cacheKey]
-	) {
-		renderWeeklyTable(
-			cachedGridWeeklyData[cacheKey],
-			filterKeyword
-		);
-
-		const badge =
-			document.getElementById("sec2-cache-time-badge");
-
-		if (badge) {
-			badge.innerText =
-				`⚡ Dùng Cache RAM (${targetType === "TEACHER" ? "Giáo viên" : "Học sinh"} - Tuần ${mondayStr} đến ${sundayStr})`;
-		}
-
-		return;
-	}
-
-	tableBody.innerHTML = `
-		<tr>
-			<td colspan="10" style="text-align:center;color:#6c757d;">
-				⏳ Đang tổng hợp dữ liệu tuần
-				(${mondayStr} đến ${sundayStr})...
-			</td>
-		</tr>
-	`;
-
-	try {
-		const db = firebase.firestore();
-
-		// =========================================================
-		// 5. LẤY MODULES
-		//
-		// GIỮ NGUYÊN CÁCH LẤY DỮ LIỆU CŨ
-		// =========================================================
-		const modulesSnapshot = await db
-			.collection("organizations")
-			.doc(orgId)
-			.collection("modules")
-			.where("targetType", "==", targetType)
-			.get();
-
-		if (modulesSnapshot.empty) {
-			tableBody.innerHTML = `
-				<tr>
-					<td colspan="10"
-						style="text-align:center;color:#6c757d;">
-						Không tìm thấy bài toán module nào cho nhóm
-						(${targetType === "TEACHER"
-							? "Giáo viên"
-							: "Học sinh"}).
-					</td>
-				</tr>
-			`;
-			return;
-		}
-
-		// =========================================================
-		// 6. LẤY DANH SÁCH CÁC FIELD KPI
-		//
-		// GIỮ NGUYÊN CÁCH LẤY DỮ LIỆU CŨ
-		// =========================================================
-		const kpiFieldsMap = {};
-
-		modulesSnapshot.forEach(modDoc => {
-			const modData = modDoc.data();
-
-			const fieldsArr =
-				Array.isArray(modData.fields)
-					? modData.fields
-					: [];
-
-			fieldsArr.forEach(fObj => {
-				if (
-					fObj &&
-					fObj.isKpi &&
-					fObj.key
-				) {
-					kpiFieldsMap[fObj.key] = {
-						id: fObj.key,
-						name: fObj.label || fObj.key,
-						scoreWeight:
-							Number(fObj.scoreWeight || -1),
-						weeklyThreshold:
-							Number(fObj.kpiWeekly || 0)
-					};
-				}
-			});
-		});
-
-		const kpiFieldsList =
-			Object.values(kpiFieldsMap);
-
-		// =========================================================
-		// 7. DỰNG HEADER
-		// =========================================================
-		let headerHtml = `
-			<th style="width: 90px;">
-				Mã định danh
-			</th>
-
-			<th style="width: 170px;">
-				Họ và tên
-			</th>
-
-			<th style="width: 130px;">
-				${targetType === "TEACHER"
-					? "Tổ chuyên môn"
-					: "Lớp"}
-			</th>
-		`;
-
-		kpiFieldsList.forEach(field => {
-			headerHtml += `
-				<th style="
-					text-align:center;
-					min-width:100px;
-				">
-					${field.name}
-				</th>
-			`;
-		});
-
-		headerHtml += `
-			<th style="
-				width:100px;
-				text-align:center;
-			">
-				Tổng điểm trừ
-			</th>
-
-			<th style="
-				width:120px;
-				text-align:center;
-			">
-				Xếp loại tuần
-			</th>
-		`;
-
-		if (headerRow) {
-			headerRow.innerHTML = headerHtml;
-		}
-
-		// =========================================================
-		// 8. LẤY TOÀN BỘ USERS
-		//
-		// ĐÂY LÀ PHẦN SỬA CHÍNH.
-		//
-		// Trước đây usersMap chứa tất cả user nhưng summaryMap
-		// chỉ được tạo từ allRecords.
-		//
-		// Bây giờ lọc role trước và tạo summaryMap NGAY TỪ
-		// TOÀN BỘ USER.
-		// =========================================================
-		const usersMap = {};
-
-		try {
-			const usersSnap = await db
-				.collection("organizations")
-				.doc(orgId)
-				.collection("users")
-				.get();
-
-			usersSnap.forEach(uDoc => {
-				const uData = uDoc.data();
-
-				const role =
-					String(uData.role || "")
-						.trim()
-						.toUpperCase();
-
-				// Chỉ lấy đúng đối tượng đang được chọn
-				if (role !== targetType.toUpperCase()) {
-					return;
-				}
-
-				usersMap[uDoc.id] = {
-					fullName:
-						uData.fullName ||
-						uDoc.id,
-
-					category:
-						uData.category ||
-						uData.className ||
-						uData.organizationUnit ||
-						"Chưa phân loại",
-
-					role: role
-				};
-			});
-
-		} catch (e) {
-			console.warn(
-				"Không tải được bảng users:",
-				e
-			);
-		}
-
-		// =========================================================
-		// 9. KHỞI TẠO SUMMARY CHO TẤT CẢ USERS
-		//
-		// User không có bất kỳ record nào trong tuần vẫn
-		// tồn tại ở đây với:
-		//
-		// kpiCounts = {}
-		// totalScore = 0
-		//
-		// Đây chính là điểm khác biệt với code cũ.
-		// =========================================================
-		const summaryMap = {};
-
-		Object.keys(usersMap).forEach(entityId => {
-			const userInfo = usersMap[entityId];
-
-			summaryMap[entityId] = {
-				id: entityId,
-
-				name:
-					userInfo.fullName ||
-					entityId,
-
-				className:
-					userInfo.category ||
-					"Chưa phân loại",
-
-				totalScore: 0,
-
-				kpiCounts: {}
-			};
-		});
-
-		// =========================================================
-		// 10. LẤY RECORDS
-		//
-		// GIỮ NGUYÊN CÁCH LẤY RECORD CŨ
-		// =========================================================
-		const allRecords = [];
-
-		for (const modDoc of modulesSnapshot.docs) {
-
-			const recordsSnap = await db
-				.collection("organizations")
-				.doc(orgId)
-				.collection("academicYears")
-				.doc(academicYearId)
-				.collection("modulesData")
-				.doc(modDoc.id)
-				.collection("records")
-				.get();
-
-			recordsSnap.forEach(recDoc => {
-				const recData = recDoc.data();
-
-				const recDate =
-					recData.date || "";
-
-				// GIỮ NGUYÊN:
-				// Chỉ lấy record thuộc tuần đang chọn
-				if (
-					recDate &&
-					recDate >= mondayStr &&
-					recDate <= sundayStr
-				) {
-					allRecords.push({
-						id: recDoc.id,
-						...recData
-					});
-				}
-			});
-		}
-
-		// =========================================================
-		// 11. CỘNG RECORD VÀO USER
-		//
-		// Cách xác định entityId GIỮ NGUYÊN.
-		// =========================================================
-		allRecords.forEach(data => {
-
-			const entityId =
-				data.entityId ||
-				data.targetId ||
-				data.id.split("_")[0];
-
-			// Record chỉ được cộng nếu entityId thuộc
-			// danh sách users đã lọc theo targetType.
-			if (!summaryMap[entityId]) {
-				return;
-			}
-
-			// =====================================================
-			// 12. CỘNG TỪNG KPI
-			// =====================================================
-			kpiFieldsList.forEach(kpiField => {
-
-				const fKey = kpiField.id;
-
-				// Cách đọc chính: field trực tiếp trên record
-				let val = data[fKey];
-
-				// Fallback giống logic tổng hợp học sinh:
-				// nếu không có field trực tiếp thì kiểm tra changes.
-				if (
-					val === undefined &&
-					data.changes &&
-					data.changes[fKey] !== undefined
-				) {
-					val = data.changes[fKey];
-				}
-
-				if (
-					val !== undefined &&
-					val !== null &&
-					val !== ""
-				) {
-					const countInc =
-						Array.isArray(val)
-							? val.length
-							: 1;
-
-					// Tổng lượt của KPI
-					summaryMap[entityId]
-						.kpiCounts[fKey] =
-						(
-							summaryMap[entityId]
-								.kpiCounts[fKey] || 0
-						) + countInc;
-
-					// Tổng điểm trừ
-					summaryMap[entityId]
-						.totalScore +=
-						countInc *
-						kpiField.scoreWeight;
-				}
-			});
-		});
-
-		// =========================================================
-		// 13. TẠO RESULT
-		//
-		// Bao gồm cả:
-		// - người có lỗi
-		// - người không có lỗi
-		// =========================================================
-		const resultList = {
-			fields: kpiFieldsList,
-			data: Object.values(summaryMap)
-		};
-
-		// =========================================================
-		// 14. CACHE
-		// =========================================================
-		if (
-			typeof cachedGridWeeklyData !== "undefined"
-		) {
-			cachedGridWeeklyData[cacheKey] =
-				resultList;
-		}
-
-		// =========================================================
-		// 15. RENDER
-		// =========================================================
-		renderWeeklyTable(
-			resultList,
-			filterKeyword
-		);
-
-		const badge =
-			document.getElementById(
-				"sec2-cache-time-badge"
-			);
-
-		if (badge) {
-			badge.innerText =
-				`🌐 Cập nhật tuần (${mondayStr} - ${sundayStr})`;
-		}
-
-	} catch (error) {
-
-		console.error(
-			"Lỗi tải tổng hợp tuần:",
-			error
-		);
-
-		tableBody.innerHTML = `
-			<tr>
-				<td colspan="10"
-					style="text-align:center;color:red;">
-					Lỗi tải dữ liệu tổng hợp tuần.
-				</td>
-			</tr>
-		`;
-	}
+async function loadGridSection2Weekly(
+    forceRefresh = false,
+    filterKeywordFromCaller = ""
+) {
+
+    const tableBody =
+        document.getElementById("grid-sec2-body-rows");
+
+    const headerRow =
+        document.getElementById("grid-sec2-header-row");
+
+    const dateInput =
+        document.getElementById("grid-sec2-date-select");
+
+    const filterInput =
+        document.getElementById("grid-sec2-filter-class");
+
+    const targetTypeSelect =
+        document.getElementById("grid-sec2-target-type");
+
+    const badge =
+        document.getElementById("sec2-cache-time-badge");
+
+
+    if (!tableBody || !dateInput) {
+        console.error(
+            "❌ Không tìm thấy control của Section 5.2"
+        );
+        return;
+    }
+
+
+    // =========================================================
+    // 1. NGÀY ĐƯỢC CHỌN
+    // =========================================================
+
+    if (!dateInput.value) {
+
+        const now = new Date();
+
+        dateInput.value =
+            now.toLocaleDateString("en-CA");
+    }
+
+
+    const selectedDateStr =
+        dateInput.value.trim();
+
+
+    // Filter:
+    // ưu tiên giá trị truyền trực tiếp từ filterGridSection2Table()
+    // nếu không có thì lấy từ input.
+    const filterKeyword =
+        String(
+            filterKeywordFromCaller ||
+            (
+                filterInput
+                    ? filterInput.value
+                    : ""
+            ) ||
+            ""
+        )
+            .trim()
+            .toLowerCase();
+
+
+    // =========================================================
+    // 2. ĐỐI TƯỢNG
+    // =========================================================
+
+    const targetType =
+        targetTypeSelect
+            ? String(
+                targetTypeSelect.value ||
+                "STUDENT"
+            )
+                .trim()
+                .toUpperCase()
+            : "STUDENT";
+
+
+    // =========================================================
+    // 3. TÍNH TUẦN
+    //
+    // Thứ Hai -> Chủ Nhật
+    // =========================================================
+
+    const inputDate =
+        new Date(
+            `${selectedDateStr}T00:00:00`
+        );
+
+
+    if (
+        isNaN(
+            inputDate.getTime()
+        )
+    ) {
+
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="30"
+                    style="
+                        text-align:center;
+                        color:red;
+                        padding:20px;
+                    ">
+                    Ngày được chọn không hợp lệ.
+                </td>
+            </tr>
+        `;
+
+        return;
+    }
+
+
+    const dayOfWeek =
+        inputDate.getDay();
+
+
+    const diffToMonday =
+        dayOfWeek === 0
+            ? -6
+            : 1 - dayOfWeek;
+
+
+    const monday =
+        new Date(inputDate);
+
+    monday.setDate(
+        monday.getDate() +
+        diffToMonday
+    );
+
+
+    const sunday =
+        new Date(monday);
+
+    sunday.setDate(
+        monday.getDate() + 6
+    );
+
+
+    function formatDateYYYYMMDD(date) {
+
+        return [
+            date.getFullYear(),
+            String(
+                date.getMonth() + 1
+            ).padStart(2, "0"),
+            String(
+                date.getDate()
+            ).padStart(2, "0")
+        ].join("-");
+    }
+
+
+    const mondayStr =
+        formatDateYYYYMMDD(monday);
+
+    const sundayStr =
+        formatDateYYYYMMDD(sunday);
+
+
+    // =========================================================
+    // 4. ORG
+    // =========================================================
+
+    const orgId =
+        window.currentOrgIdGlobal;
+
+
+    if (!orgId) {
+
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="30"
+                    style="
+                        text-align:center;
+                        color:red;
+                        padding:20px;
+                    ">
+                    Chưa xác định được OrgId.
+                </td>
+            </tr>
+        `;
+
+        return;
+    }
+
+
+    // =========================================================
+    // 5. NĂM HỌC
+    //
+    // Ưu tiên currentAcademicYearIdGlobal.
+    // =========================================================
+
+    let academicYearId = "";
+
+
+    if (
+        window.currentAcademicYearIdGlobal
+    ) {
+
+        academicYearId =
+            String(
+                window.currentAcademicYearIdGlobal
+            ).trim();
+
+    }
+
+    else if (
+        window.currentAcademicYear
+    ) {
+
+        academicYearId =
+            String(
+                window.currentAcademicYear
+            ).trim();
+
+    }
+
+    else {
+
+        const yearsArr =
+            window.currentAcademicYearsGlobal;
+
+
+        if (
+            Array.isArray(yearsArr) &&
+            yearsArr.length > 0
+        ) {
+
+            const yearItem =
+                yearsArr.find(item => {
+
+                    if (
+                        item &&
+                        typeof item === "object"
+                    ) {
+
+                        return (
+                            item.id ||
+                            item.name ||
+                            item.year
+                        );
+                    }
+
+                    return !!item;
+                });
+
+
+            if (yearItem) {
+
+                academicYearId =
+                    String(
+
+                        typeof yearItem === "object"
+
+                            ? (
+                                yearItem.id ||
+                                yearItem.name ||
+                                yearItem.year
+                            )
+
+                            : yearItem
+
+                    ).trim();
+            }
+        }
+    }
+
+
+    if (!academicYearId) {
+
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="30"
+                    style="
+                        text-align:center;
+                        color:red;
+                        padding:20px;
+                    ">
+                    Chưa xác định được năm học.
+                </td>
+            </tr>
+        `;
+
+        return;
+    }
+
+
+    // =========================================================
+    // 6. CACHE
+    //
+    // Thống nhất với filterGridSection2Table()
+    // =========================================================
+
+    const cacheKey =
+        `${academicYearId}_` +
+        `${targetType.toLowerCase()}_` +
+        `weekly_${mondayStr}_to_${sundayStr}_v3`;
+
+
+    if (
+        !forceRefresh &&
+        typeof cachedGridWeeklyData !== "undefined" &&
+        cachedGridWeeklyData[cacheKey]
+    ) {
+
+        renderWeeklyTable(
+            cachedGridWeeklyData[cacheKey],
+            filterKeyword
+        );
+
+
+        if (badge) {
+
+            badge.innerText =
+                `⚡ Dùng Cache RAM (` +
+                `${targetType === "TEACHER"
+                    ? "Giáo viên"
+                    : "Học sinh"} - ` +
+                `Tuần ${mondayStr} đến ${sundayStr})`;
+        }
+
+        return;
+    }
+
+
+    // =========================================================
+    // 7. LOADING
+    // =========================================================
+
+    tableBody.innerHTML = `
+        <tr>
+            <td colspan="30"
+                style="
+                    text-align:center;
+                    color:#6c757d;
+                    padding:20px;
+                ">
+                ⏳ Đang tổng hợp dữ liệu tuần
+                ${mondayStr} → ${sundayStr}...
+            </td>
+        </tr>
+    `;
+
+
+    try {
+
+        const db =
+            firebase.firestore();
+
+
+        // =====================================================
+        // 8. LẤY USERS
+        //
+        // organizations/{orgId}/users/{uid}
+        //
+        // uid chính là entityId.
+        // =====================================================
+
+        const usersMap = {};
+
+
+        const usersSnapshot =
+            await db
+                .collection("organizations")
+                .doc(orgId)
+                .collection("users")
+                .get();
+
+
+        usersSnapshot.forEach(userDoc => {
+
+            const userData =
+                userDoc.data() || {};
+
+
+            const role =
+                String(
+                    userData.role || ""
+                )
+                    .trim()
+                    .toUpperCase();
+
+
+            if (
+                role !==
+                targetType
+            ) {
+                return;
+            }
+
+
+            const entityId =
+                String(
+                    userData.uid ||
+                    userDoc.id ||
+                    ""
+                ).trim();
+
+
+            if (!entityId) {
+                return;
+            }
+
+
+            usersMap[entityId] = {
+
+                id:
+                    entityId,
+
+                fullName:
+                    userData.fullName ||
+                    entityId,
+
+                category:
+                    userData.category ||
+                    userData.className ||
+                    userData.organizationUnit ||
+                    "Chưa phân loại",
+
+                role:
+                    role
+            };
+        });
+
+
+        // =====================================================
+        // 9. LẤY FIELD KPI CHÍNH THỨC
+        //
+        // Đọc:
+        //
+        // organizations/{orgId}/fields/{fieldKey}
+        //
+        // để lấy chính xác:
+        //
+        // isKpi
+        // scoreWeight
+        // kpiWeekly
+        // kpiOptions
+        // =====================================================
+
+        const kpiFieldsMap = {};
+
+
+        const fieldsSnapshot =
+            await db
+                .collection("organizations")
+                .doc(orgId)
+                .collection("fields")
+                .get();
+
+
+        fieldsSnapshot.forEach(fieldDoc => {
+
+            const fieldData =
+                fieldDoc.data() || {};
+
+
+            if (
+                fieldData.isKpi !== true
+            ) {
+                return;
+            }
+
+
+            const fieldKey =
+                String(
+                    fieldData.key ||
+                    fieldDoc.id ||
+                    ""
+                ).trim();
+
+
+            if (!fieldKey) {
+                return;
+            }
+
+
+            kpiFieldsMap[fieldKey] = {
+
+                id:
+                    fieldKey,
+
+                key:
+                    fieldKey,
+
+                name:
+                    fieldData.label ||
+                    fieldKey,
+
+                label:
+                    fieldData.label ||
+                    fieldKey,
+
+                type:
+                    fieldData.type ||
+                    "text",
+
+                scoreWeight:
+                    Number(
+                        fieldData.scoreWeight ?? 0
+                    ),
+
+                weeklyThreshold:
+                    Number(
+                        fieldData.kpiWeekly ?? 0
+                    ),
+
+                kpiOptions:
+                    (
+                        fieldData.kpiOptions &&
+                        typeof fieldData.kpiOptions === "object"
+                    )
+                        ? fieldData.kpiOptions
+                        : {},
+
+                options:
+                    Array.isArray(
+                        fieldData.options
+                    )
+                        ? fieldData.options
+                        : []
+            };
+        });
+
+
+        const kpiFieldsList =
+            Object.values(
+                kpiFieldsMap
+            );
+
+
+        console.log(
+            "📊 KPI WEEKLY FIELDS:",
+            kpiFieldsList
+        );
+
+
+        // =====================================================
+        // 10. HEADER
+        // =====================================================
+
+        let headerHtml = `
+
+            <th style="width:90px;">
+                Mã định danh
+            </th>
+
+            <th style="width:170px;">
+                Họ và tên
+            </th>
+
+            <th style="width:130px;">
+                ${
+                    targetType === "TEACHER"
+                        ? "Tổ chuyên môn"
+                        : "Lớp"
+                }
+            </th>
+        `;
+
+
+        kpiFieldsList.forEach(field => {
+
+            headerHtml += `
+
+                <th style="
+                    text-align:center;
+                    min-width:105px;
+                ">
+                    ${field.name}
+                </th>
+            `;
+        });
+
+
+        headerHtml += `
+
+            <th style="
+                width:110px;
+                text-align:center;
+            ">
+                Tổng điểm trừ
+            </th>
+
+            <th style="
+                width:130px;
+                text-align:center;
+            ">
+                Cảnh báo Tuần
+            </th>
+        `;
+
+
+        if (headerRow) {
+
+            headerRow.innerHTML =
+                headerHtml;
+        }
+
+
+        // =====================================================
+        // 11. KHỞI TẠO SUMMARY CHO TẤT CẢ USER
+        // =====================================================
+
+        const summaryMap = {};
+
+
+        Object.keys(
+            usersMap
+        ).forEach(entityId => {
+
+            const user =
+                usersMap[entityId];
+
+
+            summaryMap[entityId] = {
+
+                id:
+                    entityId,
+
+                name:
+                    user.fullName ||
+                    entityId,
+
+                className:
+                    user.category ||
+                    "Chưa phân loại",
+
+                // Tổng số lượt KPI
+                totalCount:
+                    0,
+
+                // Tổng điểm âm dạng dương
+                totalPenalty:
+                    0,
+
+                // Tổng điểm dương
+                totalBonus:
+                    0,
+
+                // Điểm ròng
+                totalScore:
+                    0,
+
+                // Số lượt KPI âm
+                negativeCount:
+                    0,
+
+                // Số tuần bị vi phạm
+                negativeWeeks:
+                    new Set(),
+
+                // Số lượt từng KPI
+                kpiCounts:
+                    {}
+            };
+        });
+
+
+        // =====================================================
+        // 12. LẤY MODULE
+        // =====================================================
+
+        const modulesSnapshot =
+            await db
+                .collection("organizations")
+                .doc(orgId)
+                .collection("modules")
+                .get();
+
+
+        const moduleDocs =
+            modulesSnapshot.docs.filter(
+                modDoc => {
+
+                    const modData =
+                        modDoc.data() || {};
+
+
+                    const modTargetType =
+                        String(
+                            modData.targetType || ""
+                        )
+                            .trim()
+                            .toUpperCase();
+
+
+                    return (
+                        modTargetType ===
+                        targetType
+                    );
+                }
+            );
+
+
+        if (
+            moduleDocs.length === 0
+        ) {
+
+            tableBody.innerHTML = `
+                <tr>
+                    <td colspan="30"
+                        style="
+                            text-align:center;
+                            color:#6c757d;
+                            padding:20px;
+                        ">
+                        Không tìm thấy module cho
+                        ${
+                            targetType === "TEACHER"
+                                ? "Giáo viên"
+                                : "Học sinh"
+                        }.
+                    </td>
+                </tr>
+            `;
+
+            return;
+        }
+
+
+        // =====================================================
+        // 13. ĐỌC RECORDS CỦA MODULE
+        //
+        // academicYears/{year}/modulesData/{moduleId}/records
+        // =====================================================
+
+        for (
+            const moduleDoc
+            of moduleDocs
+        ) {
+
+            const recordsSnapshot =
+                await db
+                    .collection("organizations")
+                    .doc(orgId)
+                    .collection("academicYears")
+                    .doc(academicYearId)
+                    .collection("modulesData")
+                    .doc(moduleDoc.id)
+                    .collection("records")
+                    .get();
+
+
+            recordsSnapshot.forEach(
+                recordDoc => {
+
+                    const data =
+                        recordDoc.data() || {};
+
+
+                    // -------------------------------------------------
+                    // ENTITY ID
+                    // -------------------------------------------------
+
+                    let entityId =
+                        data.entityId ||
+                        data.targetId ||
+                        "";
+
+
+                    if (!entityId) {
+
+                        const recordId =
+                            String(
+                                recordDoc.id ||
+                                ""
+                            );
+
+
+                        // Ví dụ:
+                        // KL001_2026-09-17
+                        entityId =
+                            recordId.split("_")[0];
+                    }
+
+
+                    entityId =
+                        String(
+                            entityId || ""
+                        ).trim();
+
+
+                    if (
+                        !entityId ||
+                        !summaryMap[entityId]
+                    ) {
+                        return;
+                    }
+
+
+                    // -------------------------------------------------
+                    // DATE
+                    // -------------------------------------------------
+
+                    const recordDate =
+                        String(
+                            data.date || ""
+                        ).trim();
+
+
+                    if (
+                        !recordDate ||
+                        recordDate < mondayStr ||
+                        recordDate > sundayStr
+                    ) {
+                        return;
+                    }
+
+
+                    // -------------------------------------------------
+                    // XÁC ĐỊNH TUẦN
+                    // -------------------------------------------------
+
+                    const weekKey =
+                        mondayStr;
+
+
+                    // -------------------------------------------------
+                    // TỪNG FIELD KPI
+                    // -------------------------------------------------
+
+                    kpiFieldsList.forEach(
+                        kpiField => {
+
+                            const fieldKey =
+                                kpiField.key;
+
+
+                            let value =
+                                data[fieldKey];
+
+
+                            // Fallback changes
+                            if (
+                                value === undefined &&
+                                data.changes &&
+                                data.changes[fieldKey] !== undefined
+                            ) {
+
+                                value =
+                                    data.changes[fieldKey];
+                            }
+
+
+                            if (
+                                value === undefined ||
+                                value === null ||
+                                value === ""
+                            ) {
+                                return;
+                            }
+
+
+                            // =================================================
+                            // A. OPTIONS
+                            // =================================================
+
+                            if (
+                                Array.isArray(value)
+                            ) {
+
+                                value.forEach(
+                                    item => {
+
+                                        let optionValue =
+                                            item;
+
+
+                                        if (
+                                            item &&
+                                            typeof item === "object"
+                                        ) {
+
+                                            optionValue =
+                                                item.value !== undefined
+                                                    ? item.value
+                                                    : item.label !== undefined
+                                                        ? item.label
+                                                        : item.name !== undefined
+                                                            ? item.name
+                                                            : "";
+                                        }
+
+
+                                        optionValue =
+                                            String(
+                                                optionValue || ""
+                                            ).trim();
+
+
+                                        if (
+                                            !optionValue
+                                        ) {
+                                            return;
+                                        }
+
+
+                                        // -----------------------------------------
+                                        // LẤY SCOREWEIGHT RIÊNG CỦA OPTION
+                                        // -----------------------------------------
+
+                                        const optionConfig =
+                                            kpiField.kpiOptions &&
+                                            typeof kpiField.kpiOptions === "object"
+
+                                                ? kpiField.kpiOptions[
+                                                    optionValue
+                                                ]
+
+                                                : null;
+
+
+                                        let scoreWeight =
+                                            0;
+
+
+                                        if (
+                                            optionConfig &&
+                                            optionConfig.scoreWeight !== undefined &&
+                                            optionConfig.scoreWeight !== null
+                                        ) {
+
+                                            scoreWeight =
+                                                Number(
+                                                    optionConfig.scoreWeight
+                                                );
+
+                                        } else {
+
+                                            scoreWeight =
+                                                Number(
+                                                    kpiField.scoreWeight || 0
+                                                );
+                                        }
+
+
+                                        if (
+                                            !Number.isFinite(
+                                                scoreWeight
+                                            )
+                                        ) {
+                                            scoreWeight = 0;
+                                        }
+
+
+                                        // -----------------------------------------
+                                        // MỖI OPTION = 1 LƯỢT
+                                        // -----------------------------------------
+
+                                        summaryMap[entityId]
+                                            .totalCount++;
+
+
+                                        summaryMap[entityId]
+                                            .kpiCounts[fieldKey] =
+
+                                            (
+                                                summaryMap[entityId]
+                                                    .kpiCounts[fieldKey] ||
+                                                0
+                                            ) + 1;
+
+
+                                        // -----------------------------------------
+                                        // ĐIỂM ÂM
+                                        // -----------------------------------------
+
+                                        if (
+                                            scoreWeight < 0
+                                        ) {
+
+                                            summaryMap[entityId]
+                                                .totalPenalty +=
+                                                Math.abs(
+                                                    scoreWeight
+                                                );
+
+
+                                            summaryMap[entityId]
+                                                .negativeCount++;
+
+
+                                            summaryMap[entityId]
+                                                .negativeWeeks
+                                                .add(weekKey);
+                                        }
+
+
+                                        // -----------------------------------------
+                                        // ĐIỂM DƯƠNG
+                                        // -----------------------------------------
+
+                                        else if (
+                                            scoreWeight > 0
+                                        ) {
+
+                                            summaryMap[entityId]
+                                                .totalBonus +=
+                                                scoreWeight;
+                                        }
+
+
+                                        // -----------------------------------------
+                                        // ĐIỂM RÒNG
+                                        // -----------------------------------------
+
+                                        summaryMap[entityId]
+                                            .totalScore +=
+                                            scoreWeight;
+                                    }
+                                );
+
+
+                                return;
+                            }
+
+
+                            // =================================================
+                            // B. KPI THƯỜNG
+                            // =================================================
+
+                            const scoreWeight =
+                                Number(
+                                    kpiField.scoreWeight || 0
+                                );
+
+
+                            const safeScore =
+                                Number.isFinite(
+                                    scoreWeight
+                                )
+                                    ? scoreWeight
+                                    : 0;
+
+
+                            summaryMap[entityId]
+                                .totalCount++;
+
+
+                            summaryMap[entityId]
+                                .kpiCounts[fieldKey] =
+
+                                (
+                                    summaryMap[entityId]
+                                        .kpiCounts[fieldKey] ||
+                                    0
+                                ) + 1;
+
+
+                            summaryMap[entityId]
+                                .totalScore +=
+                                safeScore;
+
+
+                            if (
+                                safeScore < 0
+                            ) {
+
+                                summaryMap[entityId]
+                                    .totalPenalty +=
+                                    Math.abs(
+                                        safeScore
+                                    );
+
+
+                                summaryMap[entityId]
+                                    .negativeCount++;
+
+
+                                summaryMap[entityId]
+                                    .negativeWeeks
+                                    .add(weekKey);
+
+
+                            } else if (
+                                safeScore > 0
+                            ) {
+
+                                summaryMap[entityId]
+                                    .totalBonus +=
+                                    safeScore;
+                            }
+
+                        }
+                    );
+                }
+            );
+        }
+
+
+        // =====================================================
+        // 14. TẠO RESULT
+        // =====================================================
+
+        const processedList =
+            Object.values(
+                summaryMap
+            ).map(item => {
+
+                const totalPenalty =
+                    Number(
+                        item.totalPenalty || 0
+                    );
+
+
+                const totalBonus =
+                    Number(
+                        item.totalBonus || 0
+                    );
+
+
+                const totalScore =
+                    Number(
+                        item.totalScore || 0
+                    );
+
+
+                const totalCount =
+                    Number(
+                        item.totalCount || 0
+                    );
+
+
+                const negativeCount =
+                    Number(
+                        item.negativeCount || 0
+                    );
+
+
+                const negativeWeeks =
+                    item.negativeWeeks instanceof Set
+                        ? item.negativeWeeks.size
+                        : 0;
+
+
+                // ---------------------------------------------
+                // CẢNH BÁO TUẦN
+                //
+                // Chỉ cảnh báo khi KPI âm chạm ngưỡng kpiWeekly.
+                // ---------------------------------------------
+
+                const warningFields = [];
+
+
+                kpiFieldsList.forEach(
+                    field => {
+
+                        const count =
+                            Number(
+                                item.kpiCounts[field.id] ||
+                                0
+                            );
+
+
+                        const threshold =
+                            Number(
+                                field.weeklyThreshold ||
+                                0
+                            );
+
+
+                        if (
+                            threshold > 0 &&
+                            count >= threshold
+                        ) {
+
+                            warningFields.push({
+                                fieldId:
+                                    field.id,
+
+                                fieldName:
+                                    field.name,
+
+                                count:
+                                    count,
+
+                                threshold:
+                                    threshold
+                            });
+                        }
+                    }
+                );
+
+
+                let warningText =
+                    "Đạt";
+
+
+                let warningStyle =
+                    "background:#d1e7dd;color:#0f5132;";
+
+
+                if (
+                    warningFields.length > 0
+                ) {
+
+                    warningText =
+                        "⚠️ Cảnh báo";
+
+
+                    warningStyle =
+                        "background:#fff3cd;color:#664d03;";
+                }
+
+
+                // -------------------------------------------------
+                // Trường hợp có điểm âm nhưng chưa chạm ngưỡng
+                // -------------------------------------------------
+
+                if (
+                    warningFields.length === 0 &&
+                    totalPenalty > 0
+                ) {
+
+                    warningText =
+                        "Cần lưu ý";
+
+
+                    warningStyle =
+                        "background:#ffe5d0;color:#9a3412;";
+                }
+
+
+                return {
+
+                    ...item,
+
+                    totalCount:
+                        totalCount,
+
+                    totalPenalty:
+                        totalPenalty,
+
+                    totalBonus:
+                        totalBonus,
+
+                    totalScore:
+                        totalScore,
+
+                    negativeCount:
+                        negativeCount,
+
+                    negativeWeeks:
+                        negativeWeeks,
+
+                    warningFields:
+                        warningFields,
+
+                    warningText:
+                        warningText,
+
+                    warningStyle:
+                        warningStyle
+                };
+            });
+
+
+        // =====================================================
+        // 15. RESULT OBJECT
+        // =====================================================
+
+        const resultList = {
+
+            fields:
+                kpiFieldsList,
+
+            data:
+                processedList
+        };
+
+
+        // =====================================================
+        // 16. CACHE
+        // =====================================================
+
+        if (
+            typeof cachedGridWeeklyData !==
+            "undefined"
+        ) {
+
+            cachedGridWeeklyData[
+                cacheKey
+            ] =
+                resultList;
+        }
+
+
+        // =====================================================
+        // 17. RENDER
+        // =====================================================
+
+        renderWeeklyTable(
+            resultList,
+            filterKeyword
+        );
+
+
+        if (badge) {
+
+            badge.innerText =
+                `🌐 Cập nhật tuần ` +
+                `(${mondayStr} - ${sundayStr})`;
+        }
+
+
+        // =====================================================
+        // 18. DEBUG
+        // =====================================================
+
+        console.log(
+            "📊 WEEKLY REPORT:",
+            {
+                academicYearId:
+                    academicYearId,
+
+                targetType:
+                    targetType,
+
+                monday:
+                    mondayStr,
+
+                sunday:
+                    sundayStr,
+
+                kpiFields:
+                    kpiFieldsList,
+
+                users:
+                    Object.keys(
+                        usersMap
+                    ).length,
+
+                recordsModules:
+                    moduleDocs.length,
+
+                resultCount:
+                    processedList.length
+            }
+        );
+
+
+    } catch (error) {
+
+        console.error(
+            "❌ Lỗi loadGridSection2Weekly():",
+            error
+        );
+
+
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="30"
+                    style="
+                        text-align:center;
+                        color:red;
+                        padding:20px;
+                    ">
+                    Lỗi tải dữ liệu tổng hợp tuần:
+                    ${error.message || error}
+                </td>
+            </tr>
+        `;
+    }
 }
 
 
@@ -5243,1271 +6572,1832 @@ async function loadGridSection2Weekly(forceRefresh = false) {
 	// ==========================================
 	// 5. SECTION 5.3: BÁO CÁO THÁNG & ĐỐI CHƯỚC MA TRẬN KPI
 	// ==========================================
-	async function loadGridSection3Monthly(forceRefresh = false) {
+async function loadGridSection3Monthly(forceRefresh = false) {
 
-	const tableBody =
-		document.getElementById("grid-sec3-body-rows");
+    const tableBody = document.getElementById("grid-sec3-body-rows");
+    const headerRow = document.getElementById("grid-sec3-header-row");
 
-	const headerRow =
-		document.getElementById("grid-sec3-header-row");
+    // =========================================================
+    // 1. LẤY ĐÚNG CONTROL CỦA SECTION 3
+    // =========================================================
 
-	const monthInput =
-		document.getElementById("grid-sec3-month-select");
+    const monthInput =
+        document.getElementById("grid-sec3-month-select");
 
-	const filterInput =
-		document.getElementById("grid-sec3-filter-class");
+    const filterInput =
+        document.getElementById("grid-sec3-filter-class");
 
-	const targetTypeSelect =
-		document.getElementById("grid-sec3-target-type");
+    const targetTypeSelect =
+        document.getElementById("grid-sec3-target-type");
 
+    const badge =
+        document.getElementById("sec3-cache-time-badge");
 
-	if (!tableBody || !monthInput) return;
-
-
-	// =========================================================
-	// 1. THÁNG ĐƯỢC CHỌN
-	// =========================================================
-
-	if (!monthInput.value) {
-
-		monthInput.value =
-			new Date()
-				.toLocaleDateString("en-CA")
-				.substring(0, 7);
-	}
-
-	const selectedMonth =
-		monthInput.value;
-
-	const filterKeyword =
-		filterInput
-			? filterInput.value.trim().toLowerCase()
-			: "";
-
-	const targetType =
-		targetTypeSelect
-			? targetTypeSelect.value
-			: "STUDENT";
+    if (!tableBody || !monthInput) {
+        console.error(
+            "❌ Không tìm thấy #grid-sec3-body-rows hoặc #grid-sec3-month-select"
+        );
+        return;
+    }
 
 
-	// =========================================================
-	// 2. ORG
-	// =========================================================
+    // =========================================================
+    // 2. THÁNG ĐƯỢC CHỌN
+    // =========================================================
 
-	const orgId =
-		window.currentOrgIdGlobal;
+    if (!monthInput.value) {
+        const now = new Date();
 
-	if (!orgId) {
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, "0");
 
-		tableBody.innerHTML = `
-			<tr>
-				<td colspan="10"
-					style="text-align:center;color:red;">
-					Chưa xác định được thông tin đơn vị (OrgId).
-				</td>
-			</tr>
-		`;
+        monthInput.value = `${y}-${m}`;
+    }
 
-		return;
-	}
+    const selectedMonth = monthInput.value.trim();
+
+    // YYYY-MM
+    const monthMatch =
+        /^(\d{4})-(\d{2})$/.exec(selectedMonth);
+
+    if (!monthMatch) {
+
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="30"
+                    style="text-align:center;color:red;padding:20px;">
+                    Tháng được chọn không hợp lệ.
+                </td>
+            </tr>
+        `;
+
+        return;
+    }
+
+    const year = Number(monthMatch[1]);
+    const monthNumber = Number(monthMatch[2]);
+
+    if (
+        !Number.isInteger(year) ||
+        !Number.isInteger(monthNumber) ||
+        monthNumber < 1 ||
+        monthNumber > 12
+    ) {
+        return;
+    }
 
 
-	// =========================================================
-	// 3. ACADEMIC YEAR
-	// =========================================================
+    // =========================================================
+    // 3. XÁC ĐỊNH NGÀY ĐẦU / CUỐI THÁNG
+    // =========================================================
 
-	let academicYearId = "";
+    const firstDayStr =
+        `${year}-${String(monthNumber).padStart(2, "0")}-01`;
 
-	const yearsArr =
-		window.currentAcademicYearsGlobal;
+    const lastDayDate =
+        new Date(year, monthNumber, 0);
 
-	if (
-		Array.isArray(yearsArr) &&
-		yearsArr.length > 0
+    const lastDayStr =
+        `${lastDayDate.getFullYear()}-` +
+        `${String(lastDayDate.getMonth() + 1).padStart(2, "0")}-` +
+        `${String(lastDayDate.getDate()).padStart(2, "0")}`;
+
+
+    // =========================================================
+    // 4. ĐỐI TƯỢNG
+    // =========================================================
+
+    const targetType =
+        targetTypeSelect
+            ? String(targetTypeSelect.value || "STUDENT")
+                .trim()
+                .toUpperCase()
+            : "STUDENT";
+
+
+    // =========================================================
+    // 5. FILTER
+    // =========================================================
+
+    const filterKeyword =
+        filterInput
+            ? String(filterInput.value || "")
+                .trim()
+                .toLowerCase()
+            : "";
+
+
+    // =========================================================
+    // 6. ORG ID
+    // =========================================================
+
+    const orgId =
+        window.currentOrgIdGlobal;
+
+    if (!orgId) {
+
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="30"
+                    style="text-align:center;color:red;padding:20px;">
+                    Chưa xác định được OrgId.
+                </td>
+            </tr>
+        `;
+
+        return;
+    }
+
+
+    // =========================================================
+    // 7. NĂM HỌC
+    //
+    // ƯU TIÊN:
+    // currentAcademicYearIdGlobal
+    // sau đó mới currentAcademicYear
+    // =========================================================
+
+    let academicYearId = "";
+
+    if (window.currentAcademicYearIdGlobal) {
+
+        academicYearId =
+            String(
+                window.currentAcademicYearIdGlobal
+            ).trim();
+
+    } else if (window.currentAcademicYear) {
+
+        academicYearId =
+            String(
+                window.currentAcademicYear
+            ).trim();
+
+    } else if (
+        Array.isArray(window.currentAcademicYearsGlobal) &&
+        window.currentAcademicYearsGlobal.length > 0
+    ) {
+
+        const firstValidYear =
+            window.currentAcademicYearsGlobal.find(item => {
+
+                if (
+                    item &&
+                    typeof item === "object"
+                ) {
+                    return (
+                        item.id ||
+                        item.name ||
+                        item.year
+                    );
+                }
+
+                return item;
+            });
+
+        if (firstValidYear) {
+
+            academicYearId =
+                String(
+                    typeof firstValidYear === "object"
+                        ? (
+                            firstValidYear.id ||
+                            firstValidYear.name ||
+                            firstValidYear.year
+                        )
+                        : firstValidYear
+                ).trim();
+        }
+    }
+
+
+    if (!academicYearId) {
+
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="30"
+                    style="text-align:center;color:red;padding:20px;">
+                    Chưa xác định được năm học.
+                </td>
+            </tr>
+        `;
+
+        return;
+    }
+
+
+    // =========================================================
+    // 8. CACHE KEY
+    //
+    // PHẢI THỐNG NHẤT VỚI filterGridSection3Table()
+    // =========================================================
+
+    const cacheKey =
+        `${academicYearId}_${targetType.toLowerCase()}_monthly_${selectedMonth}`;
+
+
+    // =========================================================
+    // 9. DÙNG CACHE
+    // =========================================================
+
+    if (
+        !forceRefresh &&
+        typeof cachedGridMonthlyData !== "undefined" &&
+        cachedGridMonthlyData[cacheKey]
+    ) {
+
+        renderMonthlyTable(
+            cachedGridMonthlyData[cacheKey],
+            filterKeyword
+        );
+
+        if (badge) {
+
+            badge.innerText =
+                `⚡ Dùng Cache RAM (${targetType === "TEACHER"
+                    ? "Giáo viên"
+                    : "Học sinh"} - ${monthNumber}/${year})`;
+        }
+
+        return;
+    }
+
+
+    tableBody.innerHTML = `
+        <tr>
+            <td colspan="30"
+                style="text-align:center;color:#6c757d;padding:20px;">
+                ⏳ Đang tổng hợp dữ liệu tháng
+                ${monthNumber}/${year}...
+            </td>
+        </tr>
+    `;
+
+
+    try {
+
+        const db = firebase.firestore();
+
+
+        // =====================================================
+        // 10. LẤY USERS
+        //
+        // users/{uid}
+        //
+        // uid chính là entityId
+        // =====================================================
+
+        const usersMap = {};
+
+        const usersSnapshot =
+            await db
+                .collection("organizations")
+                .doc(orgId)
+                .collection("users")
+                .get();
+
+        usersSnapshot.forEach(userDoc => {
+
+            const userData =
+                userDoc.data() || {};
+
+            const role =
+                String(
+                    userData.role || ""
+                )
+                    .trim()
+                    .toUpperCase();
+
+            if (role !== targetType) {
+                return;
+            }
+
+            const entityId =
+                String(
+                    userData.uid ||
+                    userDoc.id ||
+                    ""
+                ).trim();
+
+            if (!entityId) {
+                return;
+            }
+
+            usersMap[entityId] = {
+
+                id: entityId,
+
+                fullName:
+                    userData.fullName ||
+                    entityId,
+
+                category:
+                    userData.category ||
+                    userData.className ||
+                    userData.organizationUnit ||
+                    "Chưa phân loại",
+
+                role: role
+            };
+        });
+
+
+        // =====================================================
+        // 11. LẤY TOÀN BỘ FIELD KPI CHÍNH THỨC
+        //
+        // organizations/{orgId}/fields/{fieldKey}
+        //
+        // KHÔNG lấy KPI config từ modules.fields nữa.
+        //
+        // Đây là điểm quan trọng để lấy đúng:
+        // isKpi
+        // scoreWeight
+        // kpiOptions
+        // =====================================================
+
+        const kpiFieldsMap = {};
+
+        const fieldsSnapshot =
+            await db
+                .collection("organizations")
+                .doc(orgId)
+                .collection("fields")
+                .get();
+
+
+        fieldsSnapshot.forEach(fieldDoc => {
+
+            const fieldData =
+                fieldDoc.data() || {};
+
+            if (
+                fieldData.isKpi !== true
+            ) {
+                return;
+            }
+
+            const fieldKey =
+                String(
+                    fieldData.key ||
+                    fieldDoc.id ||
+                    ""
+                ).trim();
+
+            if (!fieldKey) {
+                return;
+            }
+
+            kpiFieldsMap[fieldKey] = {
+
+                id: fieldKey,
+
+                key: fieldKey,
+
+                name:
+                    fieldData.label ||
+                    fieldKey,
+
+                label:
+                    fieldData.label ||
+                    fieldKey,
+
+                type:
+                    fieldData.type ||
+                    "text",
+
+                scoreWeight:
+                    Number(
+                        fieldData.scoreWeight ?? 0
+                    ),
+
+                kpiWeekly:
+                    Number(
+                        fieldData.kpiWeekly ?? 0
+                    ),
+
+                kpiMonthly:
+                    Number(
+                        fieldData.kpiMonthly ?? 0
+                    ),
+
+                kpiOptions:
+                    (
+                        fieldData.kpiOptions &&
+                        typeof fieldData.kpiOptions === "object"
+                    )
+                        ? fieldData.kpiOptions
+                        : {},
+
+                options:
+                    Array.isArray(fieldData.options)
+                        ? fieldData.options
+                        : []
+            };
+        });
+
+
+        const kpiFieldsList =
+            Object.values(kpiFieldsMap);
+
+
+        console.log(
+            "📊 KPI fields chính thức:",
+            kpiFieldsList
+        );
+
+
+        // =====================================================
+        // 12. DỰNG HEADER
+        // =====================================================
+
+        let headerHtml = `
+
+            <th style="width:100px;">
+                Mã định danh
+            </th>
+
+            <th style="width:180px;">
+                Họ và tên
+            </th>
+
+            <th style="width:130px;">
+                ${targetType === "TEACHER"
+                    ? "Tổ chuyên môn"
+                    : "Lớp"}
+            </th>
+        `;
+
+
+        kpiFieldsList.forEach(field => {
+
+            headerHtml += `
+
+                <th style="
+                    text-align:center;
+                    min-width:110px;
+                ">
+                    ${field.name}
+                </th>
+            `;
+        });
+
+
+        headerHtml += `
+
+            <th style="
+                width:90px;
+                text-align:center;
+            ">
+                Tổng lượt
+            </th>
+
+            <th style="
+                width:110px;
+                text-align:center;
+            ">
+                Số điểm bị trừ
+            </th>
+
+            <th style="
+                width:110px;
+                text-align:center;
+            ">
+                Tổng điểm tháng
+            </th>
+
+            <th style="
+                width:120px;
+                text-align:center;
+            ">
+                Xếp loại tháng
+            </th>
+        `;
+
+
+        if (headerRow) {
+            headerRow.innerHTML = headerHtml;
+        }
+
+
+        // =====================================================
+        // 13. KHỞI TẠO SUMMARY CHO TẤT CẢ ENTITY
+        // =====================================================
+
+        const summaryMap = {};
+
+        Object.keys(usersMap).forEach(entityId => {
+
+            const user =
+                usersMap[entityId];
+
+            summaryMap[entityId] = {
+
+                id:
+                    entityId,
+
+                name:
+                    user.fullName,
+
+                className:
+                    user.category,
+
+                // Tổng tất cả lượt KPI
+                totalCount:
+                    0,
+
+                // Tổng điểm âm dạng dương
+                totalPenalty:
+                    0,
+
+                // Tổng điểm dương
+                totalBonus:
+                    0,
+
+                // Điểm ròng
+                totalScore:
+                    0,
+
+                // Số lượt vi phạm âm
+                negativeCount:
+                    0,
+
+                // Các tuần có ít nhất 1 KPI âm
+                negativeWeeks:
+                    new Set(),
+
+                // Số lượt của từng KPI
+                kpiCounts:
+                    {}
+            };
+        });
+
+
+        // =====================================================
+        // 14. LẤY MODULE
+        //
+        // modules/{moduleId}
+        // =====================================================
+
+        const modulesSnapshot =
+            await db
+                .collection("organizations")
+                .doc(orgId)
+                .collection("modules")
+                .get();
+
+
+        const moduleDocs =
+            modulesSnapshot.docs.filter(modDoc => {
+
+                const modData =
+                    modDoc.data() || {};
+
+                const modTargetType =
+                    String(
+                        modData.targetType || ""
+                    )
+                        .trim()
+                        .toUpperCase();
+
+                return modTargetType === targetType;
+            });
+
+
+        if (moduleDocs.length === 0) {
+
+            tableBody.innerHTML = `
+                <tr>
+                    <td colspan="30"
+                        style="
+                            text-align:center;
+                            color:#6c757d;
+                            padding:20px;
+                        ">
+                        Không tìm thấy module cho
+                        ${targetType === "TEACHER"
+                            ? "Giáo viên"
+                            : "Học sinh"}.
+                    </td>
+                </tr>
+            `;
+
+            return;
+        }
+
+
+        // =====================================================
+        // 15. ĐỌC RECORDS CỦA TỪNG MODULE
+        //
+        // Đường dẫn thực tế:
+        //
+        // academicYears/{year}/modulesData/{moduleId}/records
+        //
+        // Record:
+        //
+        // {
+        //     entityId: "KL001",
+        //     date: "2026-09-17",
+        //     KetQuaKiemTraKhaoSat: [
+        //         {
+        //             value: "...",
+        //             email: "...",
+        //             by: "...",
+        //             time: "..."
+        //         }
+        //     ]
+        // }
+        // =====================================================
+
+        for (
+            const moduleDoc
+            of moduleDocs
+        ) {
+
+            const recordsSnapshot =
+                await db
+                    .collection("organizations")
+                    .doc(orgId)
+                    .collection("academicYears")
+                    .doc(academicYearId)
+                    .collection("modulesData")
+                    .doc(moduleDoc.id)
+                    .collection("records")
+                    .get();
+
+
+            recordsSnapshot.forEach(recordDoc => {
+
+                const data =
+                    recordDoc.data() || {};
+
+
+                // -------------------------------------------------
+                // XÁC ĐỊNH ENTITY ID
+                // -------------------------------------------------
+
+                let entityId =
+                    data.entityId ||
+                    data.targetId ||
+                    "";
+
+
+                if (!entityId) {
+
+                    const recordId =
+                        String(
+                            recordDoc.id || ""
+                        );
+
+                    // Ví dụ:
+                    // KL001_2026-09-17
+                    entityId =
+                        recordId.split("_")[0];
+                }
+
+
+                entityId =
+                    String(
+                        entityId || ""
+                    ).trim();
+
+
+                if (
+                    !entityId ||
+                    !summaryMap[entityId]
+                ) {
+                    return;
+                }
+
+
+                // -------------------------------------------------
+                // CHỈ LẤY RECORD TRONG THÁNG
+                // -------------------------------------------------
+
+                const recordDate =
+                    String(
+                        data.date || ""
+                    ).trim();
+
+
+                if (
+                    !recordDate ||
+                    recordDate < firstDayStr ||
+                    recordDate > lastDayStr
+                ) {
+                    return;
+                }
+
+
+                // -------------------------------------------------
+                // TÍNH TUẦN THỨ HAI -> CHỦ NHẬT
+                //
+                // Chỉ thêm tuần khi tuần đó có KPI âm.
+                // -------------------------------------------------
+
+                function getMondayKey(dateString) {
+
+                    const d =
+                        new Date(
+                            `${dateString}T00:00:00`
+                        );
+
+                    if (
+                        isNaN(
+                            d.getTime()
+                        )
+                    ) {
+                        return "";
+                    }
+
+                    const day =
+                        d.getDay();
+
+                    const diff =
+                        day === 0
+                            ? -6
+                            : 1 - day;
+
+                    d.setDate(
+                        d.getDate() + diff
+                    );
+
+                    return [
+                        d.getFullYear(),
+                        String(
+                            d.getMonth() + 1
+                        ).padStart(2, "0"),
+                        String(
+                            d.getDate()
+                        ).padStart(2, "0")
+                    ].join("-");
+                }
+
+
+                const weekKey =
+                    getMondayKey(recordDate);
+
+
+                // -------------------------------------------------
+                // TỪNG FIELD KPI
+                // -------------------------------------------------
+
+                kpiFieldsList.forEach(kpiField => {
+
+                    const fieldKey =
+                        kpiField.key;
+
+
+                    let value =
+                        data[fieldKey];
+
+
+                    // Fallback nếu record có changes
+                    if (
+                        value === undefined &&
+                        data.changes &&
+                        data.changes[fieldKey] !== undefined
+                    ) {
+                        value =
+                            data.changes[fieldKey];
+                    }
+
+
+                    if (
+                        value === undefined ||
+                        value === null ||
+                        value === ""
+                    ) {
+                        return;
+                    }
+
+
+                    // =================================================
+                    // A. FIELD OPTIONS
+                    //
+                    // Record thực tế:
+                    //
+                    // [
+                    //   {
+                    //      value: "Chất lượng...",
+                    //      email: "...",
+                    //      by: "...",
+                    //      time: "..."
+                    //   }
+                    // ]
+                    // =================================================
+
+                    if (
+                        Array.isArray(value)
+                    ) {
+
+                        value.forEach(item => {
+
+                            let optionValue =
+                                item;
+
+
+                            if (
+                                item &&
+                                typeof item === "object"
+                            ) {
+
+                                optionValue =
+                                    item.value !== undefined
+                                        ? item.value
+                                        : item.label !== undefined
+                                            ? item.label
+                                            : item.name !== undefined
+                                                ? item.name
+                                                : "";
+                            }
+
+
+                            optionValue =
+                                String(
+                                    optionValue || ""
+                                ).trim();
+
+
+                            if (!optionValue) {
+                                return;
+                            }
+
+
+                            // -----------------------------------------
+                            // LẤY CẤU HÌNH OPTION
+                            // -----------------------------------------
+
+                            const optionConfig =
+                                kpiField.kpiOptions &&
+                                typeof kpiField.kpiOptions === "object"
+                                    ? kpiField.kpiOptions[optionValue]
+                                    : null;
+
+
+                            let scoreWeight =
+                                0;
+
+
+                            if (
+                                optionConfig &&
+                                optionConfig.scoreWeight !== undefined
+                            ) {
+
+                                scoreWeight =
+                                    Number(
+                                        optionConfig.scoreWeight
+                                    );
+
+                            } else {
+
+                                // fallback
+                                scoreWeight =
+                                    Number(
+                                        kpiField.scoreWeight || 0
+                                    );
+                            }
+
+
+                            if (
+                                !Number.isFinite(
+                                    scoreWeight
+                                )
+                            ) {
+                                scoreWeight = 0;
+                            }
+
+
+                            // -----------------------------------------
+                            // MỖI OPTION = 1 LƯỢT
+                            // -----------------------------------------
+
+                            summaryMap[entityId]
+                                .totalCount++;
+
+
+                            summaryMap[entityId]
+                                .kpiCounts[fieldKey] =
+                                (
+                                    summaryMap[entityId]
+                                        .kpiCounts[fieldKey] || 0
+                                ) + 1;
+
+
+                            // -----------------------------------------
+                            // ĐIỂM ÂM
+                            // -----------------------------------------
+
+                            if (
+                                scoreWeight < 0
+                            ) {
+
+                                summaryMap[entityId]
+                                    .totalPenalty +=
+                                    Math.abs(
+                                        scoreWeight
+                                    );
+
+
+                                summaryMap[entityId]
+                                    .negativeCount++;
+
+
+                                if (weekKey) {
+
+                                    summaryMap[entityId]
+                                        .negativeWeeks
+                                        .add(weekKey);
+                                }
+                            }
+
+
+                            // -----------------------------------------
+                            // ĐIỂM DƯƠNG
+                            // -----------------------------------------
+
+                            else if (
+                                scoreWeight > 0
+                            ) {
+
+                                summaryMap[entityId]
+                                    .totalBonus +=
+                                    scoreWeight;
+                            }
+
+
+                            // -----------------------------------------
+                            // ĐIỂM RÒNG
+                            // -----------------------------------------
+
+                            summaryMap[entityId]
+                                .totalScore +=
+                                scoreWeight;
+                        });
+
+
+                        return;
+                    }
+
+
+                    // =================================================
+                    // B. FIELD KPI THƯỜNG
+                    //
+                    // Không phải options.
+                    //
+                    // Mỗi giá trị = 1 lượt.
+                    // =================================================
+
+                    const scoreWeight =
+                        Number(
+                            kpiField.scoreWeight || 0
+                        );
+
+
+                    const safeScore =
+                        Number.isFinite(scoreWeight)
+                            ? scoreWeight
+                            : 0;
+
+
+                    summaryMap[entityId]
+                        .totalCount++;
+
+
+                    summaryMap[entityId]
+                        .kpiCounts[fieldKey] =
+                        (
+                            summaryMap[entityId]
+                                .kpiCounts[fieldKey] || 0
+                        ) + 1;
+
+
+                    summaryMap[entityId]
+                        .totalScore +=
+                        safeScore;
+
+
+                    if (
+                        safeScore < 0
+                    ) {
+
+                        summaryMap[entityId]
+                            .totalPenalty +=
+                            Math.abs(
+                                safeScore
+                            );
+
+
+                        summaryMap[entityId]
+                            .negativeCount++;
+
+
+                        if (weekKey) {
+
+                            summaryMap[entityId]
+                                .negativeWeeks
+                                .add(weekKey);
+                        }
+
+                    } else if (
+                        safeScore > 0
+                    ) {
+
+                        summaryMap[entityId]
+                            .totalBonus +=
+                            safeScore;
+                    }
+
+                });
+
+            });
+        }
+
+
+        // =====================================================
+        // 16. LẤY CẤU HÌNH XẾP LOẠI THÁNG
+        //
+        // KPIconfig/student
+        // KPIconfig/teacher
+        // =====================================================
+
+        let kpiRules = {
+
+            kha_weeks: 1,
+            kha_count: 5,
+            kha_score: 5,
+
+            dat_weeks: 2,
+            dat_count: 10,
+            dat_score: 10,
+
+            chuadat_weeks: 3,
+            chuadat_count: 15,
+            chuadat_score: 15
+        };
+
+
+        try {
+
+            const rulesDoc =
+                await db
+                    .collection("organizations")
+                    .doc(orgId)
+                    .collection("academicYears")
+                    .doc(academicYearId)
+                    .collection("KPIconfig")
+                    .doc(
+                        targetType === "TEACHER"
+                            ? "teacher"
+                            : "student"
+                    )
+                    .get();
+
+
+            if (
+                rulesDoc.exists
+            ) {
+
+                kpiRules = {
+                    ...kpiRules,
+                    ...rulesDoc.data()
+                };
+            }
+
+        } catch (ruleError) {
+
+            console.warn(
+                "⚠️ Không đọc được KPIconfig, dùng mặc định:",
+                ruleError
+            );
+        }
+
+
+        // =====================================================
+        // 17. XẾP LOẠI
+        //
+        // QUY TẮC:
+        //
+        // Mỗi hàng có 3 ngưỡng:
+        // weeks / count / score
+        //
+        // CHẠM BẤT KỲ NGƯỠNG NÀO
+        // => đạt hàng đó.
+        //
+        // Kiểm tra Chưa đạt -> Đạt -> Khá.
+        // =====================================================
+
+        function reachedAnyThreshold(
+            weeks,
+            count,
+            score,
+            rules,
+            prefix
+        ) {
+
+            const weeksThreshold =
+                Number(
+                    rules[`${prefix}_weeks`]
+                ) || 0;
+
+            const countThreshold =
+                Number(
+                    rules[`${prefix}_count`]
+                ) || 0;
+
+            const scoreThreshold =
+                Number(
+                    rules[`${prefix}_score`]
+                ) || 0;
+
+
+            return (
+                (
+                    weeksThreshold > 0 &&
+                    weeks >= weeksThreshold
+                ) ||
+                (
+                    countThreshold > 0 &&
+                    count >= countThreshold
+                ) ||
+                (
+                    scoreThreshold > 0 &&
+                    score >= scoreThreshold
+                )
+            );
+        }
+
+
+        const processedList =
+            Object.values(summaryMap)
+                .map(item => {
+
+                    const totalPenalty =
+                        Number(
+                            item.totalPenalty || 0
+                        );
+
+                    const totalBonus =
+                        Number(
+                            item.totalBonus || 0
+                        );
+
+                    const negativeCount =
+                        Number(
+                            item.negativeCount || 0
+                        );
+
+                    const negativeWeeks =
+                        item.negativeWeeks instanceof Set
+                            ? item.negativeWeeks.size
+                            : 0;
+
+
+                    // ---------------------------------------------
+                    // ĐIỂM THÁNG
+                    //
+                    // 90 - điểm trừ + điểm cộng
+                    // ---------------------------------------------
+
+                    const totalPoints =
+                        90 -
+                        totalPenalty +
+                        totalBonus;
+
+
+                    // ---------------------------------------------
+                    // XẾP LOẠI
+                    // ---------------------------------------------
+
+                    let rank =
+                        "🟢 Tốt";
+
+                    let badgeStyle =
+                        "background:#d1e7dd;color:#0f5132;";
+
+
+                    // CHƯA ĐẠT
+                    if (
+                        reachedAnyThreshold(
+                            negativeWeeks,
+                            negativeCount,
+                            totalPenalty,
+                            kpiRules,
+                            "chuadat"
+                        )
+                    ) {
+
+                        rank =
+                            "🔴 Chưa đạt";
+
+                        badgeStyle =
+                            "background:#f8d7da;color:#842029;";
+                    }
+
+
+                    // ĐẠT
+                    else if (
+                        reachedAnyThreshold(
+                            negativeWeeks,
+                            negativeCount,
+                            totalPenalty,
+                            kpiRules,
+                            "dat"
+                        )
+                    ) {
+
+                        rank =
+                            "🟠 Đạt";
+
+                        badgeStyle =
+                            "background:#fff3cd;color:#664d03;";
+                    }
+
+
+                    // KHÁ
+                    else if (
+                        reachedAnyThreshold(
+                            negativeWeeks,
+                            negativeCount,
+                            totalPenalty,
+                            kpiRules,
+                            "kha"
+                        )
+                    ) {
+
+                        rank =
+                            "🟡 Khá";
+
+                        badgeStyle =
+                            "background:#fff3cd;color:#664d03;";
+                    }
+
+
+                    return {
+
+                        ...item,
+
+                        totalPenalty:
+                            totalPenalty,
+
+                        totalBonus:
+                            totalBonus,
+
+                        totalPoints:
+                            totalPoints,
+
+                        negativeCount:
+                            negativeCount,
+
+                        negativeWeeks:
+                            negativeWeeks,
+
+                        rank:
+                            rank,
+
+                        badgeStyle:
+                            badgeStyle
+                    };
+                });
+
+
+        // =====================================================
+        // 18. RESULT
+        // =====================================================
+
+        const resultList = {
+
+            fields:
+                kpiFieldsList,
+
+            data:
+                processedList
+        };
+
+
+        // =====================================================
+        // 19. CACHE
+        // =====================================================
+
+        if (
+            typeof cachedGridMonthlyData !== "undefined"
+        ) {
+
+            cachedGridMonthlyData[cacheKey] =
+                resultList;
+        }
+
+
+        // =====================================================
+        // 20. RENDER
+        // =====================================================
+
+        renderMonthlyTable(
+            resultList,
+            filterKeyword
+        );
+
+
+        if (badge) {
+
+            badge.innerText =
+                `🌐 Cập nhật tháng ${monthNumber}/${year}`;
+        }
+
+
+        // =====================================================
+        // 21. DEBUG
+        // =====================================================
+
+        const debugKL001 =
+            processedList.find(
+                item => item.id === "KL001"
+            );
+
+
+        if (debugKL001) {
+
+            console.log(
+                "🔎 KPI MONTHLY KL001:",
+                {
+                    totalCount:
+                        debugKL001.totalCount,
+
+                    kpiCounts:
+                        debugKL001.kpiCounts,
+
+                    totalPenalty:
+                        debugKL001.totalPenalty,
+
+                    totalBonus:
+                        debugKL001.totalBonus,
+
+                    totalPoints:
+                        debugKL001.totalPoints,
+
+                    negativeCount:
+                        debugKL001.negativeCount,
+
+                    negativeWeeks:
+                        debugKL001.negativeWeeks,
+
+                    rank:
+                        debugKL001.rank
+                }
+            );
+        }
+
+
+    } catch (error) {
+
+        console.error(
+            "❌ Lỗi loadGridSection3Monthly():",
+            error
+        );
+
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="30"
+                    style="
+                        text-align:center;
+                        color:red;
+                        padding:20px;
+                    ">
+                    Lỗi tải dữ liệu tổng hợp tháng:
+                    ${error.message || error}
+                </td>
+            </tr>
+        `;
+    }
+}
+
+
+
+	
+	
+	
+
+	// Hàm render bảng tháng kèm hỗ trợ lọc theo từ khóa
+	function renderMonthlyTable(
+		resultObj,
+		filterKeyword = ""
 	) {
 
-		const lastYearItem =
-			yearsArr[yearsArr.length - 1];
-
-		academicYearId =
-			String(
-				typeof lastYearItem === "object" &&
-				lastYearItem !== null
-					? (
-						lastYearItem.id ||
-						lastYearItem.name ||
-						lastYearItem.year
-					)
-					: lastYearItem
-			).trim();
-
-	}
-	else if (
-		window.currentAcademicYearIdGlobal
-	) {
-
-		academicYearId =
-			String(
-				window.currentAcademicYearIdGlobal
-			).trim();
-	}
-
-
-	if (!academicYearId) {
-
-		tableBody.innerHTML = `
-			<tr>
-				<td colspan="10"
-					style="text-align:center;color:red;">
-					Chưa xác định được năm học hiện tại.
-				</td>
-			</tr>
-		`;
-
-		return;
-	}
-
-
-	// =========================================================
-	// 4. CACHE
-	// =========================================================
-
-	const cacheKey =
-		`${academicYearId}_${targetType.toLowerCase()}_monthly_${selectedMonth}`;
-
-	if (
-		!forceRefresh &&
-		typeof cachedGridMonthlyData !== "undefined" &&
-		cachedGridMonthlyData[cacheKey]
-	) {
-
-		renderMonthlyTable(
-			cachedGridMonthlyData[cacheKey],
-			filterKeyword
-		);
-
-		const badge =
+		const tableBody =
 			document.getElementById(
-				"sec3-cache-time-badge"
+				"grid-sec3-body-rows"
 			);
 
-		if (badge) {
 
-			badge.innerText =
-				`⚡ Dùng Cache RAM (${targetType === "TEACHER"
-					? "Giáo viên"
-					: "Học sinh"} - Tháng ${selectedMonth})`;
-		}
-
-		return;
-	}
-
-
-	// =========================================================
-	// 5. LOADING
-	// =========================================================
-
-	tableBody.innerHTML = `
-		<tr>
-			<td colspan="10"
-				style="text-align:center;color:#6c757d;">
-				⏳ Đang tổng hợp KPI tháng ${selectedMonth}
-				(${targetType === "TEACHER"
-					? "Giáo viên"
-					: "Học sinh"})...
-			</td>
-		</tr>
-	`;
-
-
-	try {
-
-		const db =
-			firebase.firestore();
+		if (!tableBody) return;
 
 
 		// =====================================================
-		// 6. YEAR REF
+		// 1. DỮ LIỆU
 		// =====================================================
 
-		const yearDocRef =
-			db
-				.collection("organizations")
-				.doc(orgId)
-				.collection("academicYears")
-				.doc(academicYearId);
+		const kpiFields =
+			resultObj.fields || [];
 
 
-		// =====================================================
-		// 7. KPI CONFIG THÁNG
-		// =====================================================
-
-		const configDocId =
-			targetType === "TEACHER"
-				? "teacher"
-				: "student";
-
-		const kpiConfigSnap =
-			await yearDocRef
-				.collection("KPIconfig")
-				.doc(configDocId)
-				.get();
-
-		const kpiRules =
-			kpiConfigSnap.exists
-				? kpiConfigSnap.data()
-				: {};
+		const rawDataList =
+			resultObj.data || [];
 
 
 		// =====================================================
-		// 8. LOAD USERS MỚI
-		//
-		// QUAN TRỌNG:
-		// Không dùng cache users cũ ở đây.
-		//
-		// Mục đích:
-		// users document ID = GV002
-		// users.uid         = abcxyz
-		//
-		// record.entityId   = GV002
-		//
-		// => GV002 phải được quy đổi thành abcxyz
+		// 2. LỌC THEO TỪ KHÓA
 		// =====================================================
 
-		const usersSnap =
-			await db
-				.collection("organizations")
-				.doc(orgId)
-				.collection("users")
-				.get();
+		const keyword =
+			(filterKeyword || "")
+				.trim()
+				.toLowerCase();
 
 
-		// Cập nhật lại cache users
-		window.cachedUsersMap = {};
+		const dataList =
+			rawDataList.filter(item => {
 
-
-		usersSnap.forEach(uDoc => {
-
-			const uData =
-				uDoc.data() || {};
-
-			window.cachedUsersMap[uDoc.id] = {
-
-				uid:
-					uData.uid || uDoc.id,
-
-				fullName:
-					uData.fullName || uDoc.id,
-
-				category:
-					uData.category || "",
-
-				email:
-					(uData.email || "")
-						.toLowerCase()
-						.trim(),
-
-				role:
-					uData.role || ""
-			};
-		});
-
-
-		// =====================================================
-		// 9. XÁC ĐỊNH TOÀN BỘ ĐỐI TƯỢNG
-		//
-		// canonicalId = uid
-		//
-		// entityAliasMap:
-		//
-		// GV002  -> uid
-		// abcxyz -> uid
-		// =====================================================
-
-		const targetUsers = [];
-
-		const entityAliasMap = {};
-
-
-		for (
-			const [uId, uInfo]
-			of Object.entries(window.cachedUsersMap)
-		) {
-
-			const role =
-				String(uInfo.role || "")
-					.toUpperCase()
-					.trim();
-
-
-			let isTarget = false;
-
-
-			if (targetType === "TEACHER") {
-
-				isTarget =
-					role === "TEACHER" ||
-					role === "EMPLOYEE" ||
-					role === "GV" ||
-					role === "GIÁO VIÊN";
-
-			}
-			else {
-
-				isTarget =
-					role === "STUDENT" ||
-					role === "HS" ||
-					role === "HỌC SINH";
-			}
-
-
-			if (!isTarget) continue;
-
-
-			// -----------------------------------------------
-			// Document ID / member ID
-			// -----------------------------------------------
-
-			const memberId =
-				String(uId || "").trim();
-
-
-			// -----------------------------------------------
-			// Firebase UID
-			// -----------------------------------------------
-
-			const uid =
-				String(uInfo.uid || "").trim();
-
-
-			// -----------------------------------------------
-			// ID chuẩn để tổng hợp
-			// -----------------------------------------------
-
-			const canonicalId =
-				uid || memberId;
-
-
-			targetUsers.push({
-
-				id:
-					canonicalId,
-
-				name:
-					uInfo.fullName ||
-					canonicalId,
-
-				department:
-					uInfo.category ||
-					"",
-
-				uid:
-					uid,
-
-				memberId:
-					memberId
-			});
-
-
-			// =================================================
-			// ALIAS 1:
-			// document ID / member ID
-			// =================================================
-
-			if (memberId) {
-
-				entityAliasMap[memberId] =
-					canonicalId;
-			}
-
-
-			// =================================================
-			// ALIAS 2:
-			// Firebase UID
-			// =================================================
-
-			if (uid) {
-
-				entityAliasMap[uid] =
-					canonicalId;
-			}
-		}
-
-
-		// =====================================================
-		// DEBUG:
-		// Kiểm tra mapping trước khi đọc record
-		// =====================================================
-
-		console.log(
-			"👥 Tổng đối tượng:",
-			targetUsers.length
-		);
-
-		console.log(
-			"🔗 Entity Alias Map:",
-			entityAliasMap
-		);
-
-
-		// =====================================================
-		// 10. KHỞI TẠO SUMMARY CHO TẤT CẢ ĐỐI TƯỢNG
-		//
-		// Mỗi giáo viên có 1 summary duy nhất.
-		//
-		// Tất cả record trong tháng sẽ cộng vào đây.
-		// =====================================================
-
-		const summaryMap = {};
-
-
-		targetUsers.forEach(user => {
-
-			summaryMap[user.id] = {
-
-				id:
-					user.id,
-
-				name:
-					user.name,
-
-				className:
-					user.department,
-
-				// Tổng lượt KPI cả tháng
-				totalCount:
-					0,
-
-				// Tổng điểm trừ cả tháng
-				totalScore:
-					0,
-
-				// Các tuần có phát sinh
-				distinctWeeks:
-					new Set(),
-
-				// Tổng từng KPI
-				kpiCounts:
-					{}
-			};
-		});
-
-
-		// =====================================================
-		// 11. LOAD MODULE CONFIG
-		// =====================================================
-
-		const modulesSnapshot =
-			await db
-				.collection("organizations")
-				.doc(orgId)
-				.collection("modules")
-				.where(
-					"targetType",
-					"==",
-					targetType
-				)
-				.get();
-
-
-		if (modulesSnapshot.empty) {
-
-			tableBody.innerHTML = `
-				<tr>
-					<td colspan="10"
-						style="text-align:center;color:#6c757d;">
-						Không tìm thấy bài toán module nào cho nhóm
-						(${targetType === "TEACHER"
-							? "Giáo viên"
-							: "Học sinh"}).
-					</td>
-				</tr>
-			`;
-
-			return;
-		}
-
-
-		// =====================================================
-		// 12. LẤY DANH SÁCH KPI
-		// =====================================================
-
-		const kpiFieldsMap = {};
-
-
-		modulesSnapshot.forEach(modDoc => {
-
-			const modData =
-				modDoc.data() || {};
-
-			const fieldsArr =
-				Array.isArray(modData.fields)
-					? modData.fields
-					: [];
-
-
-			fieldsArr.forEach(fObj => {
-
-				if (
-					fObj &&
-					fObj.isKpi &&
-					fObj.key
-				) {
-
-					kpiFieldsMap[fObj.key] = {
-
-						id:
-							fObj.key,
-
-						name:
-							fObj.label ||
-							fObj.key,
-
-						scoreWeight:
-							Number(
-								fObj.scoreWeight || -1
-							),
-
-						monthlyThreshold:
-							Number(
-								fObj.kpiMonthly || 0
-							)
-					};
+				if (!keyword) {
+					return true;
 				}
-			});
-		});
 
 
-		const kpiFieldsList =
-			Object.values(kpiFieldsMap);
-
-
-		// =====================================================
-		// 13. HEADER
-		// =====================================================
-
-		let headerHtml = `
-
-			<th style="width:90px;">
-				Mã ID
-			</th>
-
-			<th style="width:170px;">
-				Họ và tên
-			</th>
-
-			<th style="width:130px;">
-				${targetType === "TEACHER"
-					? "Tổ chuyên môn"
-					: "Lớp"}
-			</th>
-		`;
-
-
-		kpiFieldsList.forEach(field => {
-
-			headerHtml += `
-
-				<th style="
-					text-align:center;
-					min-width:100px;
-				">
-					${field.name}
-				</th>
-			`;
-		});
-
-
-		headerHtml += `
-
-			<th style="
-				width:100px;
-				text-align:center;
-			">
-				Tổng lượt
-			</th>
-
-			<th style="
-				width:100px;
-				text-align:center;
-			">
-				Tổng điểm trừ
-			</th>
-
-			<th style="
-				width:130px;
-				text-align:center;
-			">
-				Xếp loại Tháng
-			</th>
-		`;
-
-
-		if (headerRow) {
-
-			headerRow.innerHTML =
-				headerHtml;
-		}
-
-
-		// =====================================================
-		// 14. KHOẢNG THỜI GIAN THÁNG
-		// =====================================================
-
-		const [year, month] =
-			selectedMonth
-				.split("-")
-				.map(Number);
-
-
-		const monthStart =
-			new Date(
-				year,
-				month - 1,
-				1
-			);
-
-
-		const monthEnd =
-			new Date(
-				year,
-				month,
-				0
-			);
-
-
-		const monthStartStr =
-			monthStart
-				.toLocaleDateString("en-CA");
-
-
-		const monthEndStr =
-			monthEnd
-				.toLocaleDateString("en-CA");
-
-
-		console.log(
-			`📅 Tổng hợp KPI tháng: ${monthStartStr} → ${monthEndStr}`
-		);
-
-
-		// =====================================================
-		// 15. ĐỌC TOÀN BỘ RECORD TRONG THÁNG
-		//
-		// Mỗi record = một ngày.
-		//
-		// Tất cả record của cùng một đối tượng
-		// đều cộng dồn vào cùng summaryMap.
-		// =====================================================
-
-		for (
-			const modDoc
-			of modulesSnapshot.docs
-		) {
-
-			const recordsRef =
-				yearDocRef
-					.collection("modulesData")
-					.doc(modDoc.id)
-					.collection("records");
-
-
-			const recordsSnap =
-				await recordsRef
-					.where(
-						"date",
-						">=",
-						monthStartStr
-					)
-					.where(
-						"date",
-						"<=",
-						monthEndStr
-					)
-					.get();
-
-
-			console.log(
-				`📦 Module ${modDoc.id}: ${recordsSnap.size} record trong tháng ${selectedMonth}`
-			);
-
-
-			// =================================================
-			// 16. XỬ LÝ TỪNG RECORD
-			// =================================================
-
-			recordsSnap.forEach(recDoc => {
-
-				const data =
-					recDoc.data() || {};
-
-
-				// ---------------------------------------------
-				// ID đối tượng trong record
-				// ---------------------------------------------
-
-				const rawEntityId =
+				const matchId =
 					String(
-						data.entityId ||
-						data.targetId ||
-						recDoc.id.split("_")[0] ||
-						""
-					).trim();
+						item.id || ""
+					)
+						.toLowerCase()
+						.includes(keyword);
 
 
-				if (!rawEntityId) {
-
-					console.warn(
-						"⚠️ Record không có entityId:",
-						recDoc.id
-					);
-
-					return;
-				}
+				const matchName =
+					String(
+						item.name || ""
+					)
+						.toLowerCase()
+						.includes(keyword);
 
 
-				// ---------------------------------------------
-				// QUY ĐỔI ID
-				//
-				// GV002 -> uid
-				// uid   -> uid
-				// ---------------------------------------------
-
-				const resolvedEntityId =
-					entityAliasMap[rawEntityId] ||
-					rawEntityId;
+				const matchClass =
+					String(
+						item.className || ""
+					)
+						.toLowerCase()
+						.includes(keyword);
 
 
-				const summary =
-					summaryMap[resolvedEntityId];
-
-
-				// ---------------------------------------------
-				// Nếu không khớp
-				// ---------------------------------------------
-
-				if (!summary) {
-
-					console.warn(
-						"⚠️ Record không khớp đối tượng:",
-						{
-							recordId:
-								recDoc.id,
-
-							rawEntityId:
-								rawEntityId,
-
-							resolvedEntityId:
-								resolvedEntityId,
-
-							moduleId:
-								modDoc.id
-						}
-					);
-
-					return;
-				}
-
-
-				// =================================================
-				// 17. XÁC ĐỊNH TUẦN CÓ PHÁT SINH
-				// =================================================
-
-				const recDate =
-					data.date || "";
-
-
-				if (recDate) {
-
-					const d =
-						new Date(recDate);
-
-
-					if (!isNaN(d.getTime())) {
-
-						const weekNum =
-							Math.ceil(
-								d.getDate() / 7
-							);
-
-
-						summary.distinctWeeks.add(
-							`${selectedMonth}-W${weekNum}`
-						);
-					}
-				}
-
-
-				// =================================================
-				// 18. CỘNG DỒN TỪNG KPI
-				//
-				// Mỗi phần tử array = 1 lượt vi phạm.
-				//
-				// Ví dụ:
-				//
-				// dimuon: [
-				//   { value: "15" }
-				// ]
-				//
-				// => 1 lượt
-				//
-				// Không phải 15 lượt.
-				// =================================================
-
-				kpiFieldsList.forEach(kpiField => {
-
-					const fKey =
-						kpiField.id;
-
-
-					let val =
-						data[fKey];
-
-
-					// -----------------------------------------
-					// Fallback nếu dữ liệu nằm trong changes
-					// -----------------------------------------
-
-					if (
-						val === undefined &&
-						data.changes &&
-						data.changes[fKey] !== undefined
-					) {
-
-						val =
-							data.changes[fKey];
-					}
-
-
-					if (
-						val === undefined ||
-						val === null ||
-						val === ""
-					) {
-
-						return;
-					}
-
-
-					// -----------------------------------------
-					// Mỗi phần tử array = 1 lượt
-					// -----------------------------------------
-
-					const countInc =
-						Array.isArray(val)
-							? val.length
-							: 1;
-
-
-					// -----------------------------------------
-					// Tổng lượt tháng
-					// -----------------------------------------
-
-					summary.totalCount +=
-						countInc;
-
-
-					// -----------------------------------------
-					// Tổng điểm trừ tháng
-					// -----------------------------------------
-
-					summary.totalScore +=
-						countInc *
-						kpiField.scoreWeight;
-
-
-					// -----------------------------------------
-					// Tổng từng KPI
-					// -----------------------------------------
-
-					summary.kpiCounts[fKey] =
-						(
-							summary.kpiCounts[fKey] ||
-							0
-						) +
-						countInc;
-				});
+				return (
+					matchId ||
+					matchName ||
+					matchClass
+				);
 			});
-		}
 
 
 		// =====================================================
-		// 19. CẤU HÌNH XẾP LOẠI THÁNG
+		// 3. TỔNG SỐ CỘT
+		//
+		// 3 cột thông tin:
+		//   Mã ID
+		//   Họ và tên
+		//   Lớp / Tổ
+		//
+		// + số KPI
+		//
+		// + 4 cột tổng:
+		//   Tổng lượt
+		//   Tổng điểm trừ
+		//   Tổng điểm
+		//   Xếp loại tháng
 		// =====================================================
 
-		const prefix =
-			targetType === "TEACHER"
-				? "cfg-teacher"
-				: "cfg-student";
-
-
-		const khaRule =
-			kpiRules.kha || {};
-
-		const datRule =
-			kpiRules.dat || {};
-
-		const chuadatRule =
-			kpiRules.chuadat || {};
-
-
-		// -----------------------------------------------------
-		// KHÁ
-		// -----------------------------------------------------
-
-		const ruleKhaWeeks =
-			Number(khaRule.weeks) ||
-			Number(
-				document.getElementById(
-					`${prefix}-kha-weeks`
-				)?.value
-			) ||
-			2;
-
-
-		const ruleKhaCount =
-			Number(khaRule.count) ||
-			Number(
-				document.getElementById(
-					`${prefix}-kha-count`
-				)?.value
-			) ||
-			5;
-
-
-		const ruleKhaScore =
-			Number(khaRule.score) ||
-			Number(
-				document.getElementById(
-					`${prefix}-kha-score`
-				)?.value
-			) ||
-			5;
-
-
-		// -----------------------------------------------------
-		// ĐẠT
-		// -----------------------------------------------------
-
-		const ruleDatWeeks =
-			Number(datRule.weeks) ||
-			Number(
-				document.getElementById(
-					`${prefix}-dat-weeks`
-				)?.value
-			) ||
-			3;
-
-
-		const ruleDatCount =
-			Number(datRule.count) ||
-			Number(
-				document.getElementById(
-					`${prefix}-dat-count`
-				)?.value
-			) ||
-			10;
-
-
-		const ruleDatScore =
-			Number(datRule.score) ||
-			Number(
-				document.getElementById(
-					`${prefix}-dat-score`
-				)?.value
-			) ||
-			10;
-
-
-		// -----------------------------------------------------
-		// CHƯA ĐẠT
-		// -----------------------------------------------------
-
-		const ruleChuadatWeeks =
-			Number(chuadatRule.weeks) ||
-			Number(
-				document.getElementById(
-					`${prefix}-chuadat-weeks`
-				)?.value
-			) ||
+		const totalCols =
+			3 +
+			kpiFields.length +
 			4;
 
 
-		const ruleChuadatCount =
-			Number(chuadatRule.count) ||
-			Number(
-				document.getElementById(
-					`${prefix}-chuadat-count`
-				)?.value
-			) ||
-			15;
-
-
-		const ruleChuadatScore =
-			Number(chuadatRule.score) ||
-			Number(
-				document.getElementById(
-					`${prefix}-chuadat-score`
-				)?.value
-			) ||
-			15;
-
-
 		// =====================================================
-		// 20. XẾP LOẠI
+		// 4. KHÔNG CÓ DỮ LIỆU
 		// =====================================================
-
-		const processedList =
-			Object.values(summaryMap)
-				.map(item => {
-
-					let rank =
-						"🟢 Tốt";
-
-
-					let badgeStyle =
-						"background: #d1e7dd; color: #0f5132;";
-
-
-					const weeksCount =
-						item.distinctWeeks.size;
-
-
-					const absScore =
-						Math.abs(item.totalScore);
-
-
-					const totalCount =
-						item.totalCount;
-
-
-					// -----------------------------------------
-					// CHƯA ĐẠT
-					// -----------------------------------------
-
-					if (
-						(
-							totalCount >=
-								ruleChuadatCount ||
-
-							absScore >=
-								ruleChuadatScore
-						) &&
-						weeksCount >=
-							ruleChuadatWeeks
-					) {
-
-						rank =
-							"🔴 Chưa đạt";
-
-
-						badgeStyle =
-							"background: #f8d7da; color: #842029;";
-					}
-
-
-					// -----------------------------------------
-					// ĐẠT
-					// -----------------------------------------
-
-					else if (
-						(
-							totalCount >=
-								ruleDatCount ||
-
-							absScore >=
-								ruleDatScore
-						) &&
-						weeksCount >=
-							ruleDatWeeks
-					) {
-
-						rank =
-							"🟠 Đạt";
-
-
-						badgeStyle =
-							"background: #fff3cd; color: #664d03;";
-					}
-
-
-					// -----------------------------------------
-					// KHÁ
-					// -----------------------------------------
-
-					else if (
-						(
-							totalCount >=
-								ruleKhaCount ||
-
-							absScore >=
-								ruleKhaScore
-						) &&
-						weeksCount >=
-							ruleKhaWeeks
-					) {
-
-						rank =
-							"🔵 Khá";
-
-
-						badgeStyle =
-							"background: #cff4fc; color: #055160;";
-					}
-
-
-					return {
-
-						...item,
-
-						weeks:
-							weeksCount,
-
-						rank:
-							rank,
-
-						badgeStyle:
-							badgeStyle
-					};
-				});
-
-
-		// =====================================================
-		// 21. RESULT
-		// =====================================================
-
-		const resultObj = {
-
-			fields:
-				kpiFieldsList,
-
-			data:
-				processedList
-		};
-
-
-		// =====================================================
-		// 22. CACHE
-		// =====================================================
-
-		if (
-			typeof cachedGridMonthlyData !==
-			"undefined"
-		) {
-
-			cachedGridMonthlyData[cacheKey] =
-				resultObj;
-		}
-
-
-		// =====================================================
-		// 23. RENDER
-		// =====================================================
-
-		renderMonthlyTable(
-			resultObj,
-			filterKeyword
-		);
-
-
-		// =====================================================
-		// 24. CACHE BADGE
-		// =====================================================
-
-		const badge =
-			document.getElementById(
-				"sec3-cache-time-badge"
-			);
-
-
-		if (badge) {
-
-			badge.innerText =
-				`🌐 Cập nhật tháng ${selectedMonth}: ` +
-				new Date().toLocaleTimeString();
-		}
-
-
-		// =====================================================
-		// 25. DEBUG KẾT QUẢ
-		// =====================================================
-
-		console.log(
-			"📊 Kết quả tổng hợp KPI tháng:",
-			processedList
-		);
-
-
-	}
-	catch (error) {
-
-		console.error(
-			"Lỗi tính KPI tháng:",
-			error
-		);
-
-
-		tableBody.innerHTML = `
-			<tr>
-				<td colspan="10"
-					style="
-						text-align:center;
-						color:red;
-					">
-					Lỗi tính toán ma trận KPI tháng.
-				</td>
-			</tr>
-		`;
-	}
-}	
-
-	// Hàm render bảng tháng kèm hỗ trợ lọc theo từ khóa
-	function renderMonthlyTable(resultObj, filterKeyword = "") {
-		const tableBody = document.getElementById("grid-sec3-body-rows");
-		if (!tableBody) return;
-
-		const kpiFields = resultObj.fields || [];
-		const rawDataList = resultObj.data || [];
-
-		const keyword = (filterKeyword || "").trim().toLowerCase();
-		const dataList = rawDataList.filter(item => {
-			if (!keyword) return true;
-			const matchId = (item.id || "").toLowerCase().includes(keyword);
-			const matchName = (item.name || "").toLowerCase().includes(keyword);
-			const matchClass = (item.className || "").toLowerCase().includes(keyword);
-			return matchId || matchName || matchClass;
-		});
-
-		const totalCols = 3 + kpiFields.length + 3;
 
 		if (dataList.length === 0) {
-			tableBody.innerHTML = `<tr><td colspan="${totalCols}" style="text-align: center; font-style: italic; color: #6c757d; padding: 20px;">Không tìm thấy dữ liệu phù hợp trong tháng này.</td></tr>`;
+
+			tableBody.innerHTML = `
+
+				<tr>
+
+					<td
+						colspan="${totalCols}"
+						style="
+							text-align:center;
+							font-style:italic;
+							color:#6c757d;
+							padding:20px;
+						"
+					>
+						Không tìm thấy dữ liệu phù hợp
+						trong tháng này.
+					</td>
+
+				</tr>
+
+			`;
+
 			return;
 		}
 
+
+		// =====================================================
+		// 5. RENDER
+		// =====================================================
+
 		let html = "";
+
+
 		dataList.forEach(item => {
+
 			let rowHtml = `
-			  <tr style="border-bottom: 1px solid #dee2e6;">
-				<td style="vertical-align: middle;"><b>${item.id}</b></td>
-				<td style="vertical-align: middle;">${item.name}</td>
-				<td style="vertical-align: middle; text-align: center;"><span style="background: #e9ecef; padding: 2px 6px; border-radius: 4px; font-size: 0.9em;">${item.className || "Chưa phân loại"}</span></td>
+
+				<tr
+					style="
+						border-bottom:1px solid #dee2e6;
+					"
+				>
+
+					<!-- =====================================
+						 MÃ ID
+						 ===================================== -->
+
+					<td
+						style="
+							vertical-align:middle;
+						"
+					>
+						<b>
+							${item.id || ""}
+						</b>
+					</td>
+
+
+					<!-- =====================================
+						 HỌ VÀ TÊN
+						 ===================================== -->
+
+					<td
+						style="
+							vertical-align:middle;
+						"
+					>
+						${item.name || ""}
+					</td>
+
+
+					<!-- =====================================
+						 LỚP / TỔ CHUYÊN MÔN
+						 ===================================== -->
+
+					<td
+						style="
+							vertical-align:middle;
+							text-align:center;
+						"
+					>
+
+						<span
+							style="
+								background:#e9ecef;
+								padding:2px 6px;
+								border-radius:4px;
+								font-size:0.9em;
+							"
+						>
+							${
+								item.className ||
+								"Chưa phân loại"
+							}
+						</span>
+
+					</td>
+
 			`;
+
+
+			// =================================================
+			// 6. CÁC CỘT KPI
+			// =================================================
 
 			kpiFields.forEach(field => {
-				const countVal = item.kpiCounts[field.id] || 0;
-				rowHtml += `<td style="text-align: center; vertical-align: middle;">${countVal > 0 ? `<span style="color: #dc3545; font-weight: bold; font-size: 1.05em;">${countVal}</span>` : '<span style="color: #ccc;">0</span>'}</td>`;
+
+				const countVal =
+					(
+						item.kpiCounts &&
+						item.kpiCounts[field.id]
+					) || 0;
+
+
+				rowHtml += `
+
+					<td
+						style="
+							text-align:center;
+							vertical-align:middle;
+						"
+					>
+
+						${
+							countVal > 0
+
+								? `
+									<span
+										style="
+											color:#dc3545;
+											font-weight:bold;
+											font-size:1.05em;
+										"
+									>
+										${countVal}
+									</span>
+								  `
+
+								: `
+									<span
+										style="
+											color:#ccc;
+										"
+									>
+										0
+									</span>
+								  `
+						}
+
+					</td>
+
+				`;
 			});
 
+
+			// =================================================
+			// 7. TỔNG LƯỢT
+			// =================================================
+
+			const totalCount =
+				Number(
+					item.totalCount || 0
+				);
+
+
+			// =================================================
+			// 8. TỔNG ĐIỂM TRỪ
+			// =================================================
+
+			const totalPenalty =
+				Number(
+					item.totalPenalty || 0
+				);
+
+
+			// =================================================
+			// 9. TỔNG ĐIỂM THƯỞNG
+			// =================================================
+
+			const totalBonus =
+				Number(
+					item.totalBonus || 0
+				);
+
+
+			// =================================================
+			// 10. TỔNG ĐIỂM THÁNG
+			//
+			// Công thức:
+			//
+			// 90 - điểm lỗi + điểm thưởng
+			//
+			// Ví dụ:
+			//
+			// lỗi = 6
+			// thưởng = 4
+			//
+			// 90 - 6 + 4 = 88
+			//
+			// Ưu tiên sử dụng totalPoints đã tính
+			// trong loadGridSection3Monthly().
+			// Nếu cache cũ chưa có totalPoints,
+			// tự tính lại tại đây.
+			// =================================================
+
+			const totalPoints =
+				item.totalPoints !== undefined &&
+				item.totalPoints !== null
+
+					? Number(
+						item.totalPoints
+					)
+
+					: (
+						90 -
+						totalPenalty +
+						totalBonus
+					);
+
+
+			// =================================================
+			// 11. THÊM CÁC CỘT TỔNG
+			// =================================================
+
 			rowHtml += `
-				<td style="text-align: center; vertical-align: middle; font-weight: bold;">${item.totalCount}</td>
-				<td style="text-align: center; vertical-align: middle; color: #dc3545; font-weight: bold;">${item.totalScore}đ</td>
-				<td style="text-align: center; vertical-align: middle;"><span style="${item.badgeStyle} padding: 3px 10px; border-radius: 4px; font-weight: bold; display: inline-block;">${item.rank}</span></td>
-			  </tr>
+
+				<!-- =========================================
+					 TỔNG LƯỢT
+					 ========================================= -->
+
+				<td
+					style="
+						text-align:center;
+						vertical-align:middle;
+						font-weight:bold;
+					"
+				>
+					${totalCount}
+				</td>
+
+
+				<!-- =========================================
+					 TỔNG ĐIỂM TRỪ
+					 ========================================= -->
+
+				<td
+					style="
+						text-align:center;
+						vertical-align:middle;
+						color:#dc3545;
+						font-weight:bold;
+					"
+				>
+					${totalPenalty}đ
+				</td>
+
+
+				<!-- =========================================
+					 TỔNG ĐIỂM
+					 ========================================= -->
+
+				<td
+					style="
+						text-align:center;
+						vertical-align:middle;
+						font-weight:bold;
+						font-size:1.05em;
+					"
+				>
+					${totalPoints}đ
+				</td>
+
+
+				<!-- =========================================
+					 XẾP LOẠI THÁNG
+					 ========================================= -->
+
+				<td
+					style="
+						text-align:center;
+						vertical-align:middle;
+					"
+				>
+
+					<span
+						style="
+							${item.badgeStyle || ""}
+							padding:3px 10px;
+							border-radius:4px;
+							font-weight:bold;
+							display:inline-block;
+						"
+					>
+						${item.rank || "🟢 Tốt"}
+					</span>
+
+				</td>
+
 			`;
-			html += rowHtml;
+
+
+			rowHtml += `
+				</tr>
+			`;
+
+
+			html +=
+				rowHtml;
 		});
-		tableBody.innerHTML = html;
+
+
+		// =====================================================
+		// 12. ĐƯA HTML VÀO BẢNG
+		// =====================================================
+
+		tableBody.innerHTML =
+			html;
 	}
 
 	// Hàm debounce lọc trực tiếp trên RAM khi gõ ở ô input tháng
@@ -6551,173 +8441,937 @@ async function loadGridSection2Weekly(forceRefresh = false) {
 	// ==========================================
 	// 6. SECTION 5.4: TRA CỨU & IN PHIẾU ĐỐI SOÁT
 	// ==========================================
-	async function searchIndividualAuditSheet() {
-		const keywordInput = document.getElementById("lookup-entity-keyword");
-		if (!keywordInput) return;
-		
-		const keyword = keywordInput.value.trim().toLowerCase();
-		if (!keyword) {
-			alert("Vui lòng nhập Mã định danh hoặc Tên cá nhân cần tra cứu!");
+	// ==========================================
+async function searchIndividualAuditSheet(forceRefresh = false) {
+
+	const keywordInput =
+		document.getElementById("lookup-entity-keyword");
+
+	if (!keywordInput) return;
+
+	const rawKeyword =
+		keywordInput.value.trim();
+
+	if (!rawKeyword) {
+		alert("Vui lòng nhập Mã định danh hoặc Tên cá nhân cần tra cứu!");
+		return;
+	}
+
+	const keyword =
+		rawKeyword.toLowerCase();
+
+	const nameEl =
+		document.getElementById("sheet-entity-name");
+
+	const categoryEl =
+		document.getElementById("sheet-entity-category");
+
+	const idEl =
+		document.getElementById("sheet-entity-id");
+
+	const rankEl =
+		document.getElementById("sheet-entity-rank");
+
+	const violationsListEl =
+		document.getElementById("sheet-violations-list");
+
+	if (violationsListEl) {
+		violationsListEl.innerHTML =
+			'<div style="color:#6c757d;font-style:italic;">' +
+			'Đang tra cứu dữ liệu từ hệ thống...' +
+			'</div>';
+	}
+
+	try {
+
+		const orgId =
+			window.currentOrgIdGlobal;
+
+		if (!orgId) {
+			alert("Chưa xác định được thông tin đơn vị (OrgId).");
 			return;
 		}
 
-		const nameEl = document.getElementById("sheet-entity-name");
-		const categoryEl = document.getElementById("sheet-entity-category");
-		const idEl = document.getElementById("sheet-entity-id");
-		const rankEl = document.getElementById("sheet-entity-rank");
-		const violationsListEl = document.getElementById("sheet-violations-list");
+		// =====================================================
+		// 1. XÁC ĐỊNH NĂM HỌC
+		// =====================================================
 
-		if (violationsListEl) {
-			violationsListEl.innerHTML = '<div style="color: #6c757d; font-style: italic;">Đang tra cứu dữ liệu từ hệ thống...</div>';
+		let academicYearId = "";
+
+		const yearsArr =
+			window.currentAcademicYearsGlobal;
+
+		if (
+			Array.isArray(yearsArr) &&
+			yearsArr.length > 0
+		) {
+
+			const lastYearItem =
+				yearsArr[yearsArr.length - 1];
+
+			academicYearId =
+				String(
+					typeof lastYearItem === "object" &&
+					lastYearItem !== null
+						? (
+							lastYearItem.id ||
+							lastYearItem.name ||
+							lastYearItem.year
+						)
+						: lastYearItem
+				).trim();
+
+		} else if (
+			window.currentAcademicYearIdGlobal
+		) {
+
+			academicYearId =
+				String(
+					window.currentAcademicYearIdGlobal
+				).trim();
 		}
 
-		try {
-			const orgId = window.currentOrgIdGlobal;
-			if (!orgId) {
-				alert("Chưa xác định được thông tin đơn vị (OrgId).");
-				return;
-			}
+		if (!academicYearId) {
+			alert("Chưa xác định được năm học hiện tại.");
+			return;
+		}
 
-			let academicYearId = "";
-			const yearsArr = window.currentAcademicYearsGlobal;
-			if (Array.isArray(yearsArr) && yearsArr.length > 0) {
-				const lastYearItem = yearsArr[yearsArr.length - 1];
-				academicYearId = String(typeof lastYearItem === 'object' && lastYearItem !== null ? (lastYearItem.id || lastYearItem.name || lastYearItem.year) : lastYearItem).trim();
-			} else if (window.currentAcademicYearIdGlobal) {
-				academicYearId = String(window.currentAcademicYearIdGlobal).trim();
-			}
+		const db =
+			firebase.firestore();
 
-			if (!academicYearId) {
-				alert("Chưa xác định được năm học hiện tại.");
-				return;
-			}
+		// =====================================================
+		// 2. KHỞI TẠO CACHE RAM
+		// =====================================================
 
-			const db = firebase.firestore();
+		window.individualAuditUserCache =
+			window.individualAuditUserCache ||
+			new Map();
 
-			// 🌟 1. Ưu tiên tìm trong RAM Cache trước (window.card2CachedMembers hoặc window.currentLoadedEntities) để siêu tốc
-			let foundUser = null;
-			const preloadedEntities = window.card2CachedMembers || window.currentLoadedEntities || [];
-			
-			if (preloadedEntities.length > 0) {
-				foundUser = preloadedEntities.find(u => {
-					const uId = String(u.id || "").toLowerCase();
-					const uName = String(u.fullName || "").toLowerCase();
-					return uId === keyword || uName.includes(keyword);
+		window.individualAuditModulesCache =
+			window.individualAuditModulesCache ||
+			new Map();
+
+		window.individualAuditResultCache =
+			window.individualAuditResultCache ||
+			new Map();
+
+		// =====================================================
+		// 3. XÁC ĐỊNH KỲ TRA CỨU
+		// =====================================================
+		//
+		// Ưu tiên các control nếu giao diện đã có.
+		//
+		// Có thể dùng:
+		// #lookup-audit-start-date
+		// #lookup-audit-end-date
+		//
+		// Nếu chưa có thì giữ null và query theo entityId.
+		//
+
+		const startDateEl =
+			document.getElementById(
+				"lookup-audit-start-date"
+			);
+
+		const endDateEl =
+			document.getElementById(
+				"lookup-audit-end-date"
+			);
+
+		const startDate =
+			startDateEl?.value?.trim() || "";
+
+		const endDate =
+			endDateEl?.value?.trim() || "";
+
+		// =====================================================
+		// 4. CACHE KEY
+		// =====================================================
+
+		const cacheKey =
+			[
+				orgId,
+				academicYearId,
+				keyword,
+				startDate || "ALL",
+				endDate || "ALL"
+			].join("__");
+
+		if (
+			!forceRefresh &&
+			window.individualAuditResultCache.has(cacheKey)
+		) {
+
+			console.log(
+				"[AUDIT CACHE] HIT:",
+				cacheKey
+			);
+
+			const cachedResult =
+				window.individualAuditResultCache.get(
+					cacheKey
+				);
+
+			renderIndividualAuditSheet(cachedResult);
+
+			return cachedResult;
+		}
+
+		console.log(
+			"[AUDIT CACHE] MISS:",
+			cacheKey
+		);
+
+		// =====================================================
+		// 5. TÌM USER
+		// =====================================================
+
+		let foundUser = null;
+
+		// -----------------------------------------------------
+		// 5A. Ưu tiên cache thành viên đang có
+		// -----------------------------------------------------
+
+		const preloadedEntities =
+			window.card2CachedMembers ||
+			window.currentLoadedEntities ||
+			[];
+
+		if (
+			Array.isArray(preloadedEntities) &&
+			preloadedEntities.length > 0
+		) {
+
+			foundUser =
+				preloadedEntities.find(u => {
+
+					const uId =
+						String(
+							u.id ||
+							u.uid ||
+							""
+						).trim().toLowerCase();
+
+					const uName =
+						String(
+							u.fullName ||
+							""
+						).trim().toLowerCase();
+
+					return (
+						uId === keyword ||
+						uName.includes(keyword)
+					);
 				});
+		}
+
+		// -----------------------------------------------------
+		// 5B. Cache user riêng
+		// -----------------------------------------------------
+
+		if (!foundUser) {
+
+			const cachedUser =
+				window.individualAuditUserCache.get(
+					keyword
+				);
+
+			if (cachedUser) {
+
+				console.log(
+					"[AUDIT USER CACHE] HIT:",
+					keyword
+				);
+
+				foundUser =
+					cachedUser;
 			}
+		}
 
-			// Nếu cache chưa có, tiến hành đọc từ Firestore collection `users`
-			if (!foundUser) {
-				const usersSnap = await db.collection("organizations").doc(orgId).collection("users").get();
-				usersSnap.forEach(uDoc => {
-					const uData = uDoc.data();
-					const uId = uDoc.id.toLowerCase();
-					const uName = (uData.fullName || "").toLowerCase();
-					
-					if (uId === keyword || uName.includes(keyword)) {
-						foundUser = {
-							id: uDoc.id,
-							fullName: uData.fullName || uDoc.id,
-							category: uData.category || uData.className || "Chưa phân loại"
-						};
-					}
-				});
-			}
+		// -----------------------------------------------------
+		// 5C. Nếu keyword có vẻ là UID -> đọc trực tiếp doc
+		// -----------------------------------------------------
 
-			if (!foundUser) {
-				if (nameEl) nameEl.innerText = "Không tìm thấy";
-				if (categoryEl) categoryEl.innerText = "---";
-				if (idEl) idEl.innerText = keyword.toUpperCase();
-				if (rankEl) rankEl.innerText = "---";
-				if (violationsListEl) violationsListEl.innerHTML = '<div style="color: red; font-style: italic;">Không tìm thấy thông tin cá nhân phù hợp với từ khóa.</div>';
-				return;
-			}
+		if (!foundUser) {
 
-			// Hiển thị thông tin cơ bản tìm được
-			if (nameEl) nameEl.innerText = foundUser.fullName;
-			if (categoryEl) categoryEl.innerText = foundUser.category || foundUser.className || "Chưa phân loại";
-			if (idEl) idEl.innerText = foundUser.id;
-
-			// 🌟 2. Xây dựng bản đồ tra cứu nhãn từ `window.cachedSchemaFields` (Thẻ 3) để dịch Key -> Label tiếng Việt
-			let fieldLabelMap = {};
-			const currentFields = window.cachedSchemaFields || [];
-			currentFields.forEach(f => {
-				fieldLabelMap[f.key] = f.label || f.key;
-			});
-
-			// 3. Lấy danh sách các module để quét lịch sử biến động (auditLogs)
-			const modulesSnap = await db.collection("organizations").doc(orgId).collection("modules").get();
-			
-			let allViolations = [];
-
-			for (const modDoc of modulesSnap.docs) {
-				const logsSnap = await db.collection("organizations")
+			const userRef =
+				db
+					.collection("organizations")
 					.doc(orgId)
-					.collection("academicYears")
-					.doc(academicYearId)
-					.collection("modulesData")
-					.doc(modDoc.id)
-					.collection("auditLogs")
-					.where("entityId", "==", foundUser.id)
+					.collection("users")
+					.doc(rawKeyword);
+
+			const userSnap =
+				await userRef.get();
+
+			if (userSnap.exists) {
+
+				const uData =
+					userSnap.data() || {};
+
+				foundUser = {
+					id: userSnap.id,
+					uid:
+						uData.uid ||
+						userSnap.id,
+					fullName:
+						uData.fullName ||
+						userSnap.id,
+					category:
+						uData.category ||
+						uData.className ||
+						"Chưa phân loại"
+				};
+
+				console.log(
+					"[AUDIT USER READ] 1 document:",
+					userSnap.id
+				);
+			}
+		}
+
+		// -----------------------------------------------------
+		// 5D. Nếu không phải UID -> mới fallback tìm tên
+		// -----------------------------------------------------
+		//
+		// Chỉ chạy khi nhập tên hoặc UID không tồn tại.
+		// Đây là trường hợp duy nhất vẫn cần đọc users collection.
+		//
+
+		if (!foundUser) {
+
+			console.log(
+				"[AUDIT USER FALLBACK] Tìm theo tên:",
+				rawKeyword
+			);
+
+			const usersSnap =
+				await db
+					.collection("organizations")
+					.doc(orgId)
+					.collection("users")
 					.get();
 
-				logsSnap.forEach(logDoc => {
-					const logData = logDoc.data();
-					
-					// Định dạng thời gian chuẩn Việt Nam
-					let timeStr = "Gần đây";
-					if (logData.timestamp && typeof logData.timestamp.toDate === 'function') {
-						timeStr = logData.timestamp.toDate().toLocaleDateString('vi-VN');
-					}
+			usersSnap.forEach(uDoc => {
 
-					// Trích xuất nội dung thay đổi và ánh xạ sang nhãn thân thiện
-					const changes = logData.changes || {};
-					const changeKeys = Object.keys(changes);
+				if (foundUser) return;
 
-					if (changeKeys.length > 0) {
-						changeKeys.forEach(fieldKey => {
-							const val = changes[fieldKey];
-							const valStr = Array.isArray(val) ? val.join(", ") : String(val);
-							
-							// Dịch key sang label (VD: loiDiMuon -> Đi muộn)
-							const displayLabel = fieldLabelMap[fieldKey] || fieldKey;
+				const uData =
+					uDoc.data() || {};
 
-							allViolations.push({
-								date: timeStr,
-								content: `<b>${displayLabel}:</b> ${valStr}`,
-								updater: logData.updaterName || logData.updaterEmail || "Hệ thống"
-							});
-						});
-					} else {
-						const actionName = logData.action || "Cập nhật dữ liệu";
-						allViolations.push({
-							date: timeStr,
-							content: `<b>${actionName}</b>`,
-							updater: logData.updaterName || logData.updaterEmail || "Hệ thống"
-						});
-					}
-				});
-			}
+				const uId =
+					uDoc.id
+						.toLowerCase();
 
-			// 4. Render danh sách nhật ký/vi phạm ra phiếu đối soát
-			if (allViolations.length > 0) {
-				let html = "";
-				allViolations.forEach(v => {
-					html += `<div style="padding: 6px 0; border-bottom: 1px solid #eee;">• [${v.date}] ${v.content} <span style="color: #6c757d; font-size: 0.85em;">(Ghi bởi: ${v.updater})</span></div>`;
-				});
-				if (violationsListEl) violationsListEl.innerHTML = html;
-				if (rankEl) rankEl.innerText = `🔴 Có ${allViolations.length} lượt ghi nhận`;
-			} else {
-				if (violationsListEl) violationsListEl.innerHTML = `<div style="color: #198754; font-style: italic;">🎉 Không có ghi nhận biến động nào trong kỳ này.</div>`;
-				if (rankEl) rankEl.innerText = "🟢 Tốt";
-			}
+				const uName =
+					String(
+						uData.fullName || ""
+					).toLowerCase();
 
-		} catch (error) {
-			console.error("Lỗi tra cứu phiếu đối soát:", error);
-			if (violationsListEl) {
-				violationsListEl.innerHTML = '<div style="color: red; font-style: italic;">Lỗi kết nối khi tải dữ liệu đối soát.</div>';
-			}
+				if (
+					uId === keyword ||
+					uName.includes(keyword)
+				) {
+
+					foundUser = {
+						id: uDoc.id,
+						uid:
+							uData.uid ||
+							uDoc.id,
+						fullName:
+							uData.fullName ||
+							uDoc.id,
+						category:
+							uData.category ||
+							uData.className ||
+							"Chưa phân loại"
+					};
+				}
+			});
 		}
+
+		// =====================================================
+		// 6. KHÔNG TÌM THẤY
+		// =====================================================
+
+		if (!foundUser) {
+
+			if (nameEl)
+				nameEl.innerText =
+					"Không tìm thấy";
+
+			if (categoryEl)
+				categoryEl.innerText =
+					"---";
+
+			if (idEl)
+				idEl.innerText =
+					rawKeyword.toUpperCase();
+
+			if (rankEl)
+				rankEl.innerText =
+					"---";
+
+			if (violationsListEl) {
+
+				violationsListEl.innerHTML =
+					'<div style="color:red;font-style:italic;">' +
+					'Không tìm thấy thông tin cá nhân phù hợp với từ khóa.' +
+					'</div>';
+			}
+
+			return null;
+		}
+
+		// Cache user
+		window.individualAuditUserCache.set(
+			String(foundUser.id).toLowerCase(),
+			foundUser
+		);
+
+		// =====================================================
+		// 7. HIỂN THỊ THÔNG TIN CÁ NHÂN
+		// =====================================================
+
+		if (nameEl)
+			nameEl.innerText =
+				foundUser.fullName;
+
+		if (categoryEl)
+			categoryEl.innerText =
+				foundUser.category ||
+				foundUser.className ||
+				"Chưa phân loại";
+
+		if (idEl)
+			idEl.innerText =
+				foundUser.id;
+
+		// =====================================================
+		// 8. FIELD LABEL MAP
+		// =====================================================
+
+		const fieldLabelMap = {};
+
+		const currentFields =
+			window.cachedSchemaFields || [];
+
+		currentFields.forEach(f => {
+
+			if (f?.key) {
+
+				fieldLabelMap[f.key] =
+					f.label ||
+					f.key;
+			}
+		});
+
+		// =====================================================
+		// 9. MODULE CACHE
+		// =====================================================
+
+		const modulesCacheKey =
+			`${orgId}__${academicYearId}`;
+
+		let modules =
+			window.individualAuditModulesCache.get(
+				modulesCacheKey
+			);
+
+		if (modules) {
+
+			console.log(
+				"[AUDIT MODULE CACHE] HIT:",
+				modules.length
+			);
+
+		} else {
+
+			const modulesSnap =
+				await db
+					.collection("organizations")
+					.doc(orgId)
+					.collection("modules")
+					.get();
+
+			modules =
+				modulesSnap.docs.map(doc => ({
+					id: doc.id,
+					...doc.data()
+				}));
+
+			window.individualAuditModulesCache.set(
+				modulesCacheKey,
+				modules
+			);
+
+			console.log(
+				"[AUDIT MODULE READ] docs:",
+				modules.length
+			);
+		}
+
+		// =====================================================
+		// 10. QUERY AUDIT LOGS
+		// =====================================================
+		//
+		// Điểm quan trọng:
+		//
+		// Không còn:
+		//
+		//   .where("entityId", "==", foundUser.id)
+		//   .get()
+		//
+		// nếu có khoảng ngày.
+		//
+		// Khi có start/end:
+		//
+		//   entityId == UID
+		//   timestamp >= start
+		//   timestamp < end + 1 ngày
+		//
+		// =====================================================
+
+		const modulePromises =
+			modules.map(async mod => {
+
+				let query =
+					db
+						.collection("organizations")
+						.doc(orgId)
+						.collection("academicYears")
+						.doc(academicYearId)
+						.collection("modulesData")
+						.doc(mod.id)
+						.collection("auditLogs")
+						.where(
+							"entityId",
+							"==",
+							foundUser.id
+						);
+
+				// ------------------------------------------------
+				// LỌC THỜI GIAN NGAY TẠI FIRESTORE
+				// ------------------------------------------------
+
+				if (
+					startDate &&
+					endDate
+				) {
+
+					const startDateObj =
+						new Date(
+							`${startDate}T00:00:00`
+						);
+
+					const endDateObj =
+						new Date(
+							`${endDate}T00:00:00`
+						);
+
+					endDateObj.setDate(
+						endDateObj.getDate() + 1
+					);
+
+					const startTimestamp =
+						firebase.firestore.Timestamp.fromDate(
+							startDateObj
+						);
+
+					const endTimestamp =
+						firebase.firestore.Timestamp.fromDate(
+							endDateObj
+						);
+
+					query =
+						query
+							.where(
+								"timestamp",
+								">=",
+								startTimestamp
+							)
+							.where(
+								"timestamp",
+								"<",
+								endTimestamp
+							);
+				}
+
+				const logsSnap =
+					await query.get();
+
+				console.log(
+					"[AUDIT LOG READ]",
+					{
+						moduleId: mod.id,
+						count: logsSnap.size,
+						period:
+							startDate && endDate
+								? `${startDate} → ${endDate}`
+								: "ALL"
+					}
+				);
+
+				return {
+					moduleId: mod.id,
+					docs: logsSnap.docs
+				};
+			});
+
+		// =====================================================
+		// 11. ĐỌC CÁC MODULE SONG SONG
+		// =====================================================
+
+		const moduleResults =
+			await Promise.all(
+				modulePromises
+			);
+
+		// =====================================================
+		// 12. GOM KẾT QUẢ
+		// =====================================================
+
+		const allViolations = [];
+
+		let auditDocsRead = 0;
+
+		moduleResults.forEach(moduleResult => {
+
+			auditDocsRead +=
+				moduleResult.docs.length;
+
+			moduleResult.docs.forEach(logDoc => {
+
+				const logData =
+					logDoc.data() || {};
+
+				// ---------------------------------------------
+				// Thời gian
+				// ---------------------------------------------
+
+				let timeStr =
+					"Gần đây";
+
+				let sortTime = 0;
+
+				if (
+					logData.timestamp &&
+					typeof logData.timestamp.toDate ===
+						"function"
+				) {
+
+					const dateObj =
+						logData.timestamp.toDate();
+
+					sortTime =
+						dateObj.getTime();
+
+					timeStr =
+						dateObj.toLocaleString(
+							"vi-VN"
+						);
+				}
+
+				// ---------------------------------------------
+				// Changes
+				// ---------------------------------------------
+
+				const changes =
+					logData.changes || {};
+
+				const changeKeys =
+					Object.keys(changes);
+
+				if (changeKeys.length > 0) {
+
+					changeKeys.forEach(fieldKey => {
+
+						const val =
+							changes[fieldKey];
+
+						const valStr =
+							Array.isArray(val)
+								? val.join(", ")
+								: String(val);
+
+						const displayLabel =
+							fieldLabelMap[fieldKey] ||
+							fieldKey;
+
+						allViolations.push({
+
+							date:
+								timeStr,
+
+							sortTime:
+								sortTime,
+
+							content:
+								`<b>${escapeHtmlAudit(displayLabel)}:</b> ${escapeHtmlAudit(valStr)}`,
+
+							updater:
+								logData.updaterName ||
+								logData.updaterEmail ||
+								"Hệ thống"
+						});
+					});
+
+				} else {
+
+					const actionName =
+						logData.action ||
+						"Cập nhật dữ liệu";
+
+					allViolations.push({
+
+						date:
+							timeStr,
+
+						sortTime:
+							sortTime,
+
+						content:
+							`<b>${escapeHtmlAudit(actionName)}</b>`,
+
+						updater:
+							logData.updaterName ||
+							logData.updaterEmail ||
+							"Hệ thống"
+					});
+				}
+			});
+		});
+
+		// =====================================================
+		// 13. SẮP XẾP MỚI NHẤT → CŨ NHẤT
+		// =====================================================
+
+		allViolations.sort(
+			(a, b) =>
+				(b.sortTime || 0) -
+				(a.sortTime || 0)
+		);
+
+		// =====================================================
+		// 14. KẾT QUẢ
+		// =====================================================
+
+		const result = {
+
+			user:
+				foundUser,
+
+			violations:
+				allViolations,
+
+			startDate:
+				startDate || null,
+
+			endDate:
+				endDate || null,
+
+			auditDocsRead:
+				auditDocsRead,
+
+			moduleCount:
+				modules.length,
+
+			loadedAt:
+				Date.now()
+		};
+
+		// =====================================================
+		// 15. CACHE KẾT QUẢ
+		// =====================================================
+
+		window.individualAuditResultCache.set(
+			cacheKey,
+			result
+		);
+
+		console.log(
+			"======================================"
+		);
+
+		console.log(
+			"[AUDIT RESULT]",
+			{
+				uid:
+					foundUser.id,
+
+				name:
+					foundUser.fullName,
+
+				modules:
+					modules.length,
+
+				auditDocsRead:
+					auditDocsRead,
+
+				violations:
+					allViolations.length,
+
+				period:
+					startDate && endDate
+						? `${startDate} → ${endDate}`
+						: "ALL"
+			}
+		);
+
+		console.log(
+			"======================================"
+		);
+
+		// =====================================================
+		// 16. RENDER
+		// =====================================================
+
+		renderIndividualAuditSheet(result);
+
+		return result;
+
+	} catch (error) {
+
+		console.error(
+			"Lỗi tra cứu phiếu đối soát:",
+			error
+		);
+
+		if (violationsListEl) {
+
+			violationsListEl.innerHTML =
+				'<div style="color:red;font-style:italic;">' +
+				'Lỗi kết nối khi tải dữ liệu đối soát.' +
+				'</div>';
+		}
+
+		return null;
+	}
+}
+
+
+	// ==========================================
+	// RENDER PHIẾU ĐỐI SOÁT
+	// ==========================================
+	function renderIndividualAuditSheet(result) {
+
+		const nameEl =
+			document.getElementById(
+				"sheet-entity-name"
+			);
+
+		const categoryEl =
+			document.getElementById(
+				"sheet-entity-category"
+			);
+
+		const idEl =
+			document.getElementById(
+				"sheet-entity-id"
+			);
+
+		const rankEl =
+			document.getElementById(
+				"sheet-entity-rank"
+			);
+
+		const violationsListEl =
+			document.getElementById(
+				"sheet-violations-list"
+			);
+
+		if (!result || !result.user) {
+
+			if (nameEl)
+				nameEl.innerText =
+					"Không tìm thấy";
+
+			if (categoryEl)
+				categoryEl.innerText =
+					"---";
+
+			if (idEl)
+				idEl.innerText =
+					"---";
+
+			if (rankEl)
+				rankEl.innerText =
+					"---";
+
+			return;
+		}
+
+		const user =
+			result.user;
+
+		const violations =
+			result.violations || [];
+
+		if (nameEl)
+			nameEl.innerText =
+				user.fullName ||
+				user.id;
+
+		if (categoryEl)
+			categoryEl.innerText =
+				user.category ||
+				"Chưa phân loại";
+
+		if (idEl)
+			idEl.innerText =
+				user.id;
+
+		if (violations.length > 0) {
+
+			let html = "";
+
+			violations.forEach(v => {
+
+				html +=
+					`<div style="padding:6px 0;border-bottom:1px solid #eee;">` +
+					`• [${v.date}] ${v.content} ` +
+					`<span style="color:#6c757d;font-size:.85em;">` +
+					`(Ghi bởi: ${escapeHtmlAudit(v.updater)})` +
+					`</span>` +
+					`</div>`;
+			});
+
+			if (violationsListEl)
+				violationsListEl.innerHTML =
+					html;
+
+			if (rankEl)
+				rankEl.innerText =
+					`Có ${violations.length} lượt ghi nhận`;
+
+		} else {
+
+			if (violationsListEl) {
+
+				violationsListEl.innerHTML =
+					'<div style="color:#198754;font-style:italic;">' +
+					'Không có ghi nhận biến động nào trong kỳ này.' +
+					'</div>';
+			}
+
+			if (rankEl)
+				rankEl.innerText =
+					"Tốt";
+		}
+	}
+
+
+	// ==========================================
+	// ESCAPE HTML
+	// ==========================================
+	function escapeHtmlAudit(value) {
+
+		return String(value ?? "")
+			.replace(/&/g, "&amp;")
+			.replace(/</g, "&lt;")
+			.replace(/>/g, "&gt;")
+			.replace(/"/g, "&quot;")
+			.replace(/'/g, "&#039;");
 	}
 
 	function printIndividualAuditSheet() {
