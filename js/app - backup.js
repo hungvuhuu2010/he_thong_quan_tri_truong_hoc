@@ -5205,58 +5205,58 @@ async function handleCreateSchoolAdmin(event) {
 	//	3.1. Khởi tạo danh sách nhân sự
 	//===========================
 	async function loadCard3StaffMembers() {
-		const radioContainer = document.getElementById("card3-members-radio-container");
-		const categorySelect = document.getElementById("select-card3-group-category");
-		if (!radioContainer) return;
+	  const radioContainer = document.getElementById("card3-members-radio-container");
+	  const categorySelect = document.getElementById("select-card3-group-category");
+	  if (!radioContainer) return;
 
-		// Lấy danh sách từ biến cache toàn cục (đã được tải ở Thẻ 1)
-		const cachedList = window.currentLoadedEntities || (typeof currentLoadedEntities !== 'undefined' ? currentLoadedEntities : []);
+	  // 🌟 Nếu cache ở Thẻ 1 chưa có, tự động gọi tải ngầm luôn không cần sang Thẻ 1
+	  if (typeof currentLoadedEntities === 'undefined' || currentLoadedEntities.length === 0) {
+		try {
+		  const user = firebase.auth().currentUser;
+		  if (!user) return;
+		  const orgId = await getCurrentAdminOrgId(user.uid);
+		  const db = firebase.firestore();
+		  const snapshot = await db.collection("organizations").doc(orgId).collection("users").get();
 
-		// Nếu cache trống, nhắc người dùng sang Thẻ 1 tải dữ liệu để tránh lỗi phân quyền Firestore
-		if (!cachedList || cachedList.length === 0) {
-			if (categorySelect) {
-				categorySelect.innerHTML = '<option value="">-- Tất cả Tổ/Đơn vị --</option>';
+		  currentLoadedEntities = [];
+		  snapshot.forEach(doc => {
+			const data = doc.data();
+			const role = (data.role || "").toUpperCase();
+			if (role === "TEACHER" || role === "STUDENT") {
+			  currentLoadedEntities.push({ id: doc.id, ...data });
 			}
-			radioContainer.innerHTML = '<i style="color: #dc3545; font-size: 0.9em;">Chưa có dữ liệu nhân sự. Vui lòng sang <b>Thẻ 1 (Quản lý nhân sự)</b> để tải danh sách nhân sự trước khi sử dụng chức năng này!</i>';
-			return;
+		  });
+		  isEntitiesCacheLoaded = true;
+		} catch (e) {
+		  console.error("Lỗi tự động tải nhân sự:", e);
 		}
+	  }
 
-		// Lọc chỉ lấy giáo viên (TEACHER)
-		const teacherList = cachedList.filter(item => (item.role || "").toUpperCase() === "TEACHER");
+	  // Lọc chỉ lấy giáo viên (TEACHER)
+	  const teacherList = currentLoadedEntities.filter(item => (item.role || "").toUpperCase() === "TEACHER");
 
-		// Lấy danh sách tổ chuyên môn từ cache an toàn tuyệt đối không cần gọi thêm Firebase
-		const categoriesSet = new Set();
-		teacherList.forEach(staff => {
-			const cat = String(
-				staff.category || 
-				staff.organizationUnit || 
-				staff.department || 
-				staff.departmentName || 
-				staff.group || 
-				staff.team || 
-				""
-			).trim();
-			if (cat) {
-				categoriesSet.add(cat);
-			}
+	  if (teacherList.length === 0) {
+		radioContainer.innerHTML = '<i style="color: #6c757d; font-size: 0.9em;">Không tìm thấy nhân sự giáo viên nào trong hệ thống.</i>';
+		return;
+	  }
+
+	  // Đổ dữ liệu tổ chuyên môn vào ô select lọc
+	  const categoriesSet = new Set();
+	  teacherList.forEach(staff => {
+		if (staff.category || staff.organizationUnit) {
+		  categoriesSet.add(staff.category || staff.organizationUnit);
+		}
+	  });
+
+	  if (categorySelect) {
+		let catHtml = '<option value="">-- Tất cả Tổ/Đơn vị --</option>';
+		categoriesSet.forEach(cat => {
+		  catHtml += `<option value="${cat}">${cat}</option>`;
 		});
+		categorySelect.innerHTML = catHtml;
+	  }
 
-		// Đổ dữ liệu vào thẻ select
-		if (categorySelect) {
-			let catHtml = '<option value="">-- Tất cả Tổ/Đơn vị --</option>';
-			Array.from(categoriesSet).sort().forEach(cat => {
-				catHtml += `<option value="${cat}">${cat}</option>`;
-			});
-			categorySelect.innerHTML = catHtml;
-		}
-
-		// Kiểm tra nếu không có giáo viên
-		if (teacherList.length === 0) {
-			radioContainer.innerHTML = '<i style="color: #6c757d; font-size: 0.9em;">Không tìm thấy nhân sự giáo viên nào trong hệ thống.</i>';
-			return;
-		}
-
-		renderCard3StaffRadio(teacherList);
+	  renderCard3StaffRadio(teacherList);
 	}
 
 	// Render danh sách Radio nhân sự ra giao diện
@@ -6565,85 +6565,113 @@ async function loadGridSection2Weekly(
 
 
         // =====================================================
-        // 9. LẤY FIELD KPI CHÍNH THỨC THEO TARGET TYPE (ĐÃ FIX LỌC MODULE)
+        // 9. LẤY FIELD KPI CHÍNH THỨC
+        //
+        // Đọc:
+        //
+        // organizations/{orgId}/fields/{fieldKey}
+        //
+        // để lấy chính xác:
+        //
+        // isKpi
+        // scoreWeight
+        // kpiWeekly
+        // kpiOptions
         // =====================================================
+
         const kpiFieldsMap = {};
 
-        // Lấy danh sách các module phù hợp với targetType của Section 2 (ví dụ: grid-sec2-target-type)
-        const modulesSnapshot = await db
-            .collection("organizations")
-            .doc(orgId)
-            .collection("modules")
-            .where("targetType", "==", targetType) // Lọc đúng TEACHER hoặc STUDENT của section 2
-            .get();
 
-        const activeFieldKeys = new Set();
-        modulesSnapshot.forEach(modDoc => {
-            const modData = modDoc.data() || {};
-            
-            // Hỗ trợ linh hoạt cả dạng mảng chuỗi hoặc mảng object
-            if (Array.isArray(modData.fields)) {
-                modData.fields.forEach(f => {
-                    if (typeof f === "string" && f.trim()) {
-                        activeFieldKeys.add(f.trim());
-                    } else if (f && typeof f === "object") {
-                        const subKey = f.key || f.id || f.fieldKey || "";
-                        if (subKey) activeFieldKeys.add(String(subKey).trim());
-                    }
-                });
-            }
-            if (modData.fieldsMap && typeof modData.fieldsMap === "object") {
-                Object.keys(modData.fieldsMap).forEach(fKey => activeFieldKeys.add(String(fKey).trim()));
-            }
-        });
+        const fieldsSnapshot =
+            await db
+                .collection("organizations")
+                .doc(orgId)
+                .collection("fields")
+                .get();
 
-        console.log("🔍 [SEC2 DEBUG] activeFieldKeys cho " + targetType + ":", Array.from(activeFieldKeys));
-
-        const fieldsSnapshot = await db
-            .collection("organizations")
-            .doc(orgId)
-            .collection("fields")
-            .get();
 
         fieldsSnapshot.forEach(fieldDoc => {
-            const fieldData = fieldDoc.data() || {};
 
-            if (fieldData.isKpi !== true) {
+            const fieldData =
+                fieldDoc.data() || {};
+
+
+            if (
+                fieldData.isKpi !== true
+            ) {
                 return;
             }
 
-            const fieldKey = String(
-                fieldData.key ||
-                fieldDoc.id ||
-                ""
-            ).trim();
+
+            const fieldKey =
+                String(
+                    fieldData.key ||
+                    fieldDoc.id ||
+                    ""
+                ).trim();
+
 
             if (!fieldKey) {
                 return;
             }
 
-            // Nếu module có cấu hình giới hạn trường thì kiểm tra
-            if (activeFieldKeys.size > 0 && !activeFieldKeys.has(fieldKey)) {
-                return;
-            }
 
             kpiFieldsMap[fieldKey] = {
-                id: fieldKey,
-                key: fieldKey,
-                name: fieldData.label || fieldKey,
-                label: fieldData.label || fieldKey,
-                type: fieldData.type || "text",
-                scoreWeight: Number(fieldData.scoreWeight ?? 0),
-                weeklyThreshold: Number(fieldData.kpiWeekly ?? 0),
-                kpiOptions: (fieldData.kpiOptions && typeof fieldData.kpiOptions === "object") ? fieldData.kpiOptions : {},
-                options: Array.isArray(fieldData.options) ? fieldData.options : []
+
+                id:
+                    fieldKey,
+
+                key:
+                    fieldKey,
+
+                name:
+                    fieldData.label ||
+                    fieldKey,
+
+                label:
+                    fieldData.label ||
+                    fieldKey,
+
+                type:
+                    fieldData.type ||
+                    "text",
+
+                scoreWeight:
+                    Number(
+                        fieldData.scoreWeight ?? 0
+                    ),
+
+                weeklyThreshold:
+                    Number(
+                        fieldData.kpiWeekly ?? 0
+                    ),
+
+                kpiOptions:
+                    (
+                        fieldData.kpiOptions &&
+                        typeof fieldData.kpiOptions === "object"
+                    )
+                        ? fieldData.kpiOptions
+                        : {},
+
+                options:
+                    Array.isArray(
+                        fieldData.options
+                    )
+                        ? fieldData.options
+                        : []
             };
         });
 
-        const kpiFieldsList = Object.values(kpiFieldsMap);
+
+        const kpiFieldsList =
+            Object.values(
+                kpiFieldsMap
+            );
+
 
         console.log(
-            "📊 [SEC2 DEBUG] KPI WEEKLY FIELDS chính thức sau khi lọc cho " + targetType + ":",
+            "📊 KPI WEEKLY FIELDS:",
             kpiFieldsList
         );
 
@@ -6774,12 +6802,12 @@ async function loadGridSection2Weekly(
         // 12. LẤY MODULE
         // =====================================================
 
-        //const modulesSnapshot =
-        //    await db
-        //        .collection("organizations")
-        //        .doc(orgId)
-        //        .collection("modules")
-        //        .get();
+        const modulesSnapshot =
+            await db
+                .collection("organizations")
+                .doc(orgId)
+                .collection("modules")
+                .get();
 
 
         const moduleDocs =
@@ -7924,86 +7952,105 @@ async function loadGridSection3Monthly(forceRefresh = false) {
 
 
         // =====================================================
-        // 11. LẤY TOÀN BỘ FIELD KPI CHÍNH THỨC THEO TARGET TYPE (ĐÃ SỬA CÁCH ĐỌC OBJECT)
+        // 11. LẤY TOÀN BỘ FIELD KPI CHÍNH THỨC
+        //
+        // organizations/{orgId}/fields/{fieldKey}
+        //
+        // KHÔNG lấy KPI config từ modules.fields nữa.
+        //
+        // Đây là điểm quan trọng để lấy đúng:
+        // isKpi
+        // scoreWeight
+        // kpiOptions
         // =====================================================
+
         const kpiFieldsMap = {};
 
-        const modulesSnapshot = await db
-            .collection("organizations")
-            .doc(orgId)
-            .collection("modules")
-            .where("targetType", "==", targetType) // Lọc đúng TEACHER hoặc STUDENT
-            .get();
+        const fieldsSnapshot =
+            await db
+                .collection("organizations")
+                .doc(orgId)
+                .collection("fields")
+                .get();
 
-        const activeFieldKeys = new Set();
-        
-        modulesSnapshot.forEach(modDoc => {
-            const modData = modDoc.data() || {};
-            
-            // Xử lý linh hoạt: mảng fields có thể là chuỗi hoặc object (ví dụ: {key: '...', name: '...'})
-            if (Array.isArray(modData.fields)) {
-                modData.fields.forEach(f => {
-                    if (typeof f === "string" && f.trim()) {
-                        activeFieldKeys.add(f.trim());
-                    } else if (f && typeof f === "object") {
-                        const subKey = f.key || f.id || f.fieldKey || "";
-                        if (subKey) activeFieldKeys.add(String(subKey).trim());
-                    }
-                });
-            }
-            if (modData.fieldsMap && typeof modData.fieldsMap === "object") {
-                Object.keys(modData.fieldsMap).forEach(fKey => activeFieldKeys.add(String(fKey).trim()));
-            }
-        });
-
-        console.log("🔍 [DEBUG] activeFieldKeys sau khi sửa:", Array.from(activeFieldKeys));
-
-        const fieldsSnapshot = await db
-            .collection("organizations")
-            .doc(orgId)
-            .collection("fields")
-            .get();
 
         fieldsSnapshot.forEach(fieldDoc => {
-            const fieldData = fieldDoc.data() || {};
 
-            if (fieldData.isKpi !== true) {
+            const fieldData =
+                fieldDoc.data() || {};
+
+            if (
+                fieldData.isKpi !== true
+            ) {
                 return;
             }
 
-            const fieldKey = String(
-                fieldData.key ||
-                fieldDoc.id ||
-                ""
-            ).trim();
+            const fieldKey =
+                String(
+                    fieldData.key ||
+                    fieldDoc.id ||
+                    ""
+                ).trim();
 
             if (!fieldKey) {
                 return;
             }
 
-            // Nếu module có cấu hình giới hạn trường thì kiểm tra
-            if (activeFieldKeys.size > 0 && !activeFieldKeys.has(fieldKey)) {
-                return;
-            }
-
             kpiFieldsMap[fieldKey] = {
+
                 id: fieldKey,
+
                 key: fieldKey,
-                name: fieldData.label || fieldKey,
-                label: fieldData.label || fieldKey,
-                type: fieldData.type || "text",
-                scoreWeight: Number(fieldData.scoreWeight ?? 0),
-                kpiWeekly: Number(fieldData.kpiWeekly ?? 0),
-                kpiMonthly: Number(fieldData.kpiMonthly ?? 0),
-                kpiOptions: (fieldData.kpiOptions && typeof fieldData.kpiOptions === "object") ? fieldData.kpiOptions : {},
-                options: Array.isArray(fieldData.options) ? fieldData.options : []
+
+                name:
+                    fieldData.label ||
+                    fieldKey,
+
+                label:
+                    fieldData.label ||
+                    fieldKey,
+
+                type:
+                    fieldData.type ||
+                    "text",
+
+                scoreWeight:
+                    Number(
+                        fieldData.scoreWeight ?? 0
+                    ),
+
+                kpiWeekly:
+                    Number(
+                        fieldData.kpiWeekly ?? 0
+                    ),
+
+                kpiMonthly:
+                    Number(
+                        fieldData.kpiMonthly ?? 0
+                    ),
+
+                kpiOptions:
+                    (
+                        fieldData.kpiOptions &&
+                        typeof fieldData.kpiOptions === "object"
+                    )
+                        ? fieldData.kpiOptions
+                        : {},
+
+                options:
+                    Array.isArray(fieldData.options)
+                        ? fieldData.options
+                        : []
             };
         });
 
-        const kpiFieldsList = Object.values(kpiFieldsMap);
+
+        const kpiFieldsList =
+            Object.values(kpiFieldsMap);
+
 
         console.log(
-            "📊 [DEBUG] KPI fields chính thức sau khi sửa cho " + targetType + ":",
+            "📊 KPI fields chính thức:",
             kpiFieldsList
         );
 
@@ -8140,12 +8187,12 @@ async function loadGridSection3Monthly(forceRefresh = false) {
         // modules/{moduleId}
         // =====================================================
 
-        //const modulesSnapshot =
-        //    await db
-        //        .collection("organizations")
-        //        .doc(orgId)
-        //        .collection("modules")
-        //       .get();
+        const modulesSnapshot =
+            await db
+                .collection("organizations")
+                .doc(orgId)
+                .collection("modules")
+                .get();
 
 
         const moduleDocs =
