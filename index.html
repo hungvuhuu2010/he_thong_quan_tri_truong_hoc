@@ -370,8 +370,31 @@
 					</form>
 
 				  <h4>Danh sách trường thông tin đã định nghĩa:</h4>
-					<div style="margin-bottom: 8px;">
-					  <input type="text" id="schema-fields-search-input" oninput="filterSchemaFieldsList()" placeholder="🔍 Tìm theo Mã trường, Tên hiển thị...">
+					<div style="margin-bottom: 8px; display: flex; gap: 6px; align-items: center;">
+						<input
+							type="text"
+							id="schema-fields-search-input"
+							oninput="filterSchemaFieldsList()"
+							placeholder="🔍 Tìm theo Mã trường, Tên hiển thị..."
+							style="flex: 1;"
+						>
+
+						<button
+							type="button"
+							onclick="exportVisibleSchemaFieldsExcel()"
+							style="
+								padding: 6px 12px;
+								border: 1px solid #198754;
+								background: #198754;
+								color: white;
+								border-radius: 4px;
+								cursor: pointer;
+								white-space: nowrap;
+							"
+							title="Xuất các trường đang hiển thị"
+						>
+							Xuất Excel
+						</button>
 					</div>
 					<div style="max-height: 200px; overflow-y: auto;">
 					  <ul id="schema-fields-list" style="list-style: none; padding: 0; margin: 0;">
@@ -400,7 +423,7 @@
 					  <option value="TEACHER">Đối tượng quản lý (VD: Giáo viên theo Tổ)</option>
 				    </select>
 
-				    <div style="margin-bottom: 15px;">     
+				    <div style="margin-bottom: 15px width: 100%; box-sizing border-box;">     
 					  <fieldset style="padding: 10px; border-radius: 6px; border: 1px solid #ccc; background: #fafafa;">
 					    <legend style="color: #0d6efd; font-weight: bold;">Tích chọn các trường thông tin cho vào bài toán:</legend>
 					  
@@ -984,7 +1007,60 @@
 						</tbody>
 					</table>
 				</div>
+				
+				<!-- KHỐI TRA CỨU & PHIẾU ĐỐI SOÁT CÁ NHÂN (DÀNH RIÊNG CHO EMPLOYEE) -->
+				<details style="border: 1px solid #0d6efd; padding: 12px; border-radius: 6px; margin-bottom: 15px; background: #fff;">
+					<summary style="font-weight: bold; cursor: pointer; color: #0d6efd;">
+						<i class="fa-solid fa-file-invoice"></i> Tra cứu &amp; Xuất Phiếu đối soát chi tiết sự việc theo cá nhân học sinh
+					</summary>
+					<div style="margin-top: 10px;">
+						
+						<div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: #f8f9fa; padding: 10px; border-radius: 6px; border: 1px solid #dee2e6; margin-bottom: 15px;">
+							<input type="text" id="emp-lookup-entity-keyword" placeholder="Nhập Mã định danh hoặc Tên học sinh (VD: HS1001)..." style="flex: 1; min-width: 220px; margin: 0; padding: 6px 10px; border: 1px solid #ced4da; border-radius: 4px;">
+							<button type="button" onclick="searchEmployeeIndividualAuditSheet()" style="background: #0d6efd; color: white; border: none; padding: 7px 15px; border-radius: 4px; cursor: pointer;">
+								<i class="fa-solid fa-magnifying-glass"></i> Tra cứu Phiếu
+							</button>
+							<button type="button" onclick="printEmployeeIndividualAuditSheet()" style="background: #198754; color: white; border: none; padding: 7px 15px; border-radius: 4px; cursor: pointer;">
+								<i class="fa-solid fa-print"></i> In / Xuất Phiếu đối soát
+							</button>
+						</div>
+
+						<div id="emp-printable-audit-sheet" style="background: #ffffff; border: 2px solid #333; padding: 20px; border-radius: 8px; max-width: 800px; margin: 0 auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1); box-sizing: border-box;">
+							
+							<div style="text-align: center; margin-bottom: 20px; border-bottom: 2px double #333; padding-bottom: 10px;">
+								<h2 style="margin: 0; color: #000; text-transform: uppercase; font-size: 1.2em;">PHIẾU ĐỐI SOÁT NỀN NẾP &amp; LỖI KPI HỌC SINH</h2>
+								<small id="emp-sheet-date-range-label" style="font-style: italic; color: #555;">(Kỳ đối soát: Tất cả dữ liệu)</small>
+							</div>
+
+							<div style="font-size: 0.95em; line-height: 1.6; margin-bottom: 15px; border-bottom: 1px dashed #ccc; padding-bottom: 10px;">
+								<div><b>1) Họ và tên học sinh:</b> <span id="emp-sheet-entity-name" style="color: #0d6efd; font-weight: bold;">--</span></div>
+								<div><b>2) Lớp:</b> <span id="emp-sheet-entity-category">--</span></div>
+								<div><b>3) Mã định danh:</b> <span id="emp-sheet-entity-id" style="font-family: monospace; font-weight: bold;">--</span></div>
+								<div><b>4) Tổng kết thi đua:</b> <span id="emp-sheet-entity-rank">--</span></div>
+							</div>
+
+							<div style="font-size: 0.95em;">
+								<div style="font-weight: bold; margin-bottom: 8px; color: #dc3545;">5) Chi tiết các lỗi vi phạm / ghi nhận:</div>
+								<div id="emp-sheet-violations-list" style="padding-left: 10px;">
+									<i style="color: #6c757d;">Nhập Mã định danh hoặc Tên học sinh ở trên và bấm "Tra cứu Phiếu" để hiển thị dữ liệu.</i>
+								</div>
+							</div>
+
+							<div style="margin-top: 25px; display: flex; justify-content: space-between; text-align: center; font-size: 0.85em; padding-top: 15px; border-top: 1px solid #eee; flex-wrap: wrap; gap: 15px;">
+								<div style="flex: 1; min-width: 150px;">
+									<b>GVCN / Phụ huynh xác nhận</b><br>
+									<i>(Ký và ghi rõ họ tên)</i>
+								</div>
+								<div style="flex: 1; min-width: 150px;">
+									<b>Ban Giám hiệu / TĐN xác nhận</b><br>
+									<i>(Ký và đóng dấu)</i>
+								</div>
+							</div>
+						</div>
+					</div>
+				</details>
 			</div>
+			
 
 			<!-- NỘI DUNG THẺ 5: TỔ CHUYÊN MÔN -->
 			<div id="emp-tab-sec-5" style="display: none;">
