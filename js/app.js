@@ -1445,23 +1445,21 @@ async function handleCreateSchoolAdmin(event) {
 					const email = getRowValue(row, ["Email", "Thư điện tử", "Mail"]).toLowerCase().trim();
 
 					if (code && name) {
-						// 1. Lưu thông tin chi tiết vào organizations/{orgId}/users/{userId}
-						const userId = email ? email : db.collection("organizations").doc(orgId).collection("users").doc().id;
-
-						const userRef = db.collection("organizations").doc(orgId).collection("users").doc(userId);
+						// 🌟 1. Tạo document trong subcollection users của tổ chức với ID ngẫu nhiên (như cấu trúc ban đầu)[cite: 4]
+						const userRef = db.collection("organizations").doc(orgId).collection("users").doc();
 						await userRef.set({
-							id: userId,
-							code: code,
+							id: userRef.id,          // ID ngẫu nhiên của document
+							code: code,              // Mã định danh thực tế từ file Excel (ví dụ số căn cước)
 							fullName: name,
 							category: category,
 							email: email,
-							role: entityType, // "TEACHER" hoặc "STUDENT"
-							activated: true,
+							role: entityType,        // "TEACHER" hoặc "STUDENT"
+							activated: Boolean(email), // Đã kích hoạt nếu có email
 							orgId: orgId,
 							updatedAt: (typeof getVietnamTimestamp === 'function' ? getVietnamTimestamp() : new Date().toISOString())
 						}, { merge: true });
 
-						// 🌟 2. Nếu dòng dữ liệu có Email, tự động tạo/cập nhật bản ghi tại collection gốc `/emails/{email}`
+						// 🌟 2. Nếu có email, tạo thêm document tại collection gốc `/emails/{email}` để phục vụ đăng nhập[cite: 4]
 						if (email) {
 							const emailRef = db.collection("emails").doc(email);
 							await emailRef.set({
@@ -1474,7 +1472,7 @@ async function handleCreateSchoolAdmin(event) {
 							}, { merge: true });
 						}
 
-						// 3. Lưu danh mục Tổ / Lớp vào collection `categories` theo đúng năm học
+						// 3. Lưu danh mục Tổ / Lớp vào collection `categories` theo đúng năm học[cite: 4]
 						if (category) {
 							const categoryDocRef = db.collection("organizations")
 								.doc(orgId)
@@ -1497,7 +1495,7 @@ async function handleCreateSchoolAdmin(event) {
 				if (countSuccess === 0) {
 					alert("Không tìm thấy dữ liệu hợp lệ! Vui lòng kiểm tra lại tên cột trong file Excel.");
 				} else {
-					alert(`Import thành công ${countSuccess} bản ghi, đồng thời đồng bộ bảng emails và danh mục Tổ/Lớp thành công!`);
+					alert(`Import thành công ${countSuccess} bản ghi vào tổ chức và đồng bộ bảng emails thành công![cite: 4]`);
 					fileInput.value = "";
 					
 					window.isEntitiesCacheLoaded = false;
@@ -6665,7 +6663,9 @@ async function loadGridSection2Weekly(
 
                 id:
                     entityId,
-
+				
+				code: userData.code || entityId, // 🌟 Bổ sung dòng này để lấy mã định danh nội bộ từ Firestore
+				
                 fullName:
                     userData.fullName ||
                     entityId,
@@ -6824,7 +6824,9 @@ async function loadGridSection2Weekly(
 
                 id:
                     entityId,
-
+				
+				code: user.code, // 🌟 Bổ sung dòng này để mang code sang bảng tổng hợp
+				
                 name:
                     user.fullName ||
                     entityId,
@@ -7612,7 +7614,7 @@ async function loadGridSection2Weekly(
 		const keyword = (filterKeyword || "").trim().toLowerCase();
 		const dataList = rawDataList.filter(item => {
 			if (!keyword) return true;
-			const matchId = (item.id || "").toLowerCase().includes(keyword);
+			const matchId = (item.code || "").toLowerCase().includes(keyword);
 			const matchName = (item.name || "").toLowerCase().includes(keyword);
 			const matchClass = (item.className || "").toLowerCase().includes(keyword);
 			return matchId || matchName || matchClass;
@@ -7629,7 +7631,7 @@ async function loadGridSection2Weekly(
 		dataList.forEach(item => {
 			let rowHtml = `
 			  <tr style="border-bottom: 1px solid #dee2e6;">
-				<td style="vertical-align: middle;"><b>${item.id}</b></td>
+				<td style="vertical-align: middle;"><b>${item.code || item.id}</b></td>
 				<td style="vertical-align: middle;">${item.name}</td>
 				<td style="vertical-align: middle; text-align: center;"><span style="background: #e9ecef; padding: 2px 6px; border-radius: 4px; font-size: 0.9em;">${item.className || "Chưa phân loại"}</span></td>
 			`;
@@ -7999,21 +8001,12 @@ async function loadGridSection3Monthly(forceRefresh = false) {
             }
 
             usersMap[entityId] = {
-
-                id: entityId,
-
-                fullName:
-                    userData.fullName ||
-                    entityId,
-
-                category:
-                    userData.category ||
-                    userData.className ||
-                    userData.organizationUnit ||
-                    "Chưa phân loại",
-
-                role: role
-            };
+				id: entityId,
+				code: userData.code || entityId, // 🌟 Thêm dòng này để lấy mã định danh nội bộ (cccd/mã gv/mã hs)
+				fullName: userData.fullName || entityId,
+				category: userData.category || userData.className || "Chưa phân loại",
+				role: role
+			};
         });
 
 
@@ -8155,15 +8148,10 @@ async function loadGridSection3Monthly(forceRefresh = false) {
                 usersMap[entityId];
 
             summaryMap[entityId] = {
-
-                id:
-                    entityId,
-
-                name:
-                    user.fullName,
-
-                className:
-                    user.category,
+				id: entityId,
+				code: user.code, // 🌟 Truyền code vào đây
+				name: user.fullName,
+				className: user.category,
 
                 // Tổng tất cả lượt KPI
                 totalCount:
@@ -9188,37 +9176,13 @@ else if (
 		dataList.forEach(item => {
 
 			let rowHtml = `
-
-				<tr
-					style="
-						border-bottom:1px solid #dee2e6;
-					"
-				>
-
-					<!-- =====================================
-						 MÃ ID
-						 ===================================== -->
-
-					<td
-						style="
-							vertical-align:middle;
-						"
-					>
-						<b>
-							${item.id || ""}
-						</b>
+				<tr style="border-bottom:1px solid #dee2e6;">
+					<!-- MÃ ID -->
+					<td style="vertical-align:middle;">
+						<b>${item.code || item.id || ""}</b>
 					</td>
-
-
-					<!-- =====================================
-						 HỌ VÀ TÊN
-						 ===================================== -->
-
-					<td
-						style="
-							vertical-align:middle;
-						"
-					>
+					<!-- HỌ VÀ TÊN -->
+					<td style="vertical-align:middle;">
 						${item.name || ""}
 					</td>
 
@@ -11016,8 +10980,9 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 		listToRender.forEach((item) => {
 			const savedData = item.savedRecord || {};
 
-			bodyHtml += `<tr data-id="${item.id}">
-				<td style="font-weight: bold; text-align: center; vertical-align: middle;">${item.id}</td>
+			// 🌟 Sử dụng item.code để hiển thị ở cột Mã ID, giữ nguyên item.id ở data-id để thao tác database
+			bodyHtml += `<tr data-id="${item.code}">
+				<td style="font-weight: bold; text-align: center; vertical-align: middle;">${item.code || item.id}</td>
 				<td style="vertical-align: middle;">${item.fullName || "Chưa cập nhật"}</td>
 				<td style="text-align: center; vertical-align: middle;">${item.category || item.classOrGroup || "-"}</td>`;
 
@@ -11031,16 +10996,15 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 
 				let cellHtml = `<div style="display: flex; flex-direction: column; gap: 6px; align-items: stretch; text-align: left;">`;
 
-				// 1. XỬ LÝ CHO KIỂU DỮ LIỆU NHIỀU LỰA CHỌN (OPTIONS / CHECKBOX) - PHÂN QUYỀN RẠCH RÒI
+				// 1. XỬ LÝ CHO KIỂU DỮ LIỆU NHIỀU LỰA CHỌN (OPTIONS / CHECKBOX)
 				if (fieldType === 'options' && Array.isArray(field.options) && field.options.length > 0) {
-					// Hỗ trợ cả cấu trúc cũ (mảng chuỗi) hoặc cấu trúc mới (mảng đối tượng lưu chi tiết email)
 					const storedValueRaw = storedValue;
-					let storedOptionsList = []; // Danh sách các lựa chọn kèm theo metadata người tích
+					let storedOptionsList = [];
 
 					if (Array.isArray(storedValueRaw)) {
-						storedOptionsList = storedValueRaw.map(item => {
-							if (typeof item === 'object' && item !== null) return item;
-							return { value: item, email: fieldEmail, by: fieldLabelBy }; // Tương thích dữ liệu cũ
+						storedOptionsList = storedValueRaw.map(optItem => {
+							if (typeof optItem === 'object' && optItem !== null) return optItem;
+							return { value: optItem, email: fieldEmail, by: fieldLabelBy };
 						});
 					} else if (storedValueRaw) {
 						storedOptionsList = [{ value: storedValueRaw, email: fieldEmail, by: fieldLabelBy }];
@@ -11049,16 +11013,12 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 					cellHtml += `<div style="display: flex; flex-direction: column; gap: 4px; background: #f8f9fa; padding: 6px; border-radius: 4px; border: 1px solid #dee2e6;">`;
 					
 					field.options.forEach(opt => {
-						// Tìm xem option này đã được ai tích chưa
 						const matchRecord = storedOptionsList.find(x => x.value === opt);
 						const isChecked = !!matchRecord;
 						
-						// Kiểm tra xem option này có phải do CHÍNH MÌNH tích không
 						const recordEmail = matchRecord ? (matchRecord.email || "").toLowerCase().trim() : "";
 						const isMyOptToday = isChecked && (recordEmail === myEmail);
 
-						// Điều kiện khóa: Nếu đã được tích bởi người khác -> Khóa (disabled)
-						// Nếu chưa tích hoặc do chính mình tích -> Cho phép tương tác
 						const isDisabled = isChecked && !isMyOptToday;
 						const disabledAttr = isDisabled ? 'disabled' : '';
 						const opacityStyle = isDisabled ? 'opacity: 0.6; cursor: not-allowed;' : 'cursor: pointer;';
@@ -11079,7 +11039,7 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 					
 					cellHtml += `</div>`;
 				}
-				// 2. XỬ LÝ CHO KIỂU DỮ LIỆU VĂN BẢN / SỐ (TEXT / NUMBER) - Duyệt mảng nhiều mốc trong ngày
+				// 2. XỬ LÝ CHO KIỂU DỮ LIỆU VĂN BẢN / SỐ (TEXT / NUMBER)
 				else {
 					let logsArray = Array.isArray(storedValue) ? storedValue : (storedValue ? [{ id: 'legacy', content: storedValue, email: fieldEmail, by: fieldLabelBy, time: 'Hôm nay' }] : []);
 
@@ -11112,7 +11072,6 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 						});
 					}
 
-					// Ô input luôn sẵn sàng để nhập thêm mốc mới trong ngày
 					cellHtml += `
 						<input type="text" class="emp-dynamic-input" 
 							data-id="${item.id}" 
@@ -11945,7 +11904,7 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 			}
 
 			// ============================================================
-			// 2. LẤY DANH SÁCH HỌC SINH
+			// 2. LẤY DANH SÁCH HỌC SINH (Lưu thêm code để hiển thị)
 			// ============================================================
 
 			if (
@@ -11964,6 +11923,7 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 					const uData = uDoc.data();
 
 					window.cachedUsersMap[uDoc.id] = {
+						code: uData.code || uDoc.id, // 🌟 Lưu mã định danh thực tế
 						fullName: uData.fullName || uDoc.id,
 						category: uData.category || uData.className || ""
 					};
@@ -11976,6 +11936,7 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 				if (homeroomClasses.includes(uInfo.category)) {
 					homeroomStudents.push({
 						id: uId,
+						code: uInfo.code || uId, // 🌟 Truyền code sang đối tượng học sinh
 						name: uInfo.fullName,
 						category: uInfo.category
 					});
@@ -12051,9 +12012,9 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 			// ============================================================
 
 			let headerHtml = `
-				<th style="width: 90px;">Mã ID</th>
+				<th style="width: 90px; text-align: center;">Mã ID</th>
 				<th style="width: 170px;">Họ và Tên</th>
-				<th style="width: 100px;">Lớp</th>
+				<th style="width: 100px; text-align: center;">Lớp</th>
 			`;
 
 			kpiFieldsList.forEach(field => {
@@ -12083,7 +12044,7 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 			}
 
 			// ============================================================
-			// 6. KHỞI TẠO THỐNG KÊ
+			// 6. KHỞI TẠO THỐNG KÊ (Lưu kèm code)
 			// ============================================================
 
 			let studentStatsMap = {};
@@ -12091,6 +12052,7 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 			homeroomStudents.forEach(st => {
 				studentStatsMap[st.id] = {
 					id: st.id,
+					code: st.code, // 🌟 Lưu mã code để render lên bảng
 					name: st.name,
 					className: st.category,
 					totalCount: 0,
@@ -12122,7 +12084,6 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 
 				const dayOfWeek = now.getDay();
 
-				// Thứ 2 là ngày đầu tuần
 				const diffToMonday =
 					dayOfWeek === 0
 						? -6
@@ -12158,10 +12119,6 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 				startDateStr = formatDateLocal(firstDay);
 				endDateStr = formatDateLocal(lastDay);
 			}
-
-			// ============================================================
-			// HÀM CỘNG DỮ LIỆU RECORD VÀO HỌC SINH
-			// ============================================================
 
 			const processRecord = (recDoc) => {
 
@@ -12228,19 +12185,6 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 					.doc(modDoc.id)
 					.collection("records");
 
-				// --------------------------------------------------------
-				// DAILY
-				// --------------------------------------------------------
-				// recordId:
-				//     entityId_YYYY-MM-DD
-				//
-				// Ví dụ:
-				//     HS001_2026-09-16
-				//
-				// Không query collection.
-				// Đọc thẳng document.
-				// --------------------------------------------------------
-
 				if (mode === "daily") {
 
 					const dailyReadPromises =
@@ -12261,13 +12205,8 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 
 					await Promise.all(dailyReadPromises);
 
-				// --------------------------------------------------------
-				// WEEKLY / MONTHLY
-				// --------------------------------------------------------
 				} else {
 
-					// Firestore "in" tối đa 30 phần tử.
-					// Chia học sinh thành từng nhóm 30.
 					const studentIds = homeroomStudents.map(
 						student => student.id
 					);
@@ -12280,7 +12219,6 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 						);
 					}
 
-					// Chạy toàn bộ query của module song song.
 					const queryPromises = chunks.map(async ids => {
 
 						const snap = await recordsRef
@@ -12401,15 +12339,16 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 
 				html += `
 					<tr style="border-bottom: 1px solid #dee2e6;">
-						<td style="font-family: monospace; font-weight: bold;">
-							${item.id}
+						<!-- 🌟 Hiển thị item.code thay vì item.id -->
+						<td style="font-family: monospace; font-weight: bold; text-align: center;">
+							${item.code}
 						</td>
 
 						<td>
 							${item.name}
 						</td>
 
-						<td>
+						<td style="text-align: center;">
 							<span style="
 								background: #e9ecef;
 								padding: 2px 6px;
