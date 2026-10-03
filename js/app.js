@@ -122,6 +122,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Theo dõi trạng thái đăng nhập Firebase Auth
   firebase.auth().onAuthStateChanged(async (user) => {
+
+console.log("Bắt đầu phân quyền cho user:");
+		
     if (user) {
       // Người dùng đã đăng nhập, tiến hành nhận diện vai trò
       await resolveUserRoleAndDashboard(user);
@@ -147,23 +150,22 @@ async function handleLogin(e) {
     await firebase.auth().signInWithEmailAndPassword(email, password);
     // Trạng thái thành công sẽ được bắt tự động bởi onAuthStateChanged
   } catch (error) {
-    console.error("Lỗi đăng nhập:", error);
-    switch (error.code) {
-      case "auth/invalid-email":
-        errorElement.textContent = "Địa chỉ email không hợp lệ.";
-        break;
-      case "auth/user-not-found":
-      case "auth/wrong-password":
-      case "auth/invalid-credential":
-        errorElement.textContent = "Email hoặc mật khẩu không chính xác.";
-        break;
-      default:
-        errorElement.textContent = "Lỗi đăng nhập: " + error.message;
-        break;
-    }
-  }
+		console.error("❌ Lỗi đăng nhập chi tiết từ Firebase Auth:", error.code, error.message);
+		switch (error.code) {
+		  case "auth/invalid-email":
+			errorElement.textContent = "Địa chỉ email không hợp lệ.";
+			break;
+		  case "auth/user-not-found":
+		  case "auth/wrong-password":
+		  case "auth/invalid-credential":
+			errorElement.textContent = "Email hoặc mật khẩu không chính xác.";
+			break;
+		  default:
+			errorElement.textContent = "Lỗi đăng nhập: " + error.message;
+			break;
+		}
+	}
 }
-
 	// Xử lý đăng xuất
 	async function handleLogout() {
 	  try {
@@ -223,18 +225,26 @@ async function handleLogin(e) {
 
 	// Hàm phân quyền và nạp giao diện tương ứng theo yêu cầu Multi-Tenant
 	async function resolveUserRoleAndDashboard(user) {
+		console.log("🔍 [DEBUG LOGIN] Bắt đầu phân quyền cho user:", {
+			uid: user.uid,
+			email: user.email
+		});
+
 		const db = firebase.firestore();
 		const email = user.email ? user.email.toLowerCase().trim() : "";
 
-		// 🌟 Gán thông tin cơ bản định danh người dùng ngay từ đầu
+		// Gán thông tin cơ bản định danh người dùng ngay từ đầu
 		window.currentUserEmailGlobal = email;
 		window.currentUserUid = user.uid;
 
 		try {
 			// Bước 1: Kiểm tra System Owner
+			console.log("🔍 [DEBUG LOGIN] Đang kiểm tra collection gốc /users/{uid}...");
 			const ownerDoc = await db.collection("users").doc(user.uid).get();
+			console.log("🔍 [DEBUG LOGIN] Kết quả /users/{uid} exists:", ownerDoc.exists);
 			
 			if (ownerDoc.exists && ownerDoc.data().role === "OWNER") {
+				console.log("👑 [DEBUG LOGIN] Phát hiện System Owner!");
 				window.currentOrgIdGlobal = null;
 				window.currentUserRoleGlobal = "OWNER";
 				window.currentAcademicYearsGlobal = [];
@@ -245,30 +255,35 @@ async function handleLogin(e) {
 			}
 
 			// Bước 2: Đọc phân quyền từ collection gốc "emails"
+			console.log("🔍 [DEBUG LOGIN] Đang đọc collection gốc /emails với docId:", email);
 			const emailDoc = await db.collection("emails").doc(email).get();
+			console.log("🔍 [DEBUG LOGIN] Kết quả /emails/{email} exists:", emailDoc.exists);
 
 			if (emailDoc.exists) {
 				const userData = emailDoc.data();
+				console.log("✅ [DEBUG LOGIN] Dữ liệu đọc được từ bảng emails:", userData);
 				
 				const orgId = userData.orgId;
-				const role = userData.role || "EMPLOYEE"; // "ADMIN" hoặc "EMPLOYEE"
+				const role = userData.role || "EMPLOYEE"; // "ADMIN" hoặc "EMPLOYEE" / "TEACHER"
 				const academicYears = userData.academicYears || [];
 				const fullName = userData.fullName || user.email;
 
-				// 🌟 1. Gán trọn bộ biến toàn cục cốt lõi
+				// Gán trọn bộ biến toàn cục cốt lõi
 				window.currentOrgIdGlobal = orgId;
 				window.currentUserRoleGlobal = role;
 				window.currentAcademicYearsGlobal = academicYears;
 				window.currentUserNameGlobal = fullName;
 
-				// Đồng thời gán vào biến cục bộ (nếu có khai báo ngoài scope)
 				if (typeof currentOrgIdGlobal !== 'undefined') currentOrgIdGlobal = orgId;
 				if (typeof currentUserRoleGlobal !== 'undefined') currentUserRoleGlobal = role;
 				if (typeof currentAcademicYearsGlobal !== 'undefined') currentAcademicYearsGlobal = academicYears;
 
-				// 🌟 2. Tải sẵn bản đồ `cachedUsersMap` cho toàn tổ chức để tra cứu tên/lớp cực nhanh sau này
+				// Tải sẵn bản đồ `cachedUsersMap` cho toàn tổ chức
 				try {
+					console.log("🔍 [DEBUG LOGIN] Đang tải danh sách users của tổ chức (orgId):", orgId);
 					const usersSnap = await db.collection("organizations").doc(orgId).collection("users").get();
+					console.log("✅ [DEBUG LOGIN] Tải thành công users, tổng số lượng:", usersSnap.size);
+					
 					window.cachedUsersMap = {};
 					usersSnap.forEach(uDoc => {
 						const uData = uDoc.data();
@@ -278,26 +293,30 @@ async function handleLogin(e) {
 						};
 					});
 				} catch (err) {
-					console.warn("⚠️ Không thể cache bảng users:", err);
+					console.warn("⚠️ [DEBUG LOGIN] Lỗi khi cache bảng users:", err);
 				}
 
-				// 🌟 3. Nếu là Giáo viên/Nhân sự (Employee), tải trước thông tin phân công lớp chủ nhiệm
+				// Nếu là Giáo viên/Nhân sự (Employee), tải trước thông tin phân công lớp chủ nhiệm
 				if (role !== "ADMIN" && academicYears.length > 0) {
 					const activeYearItem = academicYears[academicYears.length - 1];
 					const activeYearId = String(typeof activeYearItem === 'object' && activeYearItem !== null ? (activeYearItem.id || activeYearItem.name || activeYearItem.year) : activeYearItem).trim();
 
 					if (activeYearId) {
 						try {
+							console.log("🔍 [DEBUG LOGIN] Đang tải phân công cho giáo viên với email/uid năm học:", activeYearId);
+							// Thử truy vấn assignments bằng email (vì hệ thống thường dùng email làm docId cho assignments)
 							const assignDoc = await db.collection("organizations")
 								.doc(orgId)
 								.collection("academicYears")
 								.doc(activeYearId)
 								.collection("assignments")
-								.doc(user.uid)
+								.doc(email) // Sử dụng email chuẩn hóa
 								.get();
 
+							console.log("🔍 [DEBUG LOGIN] Kết quả document assignments exists:", assignDoc.exists);
 							if (assignDoc.exists) {
 								const assignData = assignDoc.data();
+								
 								let hr = assignData.homeroom || assignData.homeroomClasses || [];
 								if (typeof hr === 'string') {
 									window.currentTeacherHomerooms = hr.split(',').map(s => s.trim()).filter(Boolean);
@@ -308,22 +327,23 @@ async function handleLogin(e) {
 								}
 							}
 						} catch (assignErr) {
-							console.warn("⚠️ Chưa có thông tin phân công lớp chủ nhiệm:", assignErr);
+							console.warn("⚠️ [DEBUG LOGIN] Lỗi tải thông tin phân công:", assignErr);
 						}
 					}
 				}
 
-				// Gọi hàm dựng giao diện Member (Admin trường hoặc Giáo viên)
+				// Gọi hàm dựng giao diện Member
+				console.log("🚀 [DEBUG LOGIN] Đang gọi setupMemberUI...");
 				setupMemberUI(userData, orgId, user);
 
 			} else {
-				// Không tìm thấy email trong bảng tra cứu
+				console.warn("❌ [DEBUG LOGIN] Không tìm thấy email này trong collection 'emails':", email);
 				document.getElementById("login-error").textContent = "Tài khoản chưa được cấu hình phân quyền trong hệ thống!";
 				await firebase.auth().signOut();
 			}
 
 		} catch (error) {
-			console.error("Lỗi phân quyền người dùng:", error);
+			console.error("❌ [DEBUG LOGIN] Lỗi catch nghiêm trọng trong phân quyền người dùng:", error);
 			document.getElementById("login-error").textContent = "Lỗi hệ thống khi kiểm tra phân quyền: " + error.message;
 		}
 	}
@@ -454,75 +474,101 @@ async function getAcademicYearDocRef() {
 	
 	
 	async function setupMemberUI(userData, orgId, authUser) {
-		document.getElementById("login-screen").style.display = "none";
-		document.getElementById("app-screen").style.display = "block";
+    document.getElementById("login-screen").style.display = "none";
+    document.getElementById("app-screen").style.display = "block";
 
-		// 🌟 Đồng bộ các biến toàn cục an toàn tại đây
-		window.currentOrgIdGlobal = orgId;
-		window.currentUserRoleGlobal = userData.role || "EMPLOYEE";
-		window.currentAcademicYearsGlobal = userData.academicYears || [];
-		
-		currentOrgIdGlobal = orgId;
-		currentUserRoleGlobal = userData.role || "EMPLOYEE";
-		currentAcademicYearsGlobal = userData.academicYears || [];
+    // 1. LƯU THÔNG TIN PHIÊN ĐĂNG NHẬP
+    window.currentOrgIdGlobal = orgId;
+    window.currentUserRoleGlobal = userData.role || "EMPLOYEE";
+    window.currentAcademicYearsGlobal = userData.academicYears || [];
 
-		document.getElementById("user-display-name").textContent = userData.fullName || authUser.email;
-		
-		// Hiển thị tên vai trò trực quan theo đúng role thực tế
-		let roleText = "Giáo viên / Nhân sự";
-		if (userData.role === "ADMIN") {
-			roleText = "Quản trị viên Trường";
-		} else if (userData.role === "STUDENT") {
-			roleText = "Học sinh";
-		}
-		document.getElementById("user-role").textContent = roleText;
-		
-		document.getElementById("user-org").textContent = orgId;
-		document.getElementById("owner-panel").style.display = "none";
-		  
-		if (userData.role === "ADMIN") {
-			const adminPanel = document.getElementById("admin-panel");
-			if (adminPanel) adminPanel.style.display = "block";
-			const employeePanel = document.getElementById("employee-panel");
-			if (employeePanel) employeePanel.style.display = "none";
+    currentOrgIdGlobal = orgId;
+    currentUserRoleGlobal = userData.role || "EMPLOYEE";
+    currentAcademicYearsGlobal = userData.academicYears || [];
 
-			// 1. Khởi tạo năm học cho Admin
-			await initAcademicYears(orgId);
+    // 2. THÔNG TIN NGƯỜI DÙNG
+    document.getElementById("user-display-name").textContent =
+        userData.fullName || authUser.email;
 
-			// 🌟 2. Nạp ngay danh sách module và gán window.currentModuleIdGlobal
-			await preloadAdminModules(orgId);
+    let roleText = "Giáo viên / Nhân sự";
 
-			// 3. Mặc định vào bảng ma trận (grid) khi Admin đăng nhập
-			if (typeof switchAdminTab === 'function') {
-				switchAdminTab('grid'); 
-			}
+    if (userData.role === "ADMIN") {
+        roleText = "Quản trị viên Trường";
+    } else if (userData.role === "STUDENT") {
+        roleText = "Học sinh";
+    }
 
-			// 4. Khởi tạo Thẻ 5 (lúc này ô select và window.currentModuleIdGlobal đã có sẵn giá trị 100%)
-			if (typeof initGridCard5 === 'function') {
-				await initGridCard5();
-			}
+    document.getElementById("user-role").textContent = roleText;
+    document.getElementById("user-org").textContent = orgId;
 
-		} else {
-			const adminPanel = document.getElementById("admin-panel");
-			if (adminPanel) adminPanel.style.display = "none";
-			const employeePanel = document.getElementById("employee-panel");
-			if (employeePanel) employeePanel.style.display = "block";
+    // 3. HIỂN THỊ TAB 5 CHO GIÁO VIÊN / NHÂN SỰ
+    // Không áp dụng cho ADMIN và STUDENT.
+    const userRole = String(userData.role || "EMPLOYEE")
+        .trim()
+        .toUpperCase();
 
-			// Khởi tạo năm học cho Giáo viên / Học sinh
-			if (typeof initEmployeeAcademicYears === 'function') {
-				await initEmployeeAcademicYears(orgId);
-			}
-			// 🌟 THÊM DÒNG NÀY: Quét thu hồi quyền trợ giúp quá hạn (30 phút)
-			if (typeof checkAndExpireSupporters === 'function') {
-				await checkAndExpireSupporters();
-			}
-			
-			// 🌟 Tự động kích hoạt Thẻ 1 hiển thị mặc định khi nhân viên đăng nhập
-			if (typeof switchEmpTab === 'function') {
-			switchEmpTab(1);
-			}
-		}
-	}
+    const canViewDepartmentTab =
+        userRole !== "ADMIN" &&
+        userRole !== "STUDENT";
+
+    const departmentTabButton =
+        document.getElementById("btn-emp-tab-5");
+
+    const departmentTabContent =
+        document.getElementById("emp-tab-sec-5");
+
+    if (departmentTabButton) {
+        departmentTabButton.style.display =
+            canViewDepartmentTab ? "" : "none";
+    }
+
+    if (!canViewDepartmentTab && departmentTabContent) {
+        departmentTabContent.style.display = "none";
+    }
+
+    // 4. OWNER PANEL
+    document.getElementById("owner-panel").style.display = "none";
+
+    // 5. ADMIN
+    if (userData.role === "ADMIN") {
+        adminPanel.style.display = "block";
+        employeePanel.style.display = "none";
+
+        await initAcademicYears(orgId);
+        await preloadAdminModules(orgId);
+
+        if (typeof switchAdminTab === "function") {
+            switchAdminTab("grid");
+        }
+
+        if (typeof initGridCard5 === "function") {
+            await initGridCard5();
+        }
+    }
+
+    // 6. GIÁO VIÊN / NHÂN SỰ / HỌC SINH
+    else {
+        adminPanel.style.display = "none";
+        employeePanel.style.display = "block";
+
+        if (typeof initEmployeeAcademicYears === "function") {
+            await initEmployeeAcademicYears(orgId);
+        }
+
+        // Giữ kiểm tra khi đăng nhập để đồng bộ trạng thái ban đầu.
+        // Kiểm tra bắt buộc trước khi ghi dữ liệu sẽ xử lý riêng
+        // trong saveSingle / saveAll.
+        if (typeof checkAndExpireSupporters === "function") {
+            await checkAndExpireSupporters();
+        }
+
+        // Mặc định mở Tab 1.
+        if (typeof switchEmpTab === "function") {
+            await switchEmpTab(1);
+        }
+    }
+}
+
 
 // ==========================================
 // 4. CHỨC NĂNG CỦA SYSTEM OWNER
@@ -1340,8 +1386,48 @@ async function handleCreateSchoolAdmin(event) {
 	  XLSX.writeFile(workbook, `Mau_Import_${entityType}.xlsx`);
 	}
 	
-	// Xử lý Import file Excel vào sub-collection users của đơn vị
 	
+	// 🌟 Hàm hiển thị Hộp thoại tiến trình
+	function showImportProgressModal() {
+		let modal = document.getElementById("import-progress-modal");
+		if (!modal) {
+			modal = document.createElement("div");
+			modal.id = "import-progress-modal";
+			modal.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 9999;";
+			modal.innerHTML = `
+				<div style="background: white; padding: 25px; border-radius: 8px; width: 400px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); text-align: center; font-family: sans-serif;">
+					<h3 style="margin-top: 0; color: #333;">Đang import dữ liệu...</h3>
+					<p id="import-progress-text" style="font-size: 14px; color: #666; margin-bottom: 15px;">Đang chuẩn bị...</p>
+					<div style="background: #e9ecef; border-radius: 4px; overflow: hidden; height: 20px; width: 100%;">
+						<div id="import-progress-bar" style="background: #0d6efd; width: 0%; height: 100%; transition: width 0.1s ease;"></div>
+					</div>
+					<p id="import-progress-percent" style="font-weight: bold; color: #0d6efd; margin-top: 10px;">0%</p>
+				</div>
+			`;
+			document.body.appendChild(modal);
+		}
+		modal.style.display = "flex";
+	}
+
+	// 🌟 Hàm cập nhật thông số tiến trình
+	function updateImportProgress(percent, text) {
+		const bar = document.getElementById("import-progress-bar");
+		const perText = document.getElementById("import-progress-percent");
+		const statusText = document.getElementById("import-progress-text");
+		if (bar) bar.style.width = percent + "%";
+		if (perText) perText.innerText = percent + "%";
+		if (statusText && text) statusText.innerText = text;
+	}
+
+	// 🌟 Hàm ẩn Hộp thoại tiến trình
+	function hideImportProgressModal() {
+		const modal = document.getElementById("import-progress-modal");
+		if (modal) {
+			modal.style.display = "none";
+		}
+	}
+
+	// 🌟 Hàm chính thực hiện import file Excel có kèm tiến trình %
 	async function uploadEntityExcel() {
 		const fileInput = document.getElementById("excel-file-input");
 		const entityTypeElem = document.getElementById("entity-type-selector");
@@ -1364,7 +1450,7 @@ async function handleCreateSchoolAdmin(event) {
 			return;
 		}
 
-		// 🌟 Lấy năm học: Ưu tiên dropdown, nếu không có thì lấy phần tử cuối của mảng window.currentAcademicYearsGlobal
+		// Lấy năm học
 		const academicYearSelect = document.getElementById("emp-academic-year-select");
 		let academicYearId = "";
 
@@ -1391,96 +1477,141 @@ async function handleCreateSchoolAdmin(event) {
 
 		reader.onload = async function (e) {
 			try {
+				showImportProgressModal();
+				updateImportProgress(5, "Đang đọc tệp Excel...");
+
 				const data = new Uint8Array(e.target.result);
 				const workbook = XLSX.read(data, { type: "array" });
 				const firstSheetName = workbook.SheetNames[0];
 				const worksheet = workbook.Sheets[firstSheetName];
-				const rows = XLSX.utils.sheet_to_json(worksheet);
+				
+				const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-				if (rows.length === 0) {
+				if (!rawRows || rawRows.length === 0) {
+					hideImportProgressModal();
 					alert("Tệp Excel không có dữ liệu!");
 					return;
 				}
 
-				// Hàm hỗ trợ tìm kiếm tên cột trong Excel không phân biệt hoa/thường hay khoảng trắng
-				const getRowValue = (row, possibleKeys) => {
-					for (let excelKey of Object.keys(row)) {
-						const cleanExcelKey = excelKey.trim().toLowerCase();
-						for (let pk of possibleKeys) {
-							if (cleanExcelKey === pk.toLowerCase()) {
-								return String(row[excelKey] || "").trim();
-							}
-						}
-					}
-					return "";
-				};
+				let startIndex = 0;
+				let colMap = { code: 0, name: 1, category: 2, email: 3 };
 
-				const db = firebase.firestore();
-				let countSuccess = 0;
+				const firstRow = rawRows[0].map(cell => String(cell || "").trim().toLowerCase());
+				const hasHeader = firstRow.some(cell => 
+					cell.includes("mã") || cell.includes("họ") || cell.includes("tên") || cell.includes("email") || cell.includes("tổ") || cell.includes("lớp")
+				);
 
-				for (let row of rows) {
-					const code = getRowValue(row, ["Mã Định Danh", "Ma", "ID", "Mã", "Mã HS", "Mã GV"]);
-					const name = getRowValue(row, ["Họ và Tên", "HoTen", "Ten", "Họ tên", "Tên đầy đủ"]);
-					const rawCategory = getRowValue(row, ["Tổ / Lớp / Đơn vị", "ToLop", "DonVi", "Tổ", "Lớp", "Đơn vị", "Phòng ban"]);
-					
-					// Ép kiểu an toàn category thành chuỗi string
-					const category = String(rawCategory || "").trim();
-					const email = getRowValue(row, ["Email", "Thư điện tử", "Mail"]);
+				if (hasHeader) {
+					startIndex = 1;
+					rawRows[0].forEach((headerName, idx) => {
+						const h = String(headerName || "").trim().toLowerCase();
+						if (h.includes("mã") || h.includes("id")) colMap.code = idx;
+						else if (h.includes("họ") || h.includes("tên")) colMap.name = idx;
+						else if (h.includes("tổ") || h.includes("lớp") || h.includes("đơn vị") || h.includes("phòng")) colMap.category = idx;
+						else if (h.includes("email") || h.includes("mail") || h.includes("thư")) colMap.email = idx;
+					});
+				}
 
+				// Lọc ra các dòng hợp lệ trước để tính tổng khối lượng (%)
+				const validRows = [];
+				for (let i = startIndex; i < rawRows.length; i++) {
+					const r = rawRows[i];
+					if (!r || r.length === 0) continue;
+					const code = String(r[colMap.code] ?? "").trim();
+					const name = String(r[colMap.name] ?? "").trim();
 					if (code && name) {
-						// 1. Lưu nhân sự/học sinh vào collection users
-						await db.collection("organizations").doc(orgId).collection("users").doc(code).set({
-							uid: code,
+						validRows.push({
+							code: code,
 							fullName: name,
-							category: category,
-							email: email,
-							role: entityType, // "TEACHER" hoặc "STUDENT"
-							activated: false,
-							orgId: orgId,
-							updatedAt: getVietnamTimestamp()
-						}, { merge: true });
-
-						// 2. Lưu danh mục Tổ / Lớp vào collection `categories` theo đúng năm học cuối mảng
-						if (category) {
-							const categoryDocRef = db.collection("organizations")
-								.doc(orgId)
-								.collection("academicYears")
-								.doc(academicYearId)
-								.collection("categories")
-								.doc(category);
-
-							await categoryDocRef.set({
-								name: category,
-								type: entityType, // "TEACHER" hoặc "STUDENT"
-								updatedAt: getVietnamTimestamp()
-							}, { merge: true });
-						}
-
-						countSuccess++;
+							category: String(r[colMap.category] ?? "").trim(),
+							email: String(r[colMap.email] ?? "").trim().toLowerCase()
+						});
 					}
 				}
 
-				if (countSuccess === 0) {
-					alert("Không tìm thấy dữ liệu hợp lệ! Vui lòng kiểm tra lại tên cột trong file Excel (Cần có cột chứa Mã và Tên).");
-				} else {
-					alert(`Import thành công ${countSuccess} bản ghi và cập nhật danh mục Tổ/Lớp vào năm học [${academicYearId}]!`);
+				if (validRows.length === 0) {
+					hideImportProgressModal();
+					alert("Không tìm thấy dữ liệu hợp lệ! Vui lòng kiểm tra lại cấu trúc file Excel.");
+					return;
+				}
+
+				const db = firebase.firestore();
+				let countSuccess = 0;
+				const totalRows = validRows.length;
+
+				// Tiến hành vòng lặp đẩy dữ liệu lên Firestore và cập nhật % tiến trình
+				for (let index = 0; index < totalRows; index++) {
+					const item = validRows[index];
+					const percent = Math.round(((index + 1) / totalRows) * 90) + 5; // Chạy từ 5% đến 95%
+					updateImportProgress(percent, `Đang xử lý dòng ${index + 1} / ${totalRows}: ${item.fullName}`);
+
+					// 1. Tạo document trong subcollection users[cite: 4]
+					const userRef = db.collection("organizations").doc(orgId).collection("users").doc();
+					await userRef.set({
+						id: userRef.id,
+						code: item.code,
+						fullName: item.fullName,
+						category: item.category,
+						email: item.email,
+						role: entityType,
+						activated: Boolean(item.email),
+						orgId: orgId,
+						updatedAt: (typeof getVietnamTimestamp === 'function' ? getVietnamTimestamp() : new Date().toISOString())
+					}, { merge: true });
+
+					// 2. Đồng bộ bảng emails gốc nếu có email[cite: 4]
+					if (item.email) {
+						const emailRef = db.collection("emails").doc(item.email);
+						await emailRef.set({
+							email: item.email,
+							orgId: orgId,
+							role: entityType === "TEACHER" ? "TEACHER" : "EMPLOYEE",
+							fullName: item.fullName,
+							academicYears: [academicYearId],
+							updatedAt: (typeof getVietnamTimestamp === 'function' ? getVietnamTimestamp() : new Date().toISOString())
+						}, { merge: true });
+					}
+
+					// 3. Lưu danh mục Tổ / Lớp[cite: 4]
+					if (item.category) {
+						const categoryDocRef = db.collection("organizations")
+							.doc(orgId)
+							.collection("academicYears")
+							.doc(academicYearId)
+							.collection("categories")
+							.doc(item.category);
+
+						await categoryDocRef.set({
+							name: item.category,
+							type: entityType,
+							updatedAt: (typeof getVietnamTimestamp === 'function' ? getVietnamTimestamp() : new Date().toISOString())
+						}, { merge: true });
+					}
+
+					countSuccess++;
+				}
+
+				updateImportProgress(100, "Hoàn tất đồng bộ dữ liệu!");
+				setTimeout(async () => {
+					hideImportProgressModal();
+					alert(`Import thành công ${countSuccess} bản ghi vào tổ chức và đồng bộ hệ thống thành công![cite: 4]`);
 					fileInput.value = "";
 					
-					// Làm mới cache và render lại bảng
 					window.isEntitiesCacheLoaded = false;
 					if (typeof reloadAndRenderAdminEntityList === 'function') {
 						await reloadAndRenderAdminEntityList(true);
 					}
-				}
+				}, 300);
 
 			} catch (error) {
+				hideImportProgressModal();
 				console.error("Lỗi đọc file Excel:", error);
 				alert("Lỗi khi xử lý file Excel: " + error.message);
 			}
 		};
 
 		reader.readAsArrayBuffer(file);
-	}
+	}	
 
 		// Ví dụ hàm đọc danh mục Lớp/Tổ từ collection categories thay vì quét toàn bộ users
 	async function fetchCategoriesFromFirestore(orgId, academicYearId) {
@@ -1576,10 +1707,13 @@ async function handleCreateSchoolAdmin(event) {
 	  tbody.innerHTML = "";
 	  entities.forEach(item => {
 		const tr = document.createElement("tr");
-		const isActivated = item.activated === true;
+		
+		// 🌟 Kiểm tra điều kiện kích hoạt: Phải có email và được cấu hình trong hệ thống (hoặc activated = true tùy logic thực tế)
+		const hasEmail = Boolean(item.email && item.email.trim() !== "");
+		const isActivated = item.activated === true && hasEmail;
 		
 		tr.innerHTML = `
-		  <td style="font-family: monospace; font-weight: bold;">${item.id || ""}</td>
+		  <td style="font-family: monospace; font-weight: bold;">${item.code || item.id || ""}</td>
 		  <td>${item.fullName || ""}</td>
 		  <td><span style="background: #e9ecef; padding: 2px 6px; border-radius: 4px; font-size: 0.9em;">${item.category || ""}</span></td>
 		  <td>${item.email || "<i>Chưa có</i>"}</td>
@@ -2069,7 +2203,11 @@ async function handleCreateSchoolAdmin(event) {
 				
 				// Lọc các đối tượng không phải ADMIN
 				if (role !== "ADMIN") {
-					window.card2CachedMembers.push({ id: doc.id, ...data });
+					window.card2CachedMembers.push({ 
+						id: data.code || data.id || doc.id, // Ưu tiên dùng Mã định danh (code) làm id để search/hiển thị
+						docId: doc.id,                      // Lưu ID ngẫu nhiên của Firestore nếu cần dùng để update/delete
+						...data 
+					});
 				}
 			});
 
@@ -2155,7 +2293,7 @@ async function handleCreateSchoolAdmin(event) {
 		label.innerHTML = `
 		  <div style="display: flex; align-items: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
 			<input type="radio" name="assign_member_radio" class="rb-assign-member" value="${item.id}" ${isChecked ? 'checked' : ''} onchange="onAssignMemberRadioChange('${item.id}', this)" style="margin-right: 8px;">
-			<b style="margin-right: 5px;">[${item.id}]</b> <span style="overflow: hidden; text-overflow: ellipsis;">${item.fullName || ''}</span>
+			<span style="overflow: hidden; text-overflow: ellipsis;">${item.fullName || ''}</span>
 		  </div>
 		  <span style="font-size: 0.75em; background: #e9ecef; color: #495057; padding: 1px 6px; border-radius: 3px; flex-shrink: 0; margin-left: 5px;">${item.category}</span>
 		`;
@@ -3546,30 +3684,56 @@ async function handleCreateSchoolAdmin(event) {
 
 	// 9. Xóa trường thông tin trên Firebase và Cache
 	async function deleteSchemaField(key) {
-	  if (!confirm(`Bạn có chắc chắn muốn xóa trường thông tin [${key}] này không?`)) {
-		return;
-	  }
+		if (!confirm(`Bạn có chắc chắn muốn xóa trường thông tin [${key}] này không?`)) {
+			return;
+		}
 
-	  try {
-		const user = firebase.auth().currentUser;
-		if (!user) return;
+		try {
+			const user = firebase.auth().currentUser;
+			if (!user) {
+				alert("Vui lòng đăng nhập lại!");
+				return;
+			}
 
-		const orgId = await getCurrentAdminOrgId(user.uid);
-		if (!orgId) return;
+			// Lấy đúng orgId bằng cách đồng bộ với hàm handleFieldFormSubmit
+			const orgId = typeof ensureOrgId === 'function' ? await ensureOrgId() : window.currentOrgIdGlobal;
+			if (!orgId) {
+				alert("Không tìm thấy thông tin đơn vị (OrgId)! Vui lòng kiểm tra lại phiên đăng nhập.");
+				return;
+			}
 
-		const db = firebase.firestore();
-		await db.collection("organizations").doc(orgId).collection("fields").doc(key).delete();
+			const db = firebase.firestore();
 
-		// Cập nhật lại cache trong RAM
-		cachedSchemaFields = cachedSchemaFields.filter(f => f.key !== key);
-		renderSchemaFieldsList(cachedSchemaFields);
+			// Thực hiện xóa document field trên Firestore đúng đường dẫn tổ chức
+			await db.collection("organizations")
+					.doc(orgId)
+					.collection("fields")
+					.doc(key)
+					.delete();
 
-		alert("Đã xóa trường thông tin thành công!");
+			// Cập nhật lại cache trong RAM
+			if (typeof cachedSchemaFields !== 'undefined' && Array.isArray(cachedSchemaFields)) {
+				cachedSchemaFields = cachedSchemaFields.filter(f => f.key !== key);
+				if (typeof renderSchemaFieldsList === 'function') {
+					renderSchemaFieldsList(cachedSchemaFields);
+				}
+			}
 
-	  } catch (error) {
-		console.error("Lỗi khi xóa trường:", error);
-		alert("Lỗi khi xóa: " + error.message);
-	  }
+			// Cập nhật lại các checkbox của module nếu cần
+			if (typeof renderModuleFieldsCheckboxes === 'function') {
+				renderModuleFieldsCheckboxes();
+			}
+
+			alert("Đã xóa trường thông tin thành công!");
+
+		} catch (error) {
+			console.error("Lỗi khi xóa trường:", error);
+			if (error.code === 'permission-denied' || error.message.includes("Missing or insufficient permissions")) {
+				alert("Lỗi phân quyền: Tài khoản của bạn không có quyền xóa trường này. Vui lòng kiểm tra lại quyền Admin!");
+			} else {
+				alert("Lỗi khi xóa: " + error.message);
+			}
+		}
 	}
 	
 	const previousSwitchAdminTab = window.switchAdminTab;
@@ -5204,59 +5368,81 @@ async function handleCreateSchoolAdmin(event) {
 	
 	//	3.1. Khởi tạo danh sách nhân sự
 	//===========================
-	async function loadCard3StaffMembers() {
+	async function loadCard3StaffMembers(forceRefresh = false) {
 		const radioContainer = document.getElementById("card3-members-radio-container");
 		const categorySelect = document.getElementById("select-card3-group-category");
 		if (!radioContainer) return;
 
-		// Lấy danh sách từ biến cache toàn cục (đã được tải ở Thẻ 1)
-		const cachedList = window.currentLoadedEntities || (typeof currentLoadedEntities !== 'undefined' ? currentLoadedEntities : []);
+		// 1. Khởi tạo mảng cache riêng cho Thẻ 3 trên window
+		window.card3CachedMembers = window.card3CachedMembers || [];
 
-		// Nếu cache trống, nhắc người dùng sang Thẻ 1 tải dữ liệu để tránh lỗi phân quyền Firestore
-		if (!cachedList || cachedList.length === 0) {
-			if (categorySelect) {
-				categorySelect.innerHTML = '<option value="">-- Tất cả Tổ/Đơn vị --</option>';
-			}
-			radioContainer.innerHTML = '<i style="color: #dc3545; font-size: 0.9em;">Chưa có dữ liệu nhân sự. Vui lòng sang <b>Thẻ 1 (Quản lý nhân sự)</b> để tải danh sách nhân sự trước khi sử dụng chức năng này!</i>';
+		// 2. Nếu đã có cache và không ép làm mới -> dùng luôn dữ liệu trong RAM
+		if (!forceRefresh && window.card3CachedMembers.length > 0) {
+			populateCard3Categories(window.card3CachedMembers, categorySelect);
+			renderCard3StaffRadio(window.card3CachedMembers);
 			return;
 		}
 
-		// Lọc chỉ lấy giáo viên (TEACHER)
-		const teacherList = cachedList.filter(item => (item.role || "").toUpperCase() === "TEACHER");
+		radioContainer.innerHTML = '<div style="padding: 10px; text-align: center; color: #6c757d;">Đang tải danh sách giáo viên...</div>';
 
-		// Lấy danh sách tổ chuyên môn từ cache an toàn tuyệt đối không cần gọi thêm Firebase
+		try {
+			// 3. Lấy orgId đồng bộ chuẩn như Thẻ 2
+			const orgId = window.currentOrgIdGlobal;
+			if (!orgId) {
+				radioContainer.innerHTML = '<div style="padding: 10px; text-align: center; color: red;">Không tìm thấy thông tin tổ chức!</div>';
+				return;
+			}
+
+			const db = firebase.firestore();
+			const snapshot = await db.collection("organizations").doc(orgId).collection("users").get();
+
+			window.card3CachedMembers = [];
+			snapshot.forEach(doc => {
+				const data = doc.data();
+				const role = (data.role || "").toUpperCase();
+				
+				// 4. Lọc chỉ lấy giáo viên (TEACHER) và chuẩn hóa ID giống Thẻ 2
+				if (role === "TEACHER") {
+					window.card3CachedMembers.push({ 
+						id: data.code || data.id || doc.id, // Dùng Mã định danh làm id chính cho đồng bộ
+						docId: doc.id,                      // ID ngẫu nhiên của Firestore
+						...data 
+					});
+				}
+			});
+
+			populateCard3Categories(window.card3CachedMembers, categorySelect);
+
+			if (window.card3CachedMembers.length === 0) {
+				radioContainer.innerHTML = '<div style="padding: 10px; text-align: center; color: #6c757d; font-style: italic;">Không tìm thấy nhân sự giáo viên nào trong hệ thống.</div>';
+				return;
+			}
+
+			renderCard3StaffRadio(window.card3CachedMembers);
+
+		} catch (error) {
+			console.error("Lỗi tải nhân sự cho Thẻ 3:", error);
+			radioContainer.innerHTML = '<div style="padding: 10px; text-align: center; color: red;">Lỗi tải dữ liệu từ máy chủ.</div>';
+		}
+	}
+
+	// Hàm phụ trợ đổ dữ liệu tổ chuyên môn vào ô select của Thẻ 3
+	function populateCard3Categories(teacherList, categorySelect) {
+		if (!categorySelect) return;
+
 		const categoriesSet = new Set();
 		teacherList.forEach(staff => {
-			const cat = String(
-				staff.category || 
-				staff.organizationUnit || 
-				staff.department || 
-				staff.departmentName || 
-				staff.group || 
-				staff.team || 
-				""
-			).trim();
+			const cat = String(staff.category || staff.organizationUnit || "").trim();
 			if (cat) {
 				categoriesSet.add(cat);
 			}
 		});
 
-		// Đổ dữ liệu vào thẻ select
-		if (categorySelect) {
-			let catHtml = '<option value="">-- Tất cả Tổ/Đơn vị --</option>';
-			Array.from(categoriesSet).sort().forEach(cat => {
-				catHtml += `<option value="${cat}">${cat}</option>`;
-			});
-			categorySelect.innerHTML = catHtml;
-		}
-
-		// Kiểm tra nếu không có giáo viên
-		if (teacherList.length === 0) {
-			radioContainer.innerHTML = '<i style="color: #6c757d; font-size: 0.9em;">Không tìm thấy nhân sự giáo viên nào trong hệ thống.</i>';
-			return;
-		}
-
-		renderCard3StaffRadio(teacherList);
+		let catHtml = '<option value="">-- Tất cả Tổ/Đơn vị --</option>';
+		Array.from(categoriesSet).sort().forEach(cat => {
+			catHtml += `<option value="${cat}">${cat}</option>`;
+		});
+		categorySelect.innerHTML = catHtml;
 	}
 
 	// Render danh sách Radio nhân sự ra giao diện
@@ -5440,7 +5626,7 @@ async function handleCreateSchoolAdmin(event) {
 
 		const teacherEmail = String(staffEmail).toLowerCase().trim();
 
-		// Thu thập danh sách các bài toán module được tích chọn (khớp với name='chk_assign_module')
+		// Thu thập danh sách các bài toán module được tích chọn
 		const selectedModules = [];
 		const moduleCheckboxes = document.querySelectorAll("#assign-modules-checkboxes input[name='chk_assign_module']:checked");
 		moduleCheckboxes.forEach(chk => {
@@ -5460,13 +5646,22 @@ async function handleCreateSchoolAdmin(event) {
 
 		try {
 			const user = firebase.auth().currentUser;
-			if (!user) return;
-			const orgId = await getCurrentAdminOrgId(user.uid);
-			if (!orgId) return;
+			if (!user) {
+				alert("Vui lòng đăng nhập lại!");
+				return;
+			}
 
-			// Lấy ID năm học chuẩn từ biến mảng window.currentAcademicYearIdGlobal hoặc currentAcademicYear
+			// 🌟 SỬA ĐOẠN NÀY: Đồng bộ cách lấy orgId giống hàm saveTeachingAssignments đang chạy đúng
+			const orgId = window.currentOrgIdGlobal || (typeof getCurrentAdminOrgId === 'function' ? await getCurrentAdminOrgId(user.uid) : null);
+			if (!orgId) {
+				alert("Không tìm thấy thông tin đơn vị (OrgId)! Vui lòng kiểm tra lại phiên đăng nhập.");
+				if (msgElem) msgElem.textContent = "Lỗi: Không tìm thấy thông tin đơn vị.";
+				return;
+			}
+
+			// Lấy ID năm học chuẩn
 			let academicYearId = currentAcademicYear || "";
-			const yearsArr = window.currentAcademicYearIdGlobal;
+			const yearsArr = window.currentAcademicYearIdGlobal || window.currentAcademicYearsGlobal;
 			if (!academicYearId && Array.isArray(yearsArr) && yearsArr.length > 0) {
 				const lastYearItem = yearsArr[yearsArr.length - 1];
 				academicYearId = String(typeof lastYearItem === 'object' && lastYearItem !== null ? (lastYearItem.id || lastYearItem.name || lastYearItem.year) : lastYearItem).trim();
@@ -5479,22 +5674,21 @@ async function handleCreateSchoolAdmin(event) {
 
 			const db = firebase.firestore();
 			
-			// 🌟 GỘP CHUNG VÀO DOCUMENT CÓ ID LÀ EMAIL (SỬ DỤNG { merge: true })
-			// Đường dẫn: /organizations/{orgId}/academicYears/{academicYearId}/assignments/{teacherEmail}
+			// Lưu phân công vào assignments
 			await db.collection("organizations")
 					.doc(orgId)
 					.collection("academicYears")
 					.doc(academicYearId)
 					.collection("assignments")
-					.doc(teacherEmail) // 👈 Lấy email làm Document ID thống nhất
+					.doc(teacherEmail)
 					.set({
 						email: teacherEmail,
 						memberId: staffUid,
 						fullName: staffName,
 						role: staffRole,
-						modules: selectedModules, // 👈 Đính kèm/cập nhật mảng module chuyên môn vào chung document
-						updatedAt: getVietnamTimestamp()
-					}, { merge: true }); // 👈 Merge giúp giữ nguyên các trường homeroom/teaching đã lưu trước đó (nếu có)
+						modules: selectedModules,
+						updatedAt: (typeof getVietnamTimestamp === 'function' ? getVietnamTimestamp() : new Date().toISOString())
+					}, { merge: true });
 
 			if (msgElem) {
 				msgElem.style.color = "green";
@@ -5509,7 +5703,11 @@ async function handleCreateSchoolAdmin(event) {
 			console.error("Lỗi lưu phân công:", error);
 			if (msgElem) {
 				msgElem.style.color = "red";
-				msgElem.textContent = "Lỗi: " + error.message;
+				if (error.code === 'permission-denied' || error.message.includes("Missing or insufficient permissions")) {
+					msgElem.textContent = "Lỗi phân quyền: Tài khoản của bạn không đủ quyền Admin để thực hiện thao tác này.";
+				} else {
+					msgElem.textContent = "Lỗi: " + error.message;
+				}
 			}
 		}
 	});
@@ -5581,13 +5779,21 @@ async function handleCreateSchoolAdmin(event) {
 
 	  let html = "";
 	  listToRender.forEach(item => {
-		// Tìm kiếm thông tin Tổ/Đơn vị từ cache nhân sự ở Thẻ 1
+		// Tìm kiếm thông tin Tổ/Đơn vị từ cache nhân sự (ưu tiên so sánh theo email hoặc memberId)
 		let staffCategory = "Chưa phân tổ";
-		if (typeof currentLoadedEntities !== 'undefined' && currentLoadedEntities.length > 0) {
-		  const foundStaff = currentLoadedEntities.find(e => e.id === item.id);
-		  if (foundStaff) {
-			staffCategory = foundStaff.category || foundStaff.organizationUnit || foundStaff.department || "Chưa phân tổ";
-		  }
+		
+		// Gom các nguồn cache nhân sự có sẵn để tra cứu chính xác nhất
+		const allMembers = (typeof currentLoadedEntities !== 'undefined' ? currentLoadedEntities : [])
+		  .concat(window.card3CachedMembers || [])
+		  .concat(window.card2CachedMembers || []);
+
+		const foundStaff = allMembers.find(e => 
+		  (e.email && item.email && String(e.email).toLowerCase().trim() === String(item.email).toLowerCase().trim()) || 
+		  (e.id === item.memberId)
+		);
+
+		if (foundStaff) {
+		  staffCategory = foundStaff.category || foundStaff.organizationUnit || foundStaff.department || "Chưa phân tổ";
 		}
 
 		// Tạo danh sách các badge module kèm nút x nhỏ để xóa trực tiếp từng module
@@ -5627,14 +5833,23 @@ async function handleCreateSchoolAdmin(event) {
 		  return;
 		}
 
-		const orgId = await getCurrentAdminOrgId(user.uid);
+		// 🌟 Đồng bộ cách lấy orgId an toàn giống các hàm khác
+		const orgId = window.currentOrgIdGlobal || (typeof getCurrentAdminOrgId === 'function' ? await getCurrentAdminOrgId(user.uid) : null);
 		if (!orgId) {
-		  alert("Không tìm thấy thông tin đơn vị!");
+		  alert("Không tìm thấy thông tin đơn vị (OrgId)! Vui lòng kiểm tra lại phiên đăng nhập.");
 		  return;
 		}
 
-		// Tìm giáo viên trong mảng cache hiện tại để lọc bỏ module cần xóa
-		const staff = cachedAssignmentsList.find(s => s.id === staffUid);
+		const activeYear = window.currentAcademicYear || currentAcademicYear;
+		if (!activeYear) {
+		  alert("Không xác định được năm học hiện tại.");
+		  return;
+		}
+
+		// Tìm giáo viên trong mảng cache hiện tại (chuẩn hóa so sánh email/id)
+		const targetId = String(staffUid).toLowerCase().trim();
+		const staff = cachedAssignmentsList.find(s => String(s.id || s.email).toLowerCase().trim() === targetId);
+		
 		if (!staff) {
 		  alert("Không tìm thấy thông tin phân công của nhân sự này trong bộ nhớ tạm!");
 		  return;
@@ -5645,31 +5860,37 @@ async function handleCreateSchoolAdmin(event) {
 
 		const db = firebase.firestore();
 		
-		// Ghi đè lại mảng modules mới lên Firestore (giữ nguyên các thông tin khác nhờ { merge: true })
+		// Ghi đè lại mảng modules mới lên Firestore
 		await db.collection("organizations")
 				.doc(orgId)
 				.collection("academicYears")
-				.doc(currentAcademicYear)
+				.doc(activeYear)
 				.collection("assignments")
-				.doc(staffUid)
+				.doc(staff.id) // Dùng chính xác id của document (email)
 				.set({
 				  modules: updatedModules,
-				  updatedAt: getVietnamTimestamp()
+				  updatedAt: (typeof getVietnamTimestamp === 'function' ? getVietnamTimestamp() : new Date().toISOString())
 				}, { merge: true });
 
 		// Cập nhật lại giá trị trong cache RAM ngay lập tức
 		staff.modules = updatedModules;
 
-		// Vẽ lại bảng rà soát để giao diện cập nhật ngay lập tức mà không cần tải lại trang
+		// Vẽ lại bảng rà soát
 		if (typeof loadAssignedUsersListByModule === 'function') {
 		  loadAssignedUsersListByModule();
 		} else {
 		  renderAssignedUsersTable(cachedAssignmentsList);
 		}
 
+		alert("Đã gỡ bỏ module thành công!");
+
 	  } catch (error) {
 		console.error("Lỗi khi gỡ module:", error);
-		alert("Lỗi khi gỡ module: " + error.message);
+		if (error.code === 'permission-denied' || error.message.includes("Missing or insufficient permissions")) {
+			alert("Lỗi phân quyền: Tài khoản của bạn không đủ quyền Admin để thực hiện thao tác này.");
+		} else {
+			alert("Lỗi khi gỡ module: " + error.message);
+		}
 	  }
 	}
 	
@@ -5691,62 +5912,190 @@ async function handleCreateSchoolAdmin(event) {
 	// 4.1. HÀM TẢI CẤU HÌNH MA TRẬN NGƯỠNG KPI
 	// ==========================================
 	async function loadMonthlyKPIRulesConfig() {
-	  try {
-		// 🌟 Sử dụng ensureOrgId() kết hợp biến cục bộ currentOrgIdGlobal
-		const orgId = typeof ensureOrgId === 'function' ? await ensureOrgId() : currentOrgIdGlobal;
-		if (!orgId) return;
+		try {
+			const orgId =
+				typeof ensureOrgId === 'function'
+					? await ensureOrgId()
+					: currentOrgIdGlobal;
 
-		const activeYear = window.currentAcademicYear || currentAcademicYear;
-		if (!activeYear) return;
+			if (!orgId) return;
 
-		const db = firebase.firestore();
-		const configCollectionRef = db.collection("organizations")
-									  .doc(orgId)
-									  .collection("academicYears")
-									  .doc(activeYear)
-									  .collection("KPIconfig");
+			const activeYear =
+				window.currentAcademicYear ||
+				currentAcademicYear;
 
-		// Tải đồng thời dữ liệu của cả Học sinh và Giáo viên từ sub-collection KPIconfig
-		const [studentDoc, teacherDoc] = await Promise.all([
-		  configCollectionRef.doc("student").get(),
-		  configCollectionRef.doc("teacher").get()
-		]);
+			if (!activeYear) return;
 
-		// Bind dữ liệu cho Học sinh
-		if (studentDoc.exists) {
-		  const sData = studentDoc.data();
-		  document.getElementById("cfg-student-kha-weeks").value = sData.kha_weeks ?? 1;
-		  document.getElementById("cfg-student-kha-count").value = sData.kha_count ?? 5;
-		  document.getElementById("cfg-student-kha-score").value = sData.kha_score ?? 5;
+			const db = firebase.firestore();
 
-		  document.getElementById("cfg-student-dat-weeks").value = sData.dat_weeks ?? 2;
-		  document.getElementById("cfg-student-dat-count").value = sData.dat_count ?? 10;
-		  document.getElementById("cfg-student-dat-score").value = sData.dat_score ?? 10;
+			const configCollectionRef = db
+				.collection("organizations")
+				.doc(orgId)
+				.collection("academicYears")
+				.doc(activeYear)
+				.collection("KPIconfig");
 
-		  document.getElementById("cfg-student-chuadat-weeks").value = sData.chuadat_weeks ?? 3;
-		  document.getElementById("cfg-student-chuadat-count").value = sData.chuadat_count ?? 15;
-		  document.getElementById("cfg-student-chuadat-score").value = sData.chuadat_score ?? 15;
+
+			// Tải đồng thời cấu hình Học sinh + Giáo viên
+			const [studentDoc, teacherDoc] =
+				await Promise.all([
+					configCollectionRef
+						.doc("student")
+						.get(),
+
+					configCollectionRef
+						.doc("teacher")
+						.get()
+				]);
+
+
+			// =========================================================
+			// HỌC SINH
+			// =========================================================
+
+			if (studentDoc.exists) {
+
+				const sData =
+					studentDoc.data() || {};
+
+
+				const studentBasePoint =
+					document.getElementById(
+						"cfg-student-basepoint"
+					);
+
+				if (studentBasePoint) {
+					studentBasePoint.value =
+						sData.BasePoint ?? "";
+				}
+
+
+				document.getElementById(
+					"cfg-student-kha-weeks"
+				).value =
+					sData.kha_weeks ?? 1;
+
+				document.getElementById(
+					"cfg-student-kha-count"
+				).value =
+					sData.kha_count ?? 5;
+
+				document.getElementById(
+					"cfg-student-kha-score"
+				).value =
+					sData.kha_score ?? 5;
+
+
+				document.getElementById(
+					"cfg-student-dat-weeks"
+				).value =
+					sData.dat_weeks ?? 2;
+
+				document.getElementById(
+					"cfg-student-dat-count"
+				).value =
+					sData.dat_count ?? 10;
+
+				document.getElementById(
+					"cfg-student-dat-score"
+				).value =
+					sData.dat_score ?? 10;
+
+
+				document.getElementById(
+					"cfg-student-chuadat-weeks"
+				).value =
+					sData.chuadat_weeks ?? 3;
+
+				document.getElementById(
+					"cfg-student-chuadat-count"
+				).value =
+					sData.chuadat_count ?? 15;
+
+				document.getElementById(
+					"cfg-student-chuadat-score"
+				).value =
+					sData.chuadat_score ?? 15;
+			}
+
+
+			// =========================================================
+			// GIÁO VIÊN / NHÂN SỰ
+			// =========================================================
+
+			if (teacherDoc.exists) {
+
+				const tData =
+					teacherDoc.data() || {};
+
+
+				const teacherBasePoint =
+					document.getElementById(
+						"cfg-teacher-basepoint"
+					);
+
+				if (teacherBasePoint) {
+					teacherBasePoint.value =
+						tData.BasePoint ?? "";
+				}
+
+
+				document.getElementById(
+					"cfg-teacher-kha-weeks"
+				).value =
+					tData.kha_weeks ?? 1;
+
+				document.getElementById(
+					"cfg-teacher-kha-count"
+				).value =
+					tData.kha_count ?? 2;
+
+				document.getElementById(
+					"cfg-teacher-kha-score"
+				).value =
+					tData.kha_score ?? 2;
+
+
+				document.getElementById(
+					"cfg-teacher-dat-weeks"
+				).value =
+					tData.dat_weeks ?? 2;
+
+				document.getElementById(
+					"cfg-teacher-dat-count"
+				).value =
+					tData.dat_count ?? 4;
+
+				document.getElementById(
+					"cfg-teacher-dat-score"
+				).value =
+					tData.dat_score ?? 4;
+
+
+				document.getElementById(
+					"cfg-teacher-chuadat-weeks"
+				).value =
+					tData.chuadat_weeks ?? 3;
+
+				document.getElementById(
+					"cfg-teacher-chuadat-count"
+				).value =
+					tData.chuadat_count ?? 6;
+
+				document.getElementById(
+					"cfg-teacher-chuadat-score"
+				).value =
+					tData.chuadat_score ?? 6;
+			}
+
+
+		} catch (error) {
+
+			console.error(
+				"Lỗi tải cấu hình KPI:",
+				error
+			);
 		}
-
-		// Bind dữ liệu cho Giáo viên / Nhân sự
-		if (teacherDoc.exists) {
-		  const tData = teacherDoc.data();
-		  document.getElementById("cfg-teacher-kha-weeks").value = tData.kha_weeks ?? 1;
-		  document.getElementById("cfg-teacher-kha-count").value = tData.kha_count ?? 2;
-		  document.getElementById("cfg-teacher-kha-score").value = tData.kha_score ?? 2;
-
-		  document.getElementById("cfg-teacher-dat-weeks").value = tData.dat_weeks ?? 2;
-		  document.getElementById("cfg-teacher-dat-count").value = tData.dat_count ?? 4;
-		  document.getElementById("cfg-teacher-dat-score").value = tData.dat_score ?? 4;
-
-		  document.getElementById("cfg-teacher-chuadat-weeks").value = tData.chuadat_weeks ?? 3;
-		  document.getElementById("cfg-teacher-chuadat-count").value = tData.chuadat_count ?? 6;
-		  document.getElementById("cfg-teacher-chuadat-score").value = tData.chuadat_score ?? 6;
-		}
-
-	  } catch (error) {
-		console.error("Lỗi tải cấu hình KPI:", error);
-	  }
 	}
   
 
@@ -5754,66 +6103,297 @@ async function handleCreateSchoolAdmin(event) {
 	// 4.2. HÀM LƯU CẤU HÌNH MA TRẬN NGƯỠNG KPI
 	// ==========================================
 	async function saveMonthlyKPIRulesConfig() {
-	  try {
-		// 🌟 1. Sử dụng ensureOrgId() để lấy OrgId chuẩn xác
-		const orgId = typeof ensureOrgId === 'function' ? await ensureOrgId() : currentOrgIdGlobal;
-		if (!orgId) {
-		  alert("Chưa xác định được thông tin đơn vị (OrgId). Vui lòng kiểm tra lại đăng nhập!");
-		  return;
+		try {
+
+			const orgId =
+				typeof ensureOrgId === 'function'
+					? await ensureOrgId()
+					: currentOrgIdGlobal;
+
+
+			if (!orgId) {
+
+				alert(
+					"Chưa xác định được thông tin đơn vị (OrgId). Vui lòng kiểm tra lại đăng nhập!"
+				);
+
+				return;
+			}
+
+
+			const activeYear =
+				window.currentAcademicYear ||
+				currentAcademicYear;
+
+
+			if (!activeYear) {
+
+				alert(
+					"Chưa chọn năm học hiện tại!"
+				);
+
+				return;
+			}
+
+
+			// =========================================================
+			// HÀM ĐỌC BASE POINT
+			// =========================================================
+
+			const readBasePoint = id => {
+
+				const el =
+					document.getElementById(id);
+
+
+				if (!el) {
+					return 0;
+				}
+
+
+				const value =
+					Number(el.value);
+
+
+				return Number.isFinite(value)
+					? value
+					: 0;
+			};
+
+
+			// =========================================================
+			// HỌC SINH
+			// =========================================================
+
+			const studentRules = {
+
+				// Điểm gốc của nhóm Học sinh
+				BasePoint:
+					readBasePoint(
+						"cfg-student-basepoint"
+					),
+
+
+				kha_weeks:
+					Number(
+						document.getElementById(
+							"cfg-student-kha-weeks"
+						).value
+					) || 1,
+
+
+				kha_count:
+					Number(
+						document.getElementById(
+							"cfg-student-kha-count"
+						).value
+					) || 5,
+
+
+				kha_score:
+					Number(
+						document.getElementById(
+							"cfg-student-kha-score"
+						).value
+					) || 5,
+
+
+				dat_weeks:
+					Number(
+						document.getElementById(
+							"cfg-student-dat-weeks"
+						).value
+					) || 2,
+
+
+				dat_count:
+					Number(
+						document.getElementById(
+							"cfg-student-dat-count"
+						).value
+					) || 10,
+
+
+				dat_score:
+					Number(
+						document.getElementById(
+							"cfg-student-dat-score"
+						).value
+					) || 10,
+
+
+				chuadat_weeks:
+					Number(
+						document.getElementById(
+							"cfg-student-chuadat-weeks"
+						).value
+					) || 3,
+
+
+				chuadat_count:
+					Number(
+						document.getElementById(
+							"cfg-student-chuadat-count"
+						).value
+					) || 15,
+
+
+				chuadat_score:
+					Number(
+						document.getElementById(
+							"cfg-student-chuadat-score"
+						).value
+					) || 15,
+
+
+				updatedAt:
+					getVietnamTimestamp()
+			};
+
+
+			// =========================================================
+			// GIÁO VIÊN / NHÂN SỰ
+			// =========================================================
+
+			const teacherRules = {
+
+				// Điểm gốc của nhóm Giáo viên / Nhân sự
+				BasePoint:
+					readBasePoint(
+						"cfg-teacher-basepoint"
+					),
+
+
+				kha_weeks:
+					Number(
+						document.getElementById(
+							"cfg-teacher-kha-weeks"
+						).value
+					) || 1,
+
+
+				kha_count:
+					Number(
+						document.getElementById(
+							"cfg-teacher-kha-count"
+						).value
+					) || 2,
+
+
+				kha_score:
+					Number(
+						document.getElementById(
+							"cfg-teacher-kha-score"
+						).value
+					) || 0,
+
+
+				dat_weeks:
+					Number(
+						document.getElementById(
+							"cfg-teacher-dat-weeks"
+						).value
+					) || 2,
+
+
+				dat_count:
+					Number(
+						document.getElementById(
+							"cfg-teacher-dat-count"
+						).value
+					) || 4,
+
+
+				dat_score:
+					Number(
+						document.getElementById(
+							"cfg-teacher-dat-score"
+						).value
+					) || 4,
+
+
+				chuadat_weeks:
+					Number(
+						document.getElementById(
+							"cfg-teacher-chuadat-weeks"
+						).value
+					) || 3,
+
+
+				chuadat_count:
+					Number(
+						document.getElementById(
+							"cfg-teacher-chuadat-count"
+						).value
+					) || 6,
+
+
+				chuadat_score:
+					Number(
+						document.getElementById(
+							"cfg-teacher-chuadat-score"
+						).value
+					) || 6,
+
+
+				updatedAt:
+					getVietnamTimestamp()
+			};
+
+
+			// =========================================================
+			// FIRESTORE
+			// =========================================================
+
+			const db =
+				firebase.firestore();
+
+
+			const configCollectionRef =
+				db
+					.collection("organizations")
+					.doc(orgId)
+					.collection("academicYears")
+					.doc(activeYear)
+					.collection("KPIconfig");
+
+
+			await Promise.all([
+
+				configCollectionRef
+					.doc("student")
+					.set(
+						studentRules,
+						{ merge: true }
+					),
+
+				configCollectionRef
+					.doc("teacher")
+					.set(
+						teacherRules,
+						{ merge: true }
+					)
+			]);
+
+
+			alert(
+				"💾 Lưu Ma trận Ngưỡng và Điểm gốc KPI cho Học sinh và Giáo viên thành công!"
+			);
+
+
+		} catch (error) {
+
+			console.error(
+				"Lỗi lưu ma trận KPI:",
+				error
+			);
+
+
+			alert(
+				"Lỗi: " +
+				error.message
+			);
 		}
-
-		const activeYear = window.currentAcademicYear || currentAcademicYear;
-		if (!activeYear) {
-		  alert("Chưa chọn năm học hiện tại!");
-		  return;
-		}
-
-		// 🌟 2. Đóng gói dữ liệu cho Học sinh
-		const studentRules = {
-		  kha_weeks: Number(document.getElementById("cfg-student-kha-weeks").value) || 1,
-		  kha_count: Number(document.getElementById("cfg-student-kha-count").value) || 5,
-		  kha_score: Number(document.getElementById("cfg-student-kha-score").value) || 5,
-		  dat_weeks: Number(document.getElementById("cfg-student-dat-weeks").value) || 2,
-		  dat_count: Number(document.getElementById("cfg-student-dat-count").value) || 10,
-		  dat_score: Number(document.getElementById("cfg-student-dat-score").value) || 10,
-		  chuadat_weeks: Number(document.getElementById("cfg-student-chuadat-weeks").value) || 3,
-		  chuadat_count: Number(document.getElementById("cfg-student-chuadat-count").value) || 15,
-		  chuadat_score: Number(document.getElementById("cfg-student-chuadat-score").value) || 15,
-		  updatedAt: getVietnamTimestamp()
-		};
-
-		// 🌟 3. Đóng gói dữ liệu cho Giáo viên / Nhân sự
-		const teacherRules = {
-		  kha_weeks: Number(document.getElementById("cfg-teacher-kha-weeks").value) || 1,
-		  kha_count: Number(document.getElementById("cfg-teacher-kha-count").value) || 2,
-		  kha_score: Number(document.getElementById("cfg-teacher-kha-score").value) || 2,
-		  dat_weeks: Number(document.getElementById("cfg-teacher-dat-weeks").value) || 2,
-		  dat_count: Number(document.getElementById("cfg-teacher-dat-count").value) || 4,
-		  dat_score: Number(document.getElementById("cfg-teacher-dat-score").value) || 4,
-		  chuadat_weeks: Number(document.getElementById("cfg-teacher-chuadat-weeks").value) || 3,
-		  chuadat_count: Number(document.getElementById("cfg-teacher-chuadat-count").value) || 6,
-		  chuadat_score: Number(document.getElementById("cfg-teacher-chuadat-score").value) || 6,
-		  updatedAt: getVietnamTimestamp()
-		};
-
-		const db = firebase.firestore();
-		const configCollectionRef = db.collection("organizations")
-									  .doc(orgId)
-									  .collection("academicYears")
-									  .doc(activeYear)
-									  .collection("KPIconfig");
-
-		// 🌟 4. Lưu đồng thời 2 document vào sub-collection KPIconfig (student và teacher)
-		await Promise.all([
-		  configCollectionRef.doc("student").set(studentRules, { merge: true }),
-		  configCollectionRef.doc("teacher").set(teacherRules, { merge: true })
-		]);
-
-		alert("💾 Lưu Ma trận Ngưỡng cho cả Học sinh và Giáo viên thành công!");
-	  } catch (error) {
-		console.error("Lỗi lưu ma trận KPI:", error);
-		alert("Lỗi: " + error.message);
-	  }
 	}
 
 	// ==========================================
@@ -6134,1348 +6714,1629 @@ async function initGridCard5() {
 	// 4. SECTION 5.2: BÁO CÁO TUẦN (CÓ CACHE)
 	// ==========================================
 
-async function loadGridSection2Weekly(
-    forceRefresh = false,
-    filterKeywordFromCaller = ""
-) {
+	async function loadGridSection2Weekly(
+		forceRefresh = false,
+		filterKeywordFromCaller = ""
+	) {
 
-    const tableBody =
-        document.getElementById("grid-sec2-body-rows");
-
-    const headerRow =
-        document.getElementById("grid-sec2-header-row");
-
-    const dateInput =
-        document.getElementById("grid-sec2-date-select");
-
-    const filterInput =
-        document.getElementById("grid-sec2-filter-class");
+		const tableBody =
+			document.getElementById("grid-sec2-body-rows");
 
-    const targetTypeSelect =
-        document.getElementById("grid-sec2-target-type");
+		const headerRow =
+			document.getElementById("grid-sec2-header-row");
 
-    const badge =
-        document.getElementById("sec2-cache-time-badge");
+		const dateInput =
+			document.getElementById("grid-sec2-date-select");
 
+		const filterInput =
+			document.getElementById("grid-sec2-filter-class");
 
-    if (!tableBody || !dateInput) {
-        console.error(
-            "❌ Không tìm thấy control của Section 5.2"
-        );
-        return;
-    }
+		const targetTypeSelect =
+			document.getElementById("grid-sec2-target-type");
 
+		const badge =
+			document.getElementById("sec2-cache-time-badge");
 
-    // =========================================================
-    // 1. NGÀY ĐƯỢC CHỌN
-    // =========================================================
 
-    if (!dateInput.value) {
+		if (!tableBody || !dateInput) {
+			console.error(
+				"❌ Không tìm thấy control của Section 5.2"
+			);
+			return;
+		}
 
-        const now = new Date();
 
-        dateInput.value =
-            now.toLocaleDateString("en-CA");
-    }
+		// =========================================================
+		// 1. NGÀY
+		// =========================================================
 
+		if (!dateInput.value) {
 
-    const selectedDateStr =
-        dateInput.value.trim();
+			const now = new Date();
 
+			dateInput.value =
+				now.toLocaleDateString("en-CA");
+		}
 
-    // Filter:
-    // ưu tiên giá trị truyền trực tiếp từ filterGridSection2Table()
-    // nếu không có thì lấy từ input.
-    const filterKeyword =
-        String(
-            filterKeywordFromCaller ||
-            (
-                filterInput
-                    ? filterInput.value
-                    : ""
-            ) ||
-            ""
-        )
-            .trim()
-            .toLowerCase();
 
+		const selectedDateStr =
+			dateInput.value.trim();
 
-    // =========================================================
-    // 2. ĐỐI TƯỢNG
-    // =========================================================
 
-    const targetType =
-        targetTypeSelect
-            ? String(
-                targetTypeSelect.value ||
-                "STUDENT"
-            )
-                .trim()
-                .toUpperCase()
-            : "STUDENT";
+		const filterKeyword =
+			String(
+				filterKeywordFromCaller ||
+				(
+					filterInput
+						? filterInput.value
+						: ""
+				) ||
+				""
+			)
+			.trim()
+			.toLowerCase();
 
 
-    // =========================================================
-    // 3. TÍNH TUẦN
-    //
-    // Thứ Hai -> Chủ Nhật
-    // =========================================================
+		// =========================================================
+		// 2. TARGET TYPE
+		// =========================================================
 
-    const inputDate =
-        new Date(
-            `${selectedDateStr}T00:00:00`
-        );
+		const targetType =
+			targetTypeSelect
+				? String(
+					targetTypeSelect.value ||
+					"STUDENT"
+				)
+					.trim()
+					.toUpperCase()
+				: "STUDENT";
 
 
-    if (
-        isNaN(
-            inputDate.getTime()
-        )
-    ) {
+		// =========================================================
+		// 3. TÍNH TUẦN
+		// =========================================================
 
-        tableBody.innerHTML = `
-            <tr>
-                <td colspan="30"
-                    style="
-                        text-align:center;
-                        color:red;
-                        padding:20px;
-                    ">
-                    Ngày được chọn không hợp lệ.
-                </td>
-            </tr>
-        `;
+		const inputDate =
+			new Date(
+				`${selectedDateStr}T00:00:00`
+			);
 
-        return;
-    }
 
+		if (isNaN(inputDate.getTime())) {
 
-    const dayOfWeek =
-        inputDate.getDay();
+			tableBody.innerHTML = `
+				<tr>
+					<td colspan="30"
+						style="
+							text-align:center;
+							color:red;
+							padding:20px;
+						">
+						Ngày được chọn không hợp lệ.
+					</td>
+				</tr>
+			`;
 
+			return;
+		}
 
-    const diffToMonday =
-        dayOfWeek === 0
-            ? -6
-            : 1 - dayOfWeek;
 
+		const dayOfWeek =
+			inputDate.getDay();
 
-    const monday =
-        new Date(inputDate);
 
-    monday.setDate(
-        monday.getDate() +
-        diffToMonday
-    );
+		const diffToMonday =
+			dayOfWeek === 0
+				? -6
+				: 1 - dayOfWeek;
 
 
-    const sunday =
-        new Date(monday);
+		const monday =
+			new Date(inputDate);
 
-    sunday.setDate(
-        monday.getDate() + 6
-    );
 
+		monday.setDate(
+			monday.getDate() +
+			diffToMonday
+		);
 
-    function formatDateYYYYMMDD(date) {
 
-        return [
-            date.getFullYear(),
-            String(
-                date.getMonth() + 1
-            ).padStart(2, "0"),
-            String(
-                date.getDate()
-            ).padStart(2, "0")
-        ].join("-");
-    }
+		const sunday =
+			new Date(monday);
 
 
-    const mondayStr =
-        formatDateYYYYMMDD(monday);
+		sunday.setDate(
+			monday.getDate() + 6
+		);
 
-    const sundayStr =
-        formatDateYYYYMMDD(sunday);
 
+		function formatDateYYYYMMDD(date) {
 
-    // =========================================================
-    // 4. ORG
-    // =========================================================
+			return [
+				date.getFullYear(),
 
-    const orgId =
-        window.currentOrgIdGlobal;
+				String(
+					date.getMonth() + 1
+				).padStart(2, "0"),
 
+				String(
+					date.getDate()
+				).padStart(2, "0")
 
-    if (!orgId) {
+			].join("-");
+		}
 
-        tableBody.innerHTML = `
-            <tr>
-                <td colspan="30"
-                    style="
-                        text-align:center;
-                        color:red;
-                        padding:20px;
-                    ">
-                    Chưa xác định được OrgId.
-                </td>
-            </tr>
-        `;
 
-        return;
-    }
+		const mondayStr =
+			formatDateYYYYMMDD(monday);
 
+		const sundayStr =
+			formatDateYYYYMMDD(sunday);
 
-    // =========================================================
-    // 5. NĂM HỌC
-    //
-    // Ưu tiên currentAcademicYearIdGlobal.
-    // =========================================================
 
-    let academicYearId = "";
+		// =========================================================
+		// 4. ORG
+		// =========================================================
 
+		const orgId =
+			window.currentOrgIdGlobal;
 
-    if (
-        window.currentAcademicYearIdGlobal
-    ) {
 
-        academicYearId =
-            String(
-                window.currentAcademicYearIdGlobal
-            ).trim();
+		if (!orgId) {
 
-    }
+			tableBody.innerHTML = `
+				<tr>
+					<td colspan="30"
+						style="
+							text-align:center;
+							color:red;
+							padding:20px;
+						">
+						Chưa xác định được OrgId.
+					</td>
+				</tr>
+			`;
 
-    else if (
-        window.currentAcademicYear
-    ) {
+			return;
+		}
 
-        academicYearId =
-            String(
-                window.currentAcademicYear
-            ).trim();
 
-    }
+		// =========================================================
+		// 5. NĂM HỌC
+		// =========================================================
 
-    else {
+		let academicYearId = "";
 
-        const yearsArr =
-            window.currentAcademicYearsGlobal;
 
+		if (
+			window.currentAcademicYearIdGlobal
+		) {
 
-        if (
-            Array.isArray(yearsArr) &&
-            yearsArr.length > 0
-        ) {
+			academicYearId =
+				String(
+					window.currentAcademicYearIdGlobal
+				).trim();
 
-            const yearItem =
-                yearsArr.find(item => {
+		} else if (
+			window.currentAcademicYear
+		) {
 
-                    if (
-                        item &&
-                        typeof item === "object"
-                    ) {
+			academicYearId =
+				String(
+					window.currentAcademicYear
+				).trim();
 
-                        return (
-                            item.id ||
-                            item.name ||
-                            item.year
-                        );
-                    }
+		} else {
 
-                    return !!item;
-                });
+			const yearsArr =
+				window.currentAcademicYearsGlobal;
 
 
-            if (yearItem) {
+			if (
+				Array.isArray(yearsArr) &&
+				yearsArr.length > 0
+			) {
 
-                academicYearId =
-                    String(
+				const yearItem =
+					yearsArr.find(
+						item => !!item
+					);
 
-                        typeof yearItem === "object"
 
-                            ? (
-                                yearItem.id ||
-                                yearItem.name ||
-                                yearItem.year
-                            )
+				if (yearItem) {
 
-                            : yearItem
+					academicYearId =
+						String(
 
-                    ).trim();
-            }
-        }
-    }
+							typeof yearItem === "object"
+								? (
+									yearItem.id ||
+									yearItem.name ||
+									yearItem.year ||
+									""
+								)
+								: yearItem
 
+						).trim();
+				}
+			}
+		}
 
-    if (!academicYearId) {
 
-        tableBody.innerHTML = `
-            <tr>
-                <td colspan="30"
-                    style="
-                        text-align:center;
-                        color:red;
-                        padding:20px;
-                    ">
-                    Chưa xác định được năm học.
-                </td>
-            </tr>
-        `;
+		if (!academicYearId) {
 
-        return;
-    }
+			tableBody.innerHTML = `
+				<tr>
+					<td colspan="30"
+						style="
+							text-align:center;
+							color:red;
+							padding:20px;
+						">
+						Chưa xác định được năm học.
+					</td>
+				</tr>
+			`;
 
+			return;
+		}
 
-    // =========================================================
-    // 6. CACHE
-    //
-    // Thống nhất với filterGridSection2Table()
-    // =========================================================
 
-    const cacheKey =
-        `${academicYearId}_` +
-        `${targetType.toLowerCase()}_` +
-        `weekly_${mondayStr}_to_${sundayStr}_v3`;
+		// =========================================================
+		// 6. CACHE
+		// =========================================================
 
+		const cacheKey =
+			`${academicYearId}_` +
+			`${targetType.toLowerCase()}_` +
+			`weekly_${mondayStr}_to_${sundayStr}_v4`;
 
-    if (
-        !forceRefresh &&
-        typeof cachedGridWeeklyData !== "undefined" &&
-        cachedGridWeeklyData[cacheKey]
-    ) {
 
-        renderWeeklyTable(
-            cachedGridWeeklyData[cacheKey],
-            filterKeyword
-        );
+		if (
+			!forceRefresh &&
+			typeof cachedGridWeeklyData !== "undefined" &&
+			cachedGridWeeklyData[cacheKey]
+		) {
 
+			renderWeeklyTable(
+				cachedGridWeeklyData[cacheKey],
+				filterKeyword
+			);
 
-        if (badge) {
 
-            badge.innerText =
-                `⚡ Dùng Cache RAM (` +
-                `${targetType === "TEACHER"
-                    ? "Giáo viên"
-                    : "Học sinh"} - ` +
-                `Tuần ${mondayStr} đến ${sundayStr})`;
-        }
+			if (badge) {
 
-        return;
-    }
+				badge.innerText =
+					`⚡ Dùng Cache RAM (` +
+					`${targetType === "TEACHER"
+						? "Giáo viên"
+						: "Học sinh"} - ` +
+					`Tuần ${mondayStr} đến ${sundayStr})`;
+			}
 
 
-    // =========================================================
-    // 7. LOADING
-    // =========================================================
+			return;
+		}
 
-    tableBody.innerHTML = `
-        <tr>
-            <td colspan="30"
-                style="
-                    text-align:center;
-                    color:#6c757d;
-                    padding:20px;
-                ">
-                ⏳ Đang tổng hợp dữ liệu tuần
-                ${mondayStr} → ${sundayStr}...
-            </td>
-        </tr>
-    `;
 
+		// =========================================================
+		// 7. LOADING
+		// =========================================================
 
-    try {
+		tableBody.innerHTML = `
+			<tr>
+				<td colspan="30"
+					style="
+						text-align:center;
+						color:#6c757d;
+						padding:20px;
+					">
+					⏳ Đang tổng hợp dữ liệu tuần
+					${mondayStr} → ${sundayStr}...
+				</td>
+			</tr>
+		`;
 
-        const db =
-            firebase.firestore();
 
+		try {
 
-        // =====================================================
-        // 8. LẤY USERS
-        //
-        // organizations/{orgId}/users/{uid}
-        //
-        // uid chính là entityId.
-        // =====================================================
+			const db =
+				firebase.firestore();
 
-        const usersMap = {};
 
+			// =====================================================
+			// 8. CACHE USERS
+			// =====================================================
 
-        const usersSnapshot =
-            await db
-                .collection("organizations")
-                .doc(orgId)
-                .collection("users")
-                .get();
+			window._sec2UsersCache =
+				window._sec2UsersCache || {};
 
 
-        usersSnapshot.forEach(userDoc => {
+			let usersCache =
+				window._sec2UsersCache[orgId];
 
-            const userData =
-                userDoc.data() || {};
 
+			const cacheInvalid =
+				!usersCache ||
+				!usersCache.byCode ||
+				!usersCache.byUid;
 
-            const role =
-                String(
-                    userData.role || ""
-                )
-                    .trim()
-                    .toUpperCase();
 
+			if (
+				forceRefresh ||
+				cacheInvalid
+			) {
 
-            if (
-                role !==
-                targetType
-            ) {
-                return;
-            }
+				const usersSnapshot =
+					await db
+						.collection("organizations")
+						.doc(orgId)
+						.collection("users")
+						.get();
 
 
-            const entityId =
-                String(
-                    userData.uid ||
-                    userDoc.id ||
-                    ""
-                ).trim();
+				const byCode = {};
+				const byUid = {};
 
 
-            if (!entityId) {
-                return;
-            }
+				usersSnapshot.forEach(
+					userDoc => {
 
+						const userData =
+							userDoc.data() || {};
 
-            usersMap[entityId] = {
 
-                id:
-                    entityId,
+						const uid =
+							String(
+								userData.uid ||
+								userDoc.id ||
+								""
+							).trim();
 
-                fullName:
-                    userData.fullName ||
-                    entityId,
 
-                category:
-                    userData.category ||
-                    userData.className ||
-                    userData.organizationUnit ||
-                    "Chưa phân loại",
+						const code =
+							String(
+								userData.code ||
+								userData.memberId ||
+								""
+							).trim();
 
-                role:
-                    role
-            };
-        });
 
+						const role =
+							String(
+								userData.role ||
+								""
+							)
+								.trim()
+								.toUpperCase();
 
-        // =====================================================
-        // 9. LẤY FIELD KPI CHÍNH THỨC THEO TARGET TYPE (ĐÃ FIX LỌC MODULE)
-        // =====================================================
-        const kpiFieldsMap = {};
 
-        // Lấy danh sách các module phù hợp với targetType của Section 2 (ví dụ: grid-sec2-target-type)
-        const modulesSnapshot = await db
-            .collection("organizations")
-            .doc(orgId)
-            .collection("modules")
-            .where("targetType", "==", targetType) // Lọc đúng TEACHER hoặc STUDENT của section 2
-            .get();
+						// Chỉ lấy đúng targetType
 
-        const activeFieldKeys = new Set();
-        modulesSnapshot.forEach(modDoc => {
-            const modData = modDoc.data() || {};
-            
-            // Hỗ trợ linh hoạt cả dạng mảng chuỗi hoặc mảng object
-            if (Array.isArray(modData.fields)) {
-                modData.fields.forEach(f => {
-                    if (typeof f === "string" && f.trim()) {
-                        activeFieldKeys.add(f.trim());
-                    } else if (f && typeof f === "object") {
-                        const subKey = f.key || f.id || f.fieldKey || "";
-                        if (subKey) activeFieldKeys.add(String(subKey).trim());
-                    }
-                });
-            }
-            if (modData.fieldsMap && typeof modData.fieldsMap === "object") {
-                Object.keys(modData.fieldsMap).forEach(fKey => activeFieldKeys.add(String(fKey).trim()));
-            }
-        });
+						if (
+							role !== targetType
+						) {
+							return;
+						}
 
-        console.log("🔍 [SEC2 DEBUG] activeFieldKeys cho " + targetType + ":", Array.from(activeFieldKeys));
 
-        const fieldsSnapshot = await db
-            .collection("organizations")
-            .doc(orgId)
-            .collection("fields")
-            .get();
+						const userInfo = {
 
-        fieldsSnapshot.forEach(fieldDoc => {
-            const fieldData = fieldDoc.data() || {};
+							id:
+								code || uid,
 
-            if (fieldData.isKpi !== true) {
-                return;
-            }
+							uid:
+								uid,
 
-            const fieldKey = String(
-                fieldData.key ||
-                fieldDoc.id ||
-                ""
-            ).trim();
+							code:
+								code,
 
-            if (!fieldKey) {
-                return;
-            }
+							fullName:
+								userData.fullName ||
+								userData.displayName ||
+								uid,
 
-            // Nếu module có cấu hình giới hạn trường thì kiểm tra
-            if (activeFieldKeys.size > 0 && !activeFieldKeys.has(fieldKey)) {
-                return;
-            }
+							category:
+								userData.category ||
+								userData.className ||
+								userData.organizationUnit ||
+								"Chưa phân loại",
 
-            kpiFieldsMap[fieldKey] = {
-                id: fieldKey,
-                key: fieldKey,
-                name: fieldData.label || fieldKey,
-                label: fieldData.label || fieldKey,
-                type: fieldData.type || "text",
-                scoreWeight: Number(fieldData.scoreWeight ?? 0),
-                weeklyThreshold: Number(fieldData.kpiWeekly ?? 0),
-                kpiOptions: (fieldData.kpiOptions && typeof fieldData.kpiOptions === "object") ? fieldData.kpiOptions : {},
-                options: Array.isArray(fieldData.options) ? fieldData.options : []
-            };
-        });
+							role:
+								role
+						};
 
-        const kpiFieldsList = Object.values(kpiFieldsMap);
 
-        console.log(
-            "📊 [SEC2 DEBUG] KPI WEEKLY FIELDS chính thức sau khi lọc cho " + targetType + ":",
-            kpiFieldsList
-        );
+						// KEY CHÍNH = CODE
 
+						if (code) {
 
-        // =====================================================
-        // 10. HEADER
-        // =====================================================
+							byCode[code] =
+								userInfo;
+						}
 
-        let headerHtml = `
 
-            <th style="width:90px;">
-                Mã định danh
-            </th>
+						// KEY PHỤ = UID
 
-            <th style="width:170px;">
-                Họ và tên
-            </th>
+						if (uid) {
 
-            <th style="width:130px;">
-                ${
-                    targetType === "TEACHER"
-                        ? "Tổ chuyên môn"
-                        : "Lớp"
-                }
-            </th>
-        `;
+							byUid[uid] =
+								userInfo;
+						}
+					}
+				);
 
 
-        kpiFieldsList.forEach(field => {
+				usersCache = {
 
-            headerHtml += `
+					byCode:
+						byCode,
 
-                <th style="
-                    text-align:center;
-                    min-width:105px;
-                ">
-                    ${field.name}
-                </th>
-            `;
-        });
+					byUid:
+						byUid,
 
+					cachedAt:
+						Date.now()
+				};
 
-        headerHtml += `
 
-            <th style="
-                width:110px;
-                text-align:center;
-            ">
-                Tổng điểm trừ
-            </th>
+				window._sec2UsersCache[
+					orgId
+				] =
+					usersCache;
 
-            <th style="
-                width:130px;
-                text-align:center;
-            ">
-                Cảnh báo Tuần
-            </th>
-        `;
 
+				// Đồng bộ với cache chung nếu cần
 
-        if (headerRow) {
+				window.cachedUsersMap =
+					window.cachedUsersMap || {};
 
-            headerRow.innerHTML =
-                headerHtml;
-        }
+			}
 
 
-        // =====================================================
-        // 11. KHỞI TẠO SUMMARY CHO TẤT CẢ USER
-        // =====================================================
+			const usersByCode =
+				usersCache.byCode || {};
 
-        const summaryMap = {};
+			const usersByUid =
+				usersCache.byUid || {};
 
 
-        Object.keys(
-            usersMap
-        ).forEach(entityId => {
+			// =====================================================
+			// 9. MODULES
+			// =====================================================
 
-            const user =
-                usersMap[entityId];
+			window._sec2ModulesCache =
+				window._sec2ModulesCache || {};
 
 
-            summaryMap[entityId] = {
+			let modulesCache =
+				window._sec2ModulesCache[
+					orgId
+				];
 
-                id:
-                    entityId,
 
-                name:
-                    user.fullName ||
-                    entityId,
+			if (
+				!modulesCache ||
+				forceRefresh
+			) {
 
-                className:
-                    user.category ||
-                    "Chưa phân loại",
+				const modulesSnapshot =
+					await db
+						.collection("organizations")
+						.doc(orgId)
+						.collection("modules")
+						.get();
 
-                // Tổng số lượt KPI
-                totalCount:
-                    0,
 
-                // Tổng điểm âm dạng dương
-                totalPenalty:
-                    0,
+				modulesCache =
+					modulesSnapshot.docs.map(
+						modDoc => ({
 
-                // Tổng điểm dương
-                totalBonus:
-                    0,
+							id:
+								modDoc.id,
 
-                // Điểm ròng
-                totalScore:
-                    0,
+							data:
+								modDoc.data() || {}
+						})
+					);
 
-                // Số lượt KPI âm
-                negativeCount:
-                    0,
 
-                // Số tuần bị vi phạm
-                negativeWeeks:
-                    new Set(),
+				window._sec2ModulesCache[
+					orgId
+				] =
+					modulesCache;
+			}
 
-                // Số lượt từng KPI
-                kpiCounts:
-                    {}
-            };
-        });
 
+			const targetModules =
+				modulesCache.filter(
+					module => {
 
-        // =====================================================
-        // 12. LẤY MODULE
-        // =====================================================
+						const modTargetType =
+							String(
+								module.data.targetType ||
+								""
+							)
+								.trim()
+								.toUpperCase();
 
-        //const modulesSnapshot =
-        //    await db
-        //        .collection("organizations")
-        //        .doc(orgId)
-        //        .collection("modules")
-        //        .get();
 
+						return (
+							modTargetType ===
+							targetType
+						);
+					}
+				);
 
-        const moduleDocs =
-            modulesSnapshot.docs.filter(
-                modDoc => {
 
-                    const modData =
-                        modDoc.data() || {};
+			if (
+				targetModules.length === 0
+			) {
 
+				tableBody.innerHTML = `
+					<tr>
+						<td colspan="30"
+							style="
+								text-align:center;
+								color:#6c757d;
+								padding:20px;
+							">
+							Không tìm thấy module cho
+							${
+								targetType === "TEACHER"
+									? "Giáo viên"
+									: "Học sinh"
+							}.
+						</td>
+					</tr>
+				`;
 
-                    const modTargetType =
-                        String(
-                            modData.targetType || ""
-                        )
-                            .trim()
-                            .toUpperCase();
+				return;
+			}
 
 
-                    return (
-                        modTargetType ===
-                        targetType
-                    );
-                }
-            );
+			// =====================================================
+			// 10. KPI FIELDS
+			// =====================================================
 
+			const kpiFieldsMap = {};
 
-        if (
-            moduleDocs.length === 0
-        ) {
 
-            tableBody.innerHTML = `
-                <tr>
-                    <td colspan="30"
-                        style="
-                            text-align:center;
-                            color:#6c757d;
-                            padding:20px;
-                        ">
-                        Không tìm thấy module cho
-                        ${
-                            targetType === "TEACHER"
-                                ? "Giáo viên"
-                                : "Học sinh"
-                        }.
-                    </td>
-                </tr>
-            `;
+			targetModules.forEach(
+				module => {
 
-            return;
-        }
+					const fieldsArr =
+						Array.isArray(
+							module.data.fields
+						)
+							? module.data.fields
+							: [];
 
 
-        // =====================================================
-        // 13. ĐỌC RECORDS CỦA MODULE
-        //
-        // academicYears/{year}/modulesData/{moduleId}/records
-        // =====================================================
+					fieldsArr.forEach(
+						fieldObj => {
 
-        for (
-            const moduleDoc
-            of moduleDocs
-        ) {
+							if (!fieldObj) {
+								return;
+							}
 
-            const recordsSnapshot =
-                await db
-                    .collection("organizations")
-                    .doc(orgId)
-                    .collection("academicYears")
-                    .doc(academicYearId)
-                    .collection("modulesData")
-                    .doc(moduleDoc.id)
-                    .collection("records")
-                    .get();
 
+							const fieldKey =
+								String(
+									fieldObj.key ||
+									fieldObj.id ||
+									fieldObj.fieldKey ||
+									""
+								).trim();
 
-            recordsSnapshot.forEach(
-                recordDoc => {
 
-                    const data =
-                        recordDoc.data() || {};
+							if (!fieldKey) {
+								return;
+							}
 
 
-                    // -------------------------------------------------
-                    // ENTITY ID
-                    // -------------------------------------------------
+							kpiFieldsMap[
+								fieldKey
+							] = {
 
-                    let entityId =
-                        data.entityId ||
-                        data.targetId ||
-                        "";
+								id:
+									fieldKey,
 
+								key:
+									fieldKey,
 
-                    if (!entityId) {
+								name:
+									fieldObj.label ||
+									fieldObj.name ||
+									fieldKey,
 
-                        const recordId =
-                            String(
-                                recordDoc.id ||
-                                ""
-                            );
+								label:
+									fieldObj.label ||
+									fieldObj.name ||
+									fieldKey,
 
+								type:
+									fieldObj.type ||
+									"text",
 
-                        // Ví dụ:
-                        // KL001_2026-09-17
-                        entityId =
-                            recordId.split("_")[0];
-                    }
+								scoreWeight:
+									Number(
+										fieldObj.scoreWeight ??
+										0
+									),
 
+								weeklyThreshold:
+									Number(
+										fieldObj.kpiWeekly ??
+										fieldObj.weeklyThreshold ??
+										0
+									),
 
-                    entityId =
-                        String(
-                            entityId || ""
-                        ).trim();
+								kpiOptions:
+									(
+										fieldObj.kpiOptions &&
+										typeof fieldObj.kpiOptions === "object"
+									)
+										? fieldObj.kpiOptions
+										: {},
 
+								options:
+									Array.isArray(
+										fieldObj.options
+									)
+										? fieldObj.options
+										: []
+							};
+						}
+					);
+				}
+			);
 
-                    if (
-                        !entityId ||
-                        !summaryMap[entityId]
-                    ) {
-                        return;
-                    }
 
+			const kpiFieldsList =
+				Object.values(
+					kpiFieldsMap
+				);
 
-                    // -------------------------------------------------
-                    // DATE
-                    // -------------------------------------------------
 
-                    const recordDate =
-                        String(
-                            data.date || ""
-                        ).trim();
+			// =====================================================
+			// 11. HEADER
+			// =====================================================
 
+			let headerHtml = `
 
-                    if (
-                        !recordDate ||
-                        recordDate < mondayStr ||
-                        recordDate > sundayStr
-                    ) {
-                        return;
-                    }
+				<th style="width:90px;">
+					Mã định danh
+				</th>
 
+				<th style="width:170px;">
+					Họ và tên
+				</th>
 
-                    // -------------------------------------------------
-                    // XÁC ĐỊNH TUẦN
-                    // -------------------------------------------------
+				<th style="width:130px;">
+					${
+						targetType === "TEACHER"
+							? "Tổ chuyên môn"
+							: "Lớp"
+					}
+				</th>
+			`;
 
-                    const weekKey =
-                        mondayStr;
 
+			kpiFieldsList.forEach(
+				field => {
 
-                    // -------------------------------------------------
-                    // TỪNG FIELD KPI
-                    // -------------------------------------------------
+					headerHtml += `
 
-                    kpiFieldsList.forEach(
-                        kpiField => {
+						<th style="
+							text-align:center;
+							min-width:105px;
+						">
+							${field.name}
+						</th>
+					`;
+				}
+			);
 
-                            const fieldKey =
-                                kpiField.key;
 
+			headerHtml += `
 
-                            let value =
-                                data[fieldKey];
+				<th style="
+					width:110px;
+					text-align:center;
+				">
+					Tổng điểm trừ
+				</th>
 
+				<th style="
+					width:130px;
+					text-align:center;
+				">
+					Cảnh báo Tuần
+				</th>
+			`;
 
-                            // Fallback changes
-                            if (
-                                value === undefined &&
-                                data.changes &&
-                                data.changes[fieldKey] !== undefined
-                            ) {
 
-                                value =
-                                    data.changes[fieldKey];
-                            }
+			if (headerRow) {
 
+				headerRow.innerHTML =
+					headerHtml;
+			}
 
-                            if (
-                                value === undefined ||
-                                value === null ||
-                                value === ""
-                            ) {
-                                return;
-                            }
 
+			// =====================================================
+			// 12. SUMMARY
+			// =====================================================
 
-                            // =================================================
-                            // A. OPTIONS
-                            // =================================================
+			const summaryMap = {};
 
-                            if (
-                                Array.isArray(value)
-                            ) {
 
-                                value.forEach(
-                                    item => {
+			Object.entries(
+				usersByCode
+			).forEach(
+				([code, user]) => {
 
-                                        let optionValue =
-                                            item;
+					summaryMap[code] = {
 
+						id:
+							code,
 
-                                        if (
-                                            item &&
-                                            typeof item === "object"
-                                        ) {
+						code:
+							user.code,
 
-                                            optionValue =
-                                                item.value !== undefined
-                                                    ? item.value
-                                                    : item.label !== undefined
-                                                        ? item.label
-                                                        : item.name !== undefined
-                                                            ? item.name
-                                                            : "";
-                                        }
+						uid:
+							user.uid,
 
+						name:
+							user.fullName ||
+							code,
 
-                                        optionValue =
-                                            String(
-                                                optionValue || ""
-                                            ).trim();
+						className:
+							user.category ||
+							"Chưa phân loại",
 
+						totalCount:
+							0,
 
-                                        if (
-                                            !optionValue
-                                        ) {
-                                            return;
-                                        }
+						totalPenalty:
+							0,
 
+						totalBonus:
+							0,
 
-                                        // -----------------------------------------
-                                        // LẤY SCOREWEIGHT RIÊNG CỦA OPTION
-                                        // -----------------------------------------
+						totalScore:
+							0,
 
-                                        const optionConfig =
-                                            kpiField.kpiOptions &&
-                                            typeof kpiField.kpiOptions === "object"
+						negativeCount:
+							0,
 
-                                                ? kpiField.kpiOptions[
-                                                    optionValue
-                                                ]
+						negativeWeeks:
+							new Set(),
 
-                                                : null;
+						kpiCounts:
+							{}
+					};
+				}
+			);
 
 
-                                        let scoreWeight =
-                                            0;
+			// =====================================================
+			// 13. HÀM TÌM SUMMARY
+			// =====================================================
 
+			function getSummaryByEntityId(
+				rawEntityId
+			) {
 
-                                        if (
-                                            optionConfig &&
-                                            optionConfig.scoreWeight !== undefined &&
-                                            optionConfig.scoreWeight !== null
-                                        ) {
+				const entityId =
+					String(
+						rawEntityId || ""
+					).trim();
 
-                                            scoreWeight =
-                                                Number(
-                                                    optionConfig.scoreWeight
-                                                );
 
-                                        } else {
+				if (!entityId) {
+					return null;
+				}
 
-                                            scoreWeight =
-                                                Number(
-                                                    kpiField.scoreWeight || 0
-                                                );
-                                        }
 
+				// -----------------------------------------------
+				// 1. Ưu tiên CODE
+				// -----------------------------------------------
 
-                                        if (
-                                            !Number.isFinite(
-                                                scoreWeight
-                                            )
-                                        ) {
-                                            scoreWeight = 0;
-                                        }
+				if (
+					summaryMap[entityId]
+				) {
 
+					return summaryMap[
+						entityId
+					];
+				}
 
-                                        // -----------------------------------------
-                                        // MỖI OPTION = 1 LƯỢT
-                                        // -----------------------------------------
 
-                                        summaryMap[entityId]
-                                            .totalCount++;
+				// -----------------------------------------------
+				// 2. Fallback UID cho record cũ
+				// -----------------------------------------------
 
+				const oldUser =
+					usersByUid[
+						entityId
+					];
 
-                                        summaryMap[entityId]
-                                            .kpiCounts[fieldKey] =
 
-                                            (
-                                                summaryMap[entityId]
-                                                    .kpiCounts[fieldKey] ||
-                                                0
-                                            ) + 1;
+				if (
+					oldUser &&
+					oldUser.code &&
+					summaryMap[
+						oldUser.code
+					]
+				) {
 
+					return summaryMap[
+						oldUser.code
+					];
+				}
 
-                                        // -----------------------------------------
-                                        // ĐIỂM ÂM
-                                        // -----------------------------------------
 
-                                        if (
-                                            scoreWeight < 0
-                                        ) {
+				return null;
+			}
 
-                                            summaryMap[entityId]
-                                                .totalx +=
-                                                Math.abs(
-                                                    scoreWeight
-                                                );
 
+			// =====================================================
+			// 14. ĐỌC RECORDS
+			// =====================================================
 
-                                            summaryMap[entityId]
-                                                .negativeCount++;
+			for (
+				const module
+				of targetModules
+			) {
 
+				const recordsSnapshot =
+					await db
+						.collection("organizations")
+						.doc(orgId)
+						.collection("academicYears")
+						.doc(academicYearId)
+						.collection("modulesData")
+						.doc(module.id)
+						.collection("records")
+						.get();
 
-                                            summaryMap[entityId]
-                                                .negativeWeeks
-                                                .add(weekKey);
-                                        }
 
+				recordsSnapshot.forEach(
+					recordDoc => {
 
-                                        // -----------------------------------------
-                                        // ĐIỂM DƯƠNG
-                                        // -----------------------------------------
+						const data =
+							recordDoc.data() || {};
 
-                                        else if (
-                                            scoreWeight > 0
-                                        ) {
 
-                                            summaryMap[entityId]
-                                                .totalBonus +=
-                                                scoreWeight;
-                                        }
+						// -------------------------------------------------
+						// ENTITY ID
+						// -------------------------------------------------
 
+						let entityId =
+							data.entityId ||
+							data.entityID ||
+							data.targetId ||
+							"";
 
-                                        // -----------------------------------------
-                                        // ĐIỂM RÒNG
-                                        // -----------------------------------------
 
-                                        summaryMap[entityId]
-                                            .totalScore +=
-                                            scoreWeight;
-                                    }
-                                );
+						if (!entityId) {
 
+							const recordId =
+								String(
+									recordDoc.id ||
+									""
+								);
 
-                                return;
-                            }
 
+							entityId =
+								recordId.split("_")[0];
+						}
 
-                            // =================================================
-                            // B. KPI THƯỜNG
-                            // =================================================
 
-                            const scoreWeight =
-                                Number(
-                                    kpiField.scoreWeight || 0
-                                );
+						entityId =
+							String(
+								entityId || ""
+							).trim();
 
 
-                            const safeScore =
-                                Number.isFinite(
-                                    scoreWeight
-                                )
-                                    ? scoreWeight
-                                    : 0;
+						const summary =
+							getSummaryByEntityId(
+								entityId
+							);
 
 
-                            summaryMap[entityId]
-                                .totalCount++;
+						if (!summary) {
+							return;
+						}
 
 
-                            summaryMap[entityId]
-                                .kpiCounts[fieldKey] =
+						// -------------------------------------------------
+						// DATE
+						// -------------------------------------------------
 
-                                (
-                                    summaryMap[entityId]
-                                        .kpiCounts[fieldKey] ||
-                                    0
-                                ) + 1;
+						const recordDate =
+							String(
+								data.date || ""
+							).trim();
 
 
-                            summaryMap[entityId]
-                                .totalScore +=
-                                safeScore;
+						if (
+							!recordDate ||
+							recordDate < mondayStr ||
+							recordDate > sundayStr
+						) {
 
+							return;
+						}
 
-                            if (
-                                safeScore < 0
-                            ) {
 
-                                summaryMap[entityId]
-                                    .totalPenalty +=
-                                    Math.abs(
-                                        safeScore
-                                    );
+						// Một record thuộc tuần này
 
+						const weekKey =
+							mondayStr;
 
-                                summaryMap[entityId]
-                                    .negativeCount++;
 
+						// =================================================
+						// TỪNG FIELD KPI
+						// =================================================
 
-                                summaryMap[entityId]
-                                    .negativeWeeks
-                                    .add(weekKey);
+						kpiFieldsList.forEach(
+							kpiField => {
 
+								const fieldKey =
+									kpiField.key;
 
-                            } else if (
-                                safeScore > 0
-                            ) {
 
-                                summaryMap[entityId]
-                                    .totalBonus +=
-                                    safeScore;
-                            }
+								let value =
+									data[fieldKey];
 
-                        }
-                    );
-                }
-            );
-        }
 
+								// Fallback changes
 
-        // =====================================================
-        // 14. TẠO RESULT
-        // =====================================================
+								if (
+									value === undefined &&
+									data.changes &&
+									data.changes[fieldKey] !== undefined
+								) {
 
-        const processedList =
-            Object.values(
-                summaryMap
-            ).map(item => {
+									value =
+										data.changes[
+											fieldKey
+										];
+								}
 
-                const totalPenalty =
-                    Number(
-                        item.totalPenalty || 0
-                    );
 
+								if (
+									value === undefined ||
+									value === null ||
+									value === ""
+								) {
 
-                const totalBonus =
-                    Number(
-                        item.totalBonus || 0
-                    );
+									return;
+								}
 
 
-                const totalScore =
-                    Number(
-                        item.totalScore || 0
-                    );
+								// =================================================
+								// A. KPI LƯU DƯỚI DẠNG ARRAY
+								// =================================================
+								//
+								// Ví dụ:
+								//
+								// [
+								//   {
+								//      value: "...",
+								//      by: "...",
+								//      email: "...",
+								//      time: "..."
+								//   }
+								// ]
+								//
+								// Mỗi phần tử = 1 lần ghi lỗi.
+								// =================================================
 
+								if (
+									Array.isArray(value)
+								) {
 
-                const totalCount =
-                    Number(
-                        item.totalCount || 0
-                    );
+									value.forEach(
+										item => {
 
+											let optionValue =
+												item;
 
-                const negativeCount =
-                    Number(
-                        item.negativeCount || 0
-                    );
 
+											if (
+												item &&
+												typeof item === "object"
+											) {
 
-                const negativeWeeks =
-                    item.negativeWeeks instanceof Set
-                        ? item.negativeWeeks.size
-                        : 0;
+												optionValue =
+													item.value !== undefined
+														? item.value
+														: item.label !== undefined
+															? item.label
+															: item.name !== undefined
+																? item.name
+																: "";
+											}
 
 
-                // ---------------------------------------------
-                // CẢNH BÁO TUẦN
-                //
-                // Chỉ cảnh báo khi KPI âm chạm ngưỡng kpiWeekly.
-                // ---------------------------------------------
+											optionValue =
+												String(
+													optionValue || ""
+												).trim();
 
-                const warningFields = [];
 
+											// Không tính phần tử rỗng
 
-                kpiFieldsList.forEach(
-                    field => {
+											if (
+												!optionValue
+											) {
+												return;
+											}
 
-                        const count =
-                            Number(
-                                item.kpiCounts[field.id] ||
-                                0
-                            );
 
+											// -----------------------------------------
+											// SCORE WEIGHT
+											// -----------------------------------------
 
-                        const threshold =
-                            Number(
-                                field.weeklyThreshold ||
-                                0
-                            );
+											const optionConfig =
+												kpiField.kpiOptions &&
+												typeof kpiField.kpiOptions === "object"
+													? kpiField.kpiOptions[
+														optionValue
+													]
+													: null;
 
 
-                        if (
-                            threshold > 0 &&
-                            count >= threshold
-                        ) {
+											let scoreWeight;
 
-                            warningFields.push({
-                                fieldId:
-                                    field.id,
 
-                                fieldName:
-                                    field.name,
+											if (
+												optionConfig &&
+												optionConfig.scoreWeight !== undefined &&
+												optionConfig.scoreWeight !== null
+											) {
 
-                                count:
-                                    count,
+												scoreWeight =
+													Number(
+														optionConfig.scoreWeight
+													);
 
-                                threshold:
-                                    threshold
-                            });
-                        }
-                    }
-                );
+											} else {
 
+												scoreWeight =
+													Number(
+														kpiField.scoreWeight ||
+														0
+													);
+											}
 
-                let warningText =
-                    "Đạt";
 
+											if (
+												!Number.isFinite(
+													scoreWeight
+												)
+											) {
 
-                let warningStyle =
-                    "background:#d1e7dd;color:#0f5132;";
+												scoreWeight =
+													0;
+											}
 
 
-                if (
-                    warningFields.length > 0
-                ) {
+											// -----------------------------------------
+											// MỖI LOG = 1 LƯỢT
+											// -----------------------------------------
 
-                    warningText =
-                        "⚠️ Cảnh báo";
+											summary.totalCount++;
 
 
-                    warningStyle =
-                        "background:#fff3cd;color:#664d03;";
-                }
+											summary.kpiCounts[
+												fieldKey
+											] = (
+												summary.kpiCounts[
+													fieldKey
+												] || 0
+											) + 1;
 
 
-                // -------------------------------------------------
-                // Trường hợp có điểm âm nhưng chưa chạm ngưỡng
-                // -------------------------------------------------
+											// -----------------------------------------
+											// ĐIỂM ÂM
+											// -----------------------------------------
 
-                if (
-                    warningFields.length === 0 &&
-                    totalPenalty > 0
-                ) {
+											if (
+												scoreWeight < 0
+											) {
 
-                    warningText =
-                        "Cần lưu ý";
+												// FIX:
+												// trước đây là totalx
+												summary.totalPenalty +=
+													Math.abs(
+														scoreWeight
+													);
 
 
-                    warningStyle =
-                        "background:#ffe5d0;color:#9a3412;";
-                }
+												summary.negativeCount++;
 
 
-                return {
+												summary.negativeWeeks.add(
+													weekKey
+												);
 
-                    ...item,
 
-                    totalCount:
-                        totalCount,
+											} else if (
+												scoreWeight > 0
+											) {
 
-                    totalPenalty:
-                        totalPenalty,
+												// -----------------------------------------
+												// ĐIỂM DƯƠNG
+												// -----------------------------------------
 
-                    totalBonus:
-                        totalBonus,
+												summary.totalBonus +=
+													scoreWeight;
+											}
 
-                    totalScore:
-                        totalScore,
 
-                    negativeCount:
-                        negativeCount,
+											// -----------------------------------------
+											// ĐIỂM RÒNG
+											// -----------------------------------------
 
-                    negativeWeeks:
-                        negativeWeeks,
+											summary.totalScore +=
+												scoreWeight;
+										}
+									);
 
-                    warningFields:
-                        warningFields,
 
-                    warningText:
-                        warningText,
+									return;
+								}
 
-                    warningStyle:
-                        warningStyle
-                };
-            });
 
+								// =================================================
+								// B. KPI LƯU DẠNG OBJECT
+								// =================================================
 
-        // =====================================================
-        // 15. RESULT OBJECT
-        // =====================================================
+								if (
+									typeof value === "object" &&
+									!Array.isArray(value)
+								) {
 
-        const resultList = {
+									const optionValue =
+										String(
+											value.value ??
+											value.label ??
+											value.name ??
+											""
+										).trim();
 
-            fields:
-                kpiFieldsList,
 
-            data:
-                processedList
-        };
+									if (
+										!optionValue
+									) {
+										return;
+									}
 
 
-        // =====================================================
-        // 16. CACHE
-        // =====================================================
+									const optionConfig =
+										kpiField.kpiOptions &&
+										typeof kpiField.kpiOptions === "object"
+											? kpiField.kpiOptions[
+												optionValue
+											]
+											: null;
 
-        if (
-            typeof cachedGridWeeklyData !==
-            "undefined"
-        ) {
 
-            cachedGridWeeklyData[
-                cacheKey
-            ] =
-                resultList;
-        }
+									let scoreWeight =
+										optionConfig &&
+										optionConfig.scoreWeight !== undefined
 
+											? Number(
+												optionConfig.scoreWeight
+											)
 
-        // =====================================================
-        // 17. RENDER
-        // =====================================================
+											: Number(
+												kpiField.scoreWeight ||
+												0
+											);
 
-        renderWeeklyTable(
-            resultList,
-            filterKeyword
-        );
 
+									if (
+										!Number.isFinite(
+											scoreWeight
+										)
+									) {
 
-        if (badge) {
+										scoreWeight = 0;
+									}
 
-            badge.innerText =
-                `🌐 Cập nhật tuần ` +
-                `(${mondayStr} - ${sundayStr})`;
-        }
 
+									summary.totalCount++;
 
-        // =====================================================
-        // 18. DEBUG
-        // =====================================================
 
-        console.log(
-            "📊 WEEKLY REPORT:",
-            {
-                academicYearId:
-                    academicYearId,
+									summary.kpiCounts[
+										fieldKey
+									] = (
+										summary.kpiCounts[
+											fieldKey
+										] || 0
+									) + 1;
 
-                targetType:
-                    targetType,
 
-                monday:
-                    mondayStr,
+									summary.totalScore +=
+										scoreWeight;
 
-                sunday:
-                    sundayStr,
 
-                kpiFields:
-                    kpiFieldsList,
+									if (
+										scoreWeight < 0
+									) {
 
-                users:
-                    Object.keys(
-                        usersMap
-                    ).length,
+										summary.totalPenalty +=
+											Math.abs(
+												scoreWeight
+											);
 
-                recordsModules:
-                    moduleDocs.length,
+										summary.negativeCount++;
 
-                resultCount:
-                    processedList.length
-            }
-        );
+										summary.negativeWeeks.add(
+											weekKey
+										);
 
+									} else if (
+										scoreWeight > 0
+									) {
 
-    } catch (error) {
+										summary.totalBonus +=
+											scoreWeight;
+									}
 
-        console.error(
-            "❌ Lỗi loadGridSection2Weekly():",
-            error
-        );
 
+									return;
+								}
 
-        tableBody.innerHTML = `
-            <tr>
-                <td colspan="30"
-                    style="
-                        text-align:center;
-                        color:red;
-                        padding:20px;
-                    ">
-                    Lỗi tải dữ liệu tổng hợp tuần:
-                    ${error.message || error}
-                </td>
-            </tr>
-        `;
-    }
-}
+
+								// =================================================
+								// C. KPI THƯỜNG
+								// =================================================
+
+								const scoreWeight =
+									Number(
+										kpiField.scoreWeight ||
+										0
+									);
+
+
+								const safeScore =
+									Number.isFinite(
+										scoreWeight
+									)
+										? scoreWeight
+										: 0;
+
+
+								summary.totalCount++;
+
+
+								summary.kpiCounts[
+									fieldKey
+								] = (
+									summary.kpiCounts[
+										fieldKey
+									] || 0
+								) + 1;
+
+
+								summary.totalScore +=
+									safeScore;
+
+
+								if (
+									safeScore < 0
+								) {
+
+									summary.totalPenalty +=
+										Math.abs(
+											safeScore
+										);
+
+
+									summary.negativeCount++;
+
+
+									summary.negativeWeeks.add(
+										weekKey
+									);
+
+
+								} else if (
+									safeScore > 0
+								) {
+
+									summary.totalBonus +=
+										safeScore;
+								}
+
+							}
+						);
+					}
+				);
+			}
+
+
+			// =====================================================
+			// 15. RESULT
+			// =====================================================
+
+			const processedList =
+				Object.values(
+					summaryMap
+				).map(
+					item => {
+
+						const totalPenalty =
+							Number(
+								item.totalPenalty ||
+								0
+							);
+
+
+						const totalBonus =
+							Number(
+								item.totalBonus ||
+								0
+							);
+
+
+						const totalScore =
+							Number(
+								item.totalScore ||
+								0
+							);
+
+
+						const totalCount =
+							Number(
+								item.totalCount ||
+								0
+							);
+
+
+						const negativeCount =
+							Number(
+								item.negativeCount ||
+								0
+							);
+
+
+						const negativeWeeks =
+							item.negativeWeeks instanceof Set
+								? item.negativeWeeks.size
+								: 0;
+
+
+						// =================================================
+						// CẢNH BÁO
+						// =================================================
+
+						const warningFields = [];
+
+
+						kpiFieldsList.forEach(
+							field => {
+
+								const count =
+									Number(
+										item.kpiCounts[
+											field.id
+										] || 0
+									);
+
+
+								const threshold =
+									Number(
+										field.weeklyThreshold ||
+										0
+									);
+
+
+								if (
+									threshold > 0 &&
+									count >= threshold
+								) {
+
+									warningFields.push({
+
+										fieldId:
+											field.id,
+
+										fieldName:
+											field.name,
+
+										count:
+											count,
+
+										threshold:
+											threshold
+									});
+								}
+							}
+						);
+
+
+						let warningText =
+							"Đạt";
+
+
+						let warningStyle =
+							"background:#d1e7dd;color:#0f5132;";
+
+
+						if (
+							warningFields.length > 0
+						) {
+
+							warningText =
+								"⚠️ Cảnh báo";
+
+
+							warningStyle =
+								"background:#fff3cd;color:#664d03;";
+
+
+						} else if (
+							totalPenalty > 0
+						) {
+
+							warningText =
+								"Cần lưu ý";
+
+
+							warningStyle =
+								"background:#ffe5d0;color:#9a3412;";
+						}
+
+
+						return {
+
+							...item,
+
+							totalCount:
+								totalCount,
+
+							totalPenalty:
+								totalPenalty,
+
+							totalBonus:
+								totalBonus,
+
+							totalScore:
+								totalScore,
+
+							negativeCount:
+								negativeCount,
+
+							negativeWeeks:
+								negativeWeeks,
+
+							warningFields:
+								warningFields,
+
+							warningText:
+								warningText,
+
+							warningStyle:
+								warningStyle
+						};
+					}
+				);
+
+
+			// =====================================================
+			// 16. RESULT OBJECT
+			// =====================================================
+
+			const resultList = {
+
+				fields:
+					kpiFieldsList,
+
+				data:
+					processedList
+			};
+
+
+			// =====================================================
+			// 17. CACHE
+			// =====================================================
+
+			if (
+				typeof cachedGridWeeklyData !==
+				"undefined"
+			) {
+
+				cachedGridWeeklyData[
+					cacheKey
+				] =
+					resultList;
+			}
+
+
+			// =====================================================
+			// 18. RENDER
+			// =====================================================
+
+			renderWeeklyTable(
+				resultList,
+				filterKeyword
+			);
+
+
+			if (badge) {
+
+				badge.innerText =
+					`🌐 Cập nhật tuần ` +
+					`(${mondayStr} - ${sundayStr})`;
+			}
+
+
+			// =====================================================
+			// 19. DEBUG
+			// =====================================================
+
+			console.log(
+				"📊 WEEKLY REPORT:",
+				{
+					academicYearId:
+						academicYearId,
+
+					targetType:
+						targetType,
+
+					monday:
+						mondayStr,
+
+					sunday:
+						sundayStr,
+
+					kpiFields:
+						kpiFieldsList,
+
+					users:
+						Object.keys(
+							usersByCode
+						).length,
+
+					recordsModules:
+						targetModules.length,
+
+					resultCount:
+						processedList.length
+				}
+			);
+
+
+		} catch (error) {
+
+			console.error(
+				"❌ Lỗi loadGridSection2Weekly():",
+				error
+			);
+
+
+			tableBody.innerHTML = `
+				<tr>
+					<td colspan="30"
+						style="
+							text-align:center;
+							color:red;
+							padding:20px;
+						">
+						Lỗi tải dữ liệu tổng hợp tuần:
+						${error.message || error}
+					</td>
+				</tr>
+			`;
+		}
+	}
 
 
 
@@ -7518,7 +8379,7 @@ async function loadGridSection2Weekly(
 		const keyword = (filterKeyword || "").trim().toLowerCase();
 		const dataList = rawDataList.filter(item => {
 			if (!keyword) return true;
-			const matchId = (item.id || "").toLowerCase().includes(keyword);
+			const matchId = (item.code || "").toLowerCase().includes(keyword);
 			const matchName = (item.name || "").toLowerCase().includes(keyword);
 			const matchClass = (item.className || "").toLowerCase().includes(keyword);
 			return matchId || matchName || matchClass;
@@ -7535,7 +8396,7 @@ async function loadGridSection2Weekly(
 		dataList.forEach(item => {
 			let rowHtml = `
 			  <tr style="border-bottom: 1px solid #dee2e6;">
-				<td style="vertical-align: middle;"><b>${item.id}</b></td>
+				<td style="vertical-align: middle;"><b>${item.code || item.id}</b></td>
 				<td style="vertical-align: middle;">${item.name}</td>
 				<td style="vertical-align: middle; text-align: center;"><span style="background: #e9ecef; padding: 2px 6px; border-radius: 4px; font-size: 0.9em;">${item.className || "Chưa phân loại"}</span></td>
 			`;
@@ -7869,6 +8730,7 @@ async function loadGridSection3Monthly(forceRefresh = false) {
         // =====================================================
 
         const usersMap = {};
+        const usersByUid = {};
 
         const usersSnapshot =
             await db
@@ -7893,38 +8755,44 @@ async function loadGridSection3Monthly(forceRefresh = false) {
                 return;
             }
 
-            const entityId =
+            const uid =
                 String(
                     userData.uid ||
                     userDoc.id ||
                     ""
                 ).trim();
 
+            const code =
+                String(
+                    userData.code ||
+                    ""
+                ).trim();
+
+            // Record mới dùng code làm entityId.
+            // Nếu dữ liệu cũ chưa có code thì tạm dùng UID.
+            const entityId = code || uid;
+
             if (!entityId) {
                 return;
             }
 
             usersMap[entityId] = {
-
                 id: entityId,
-
-                fullName:
-                    userData.fullName ||
-                    entityId,
-
-                category:
-                    userData.category ||
-                    userData.className ||
-                    userData.organizationUnit ||
-                    "Chưa phân loại",
-
+                code: code || uid,
+                uid: uid,
+                fullName: userData.fullName || entityId,
+                category: userData.category || userData.className || "Chưa phân loại",
                 role: role
             };
+
+            if (uid) {
+                usersByUid[uid] = entityId;
+            }
         });
 
 
         // =====================================================
-        // 11. LẤY TOÀN BỘ FIELD KPI CHÍNH THỨC THEO TARGET TYPE (ĐÃ SỬA CÁCH ĐỌC OBJECT)
+        // 11. LẤY FIELD KPI TRỰC TIẾP TỪ CÁC MODULE CỦA TARGET TYPE
         // =====================================================
         const kpiFieldsMap = {};
 
@@ -7935,75 +8803,43 @@ async function loadGridSection3Monthly(forceRefresh = false) {
             .where("targetType", "==", targetType) // Lọc đúng TEACHER hoặc STUDENT
             .get();
 
-        const activeFieldKeys = new Set();
-        
+        // Duyệt qua từng module của đối tượng này để bóc tách mảng fields đã được gán lúc tạo module
         modulesSnapshot.forEach(modDoc => {
             const modData = modDoc.data() || {};
-            
-            // Xử lý linh hoạt: mảng fields có thể là chuỗi hoặc object (ví dụ: {key: '...', name: '...'})
-            if (Array.isArray(modData.fields)) {
-                modData.fields.forEach(f => {
-                    if (typeof f === "string" && f.trim()) {
-                        activeFieldKeys.add(f.trim());
-                    } else if (f && typeof f === "object") {
-                        const subKey = f.key || f.id || f.fieldKey || "";
-                        if (subKey) activeFieldKeys.add(String(subKey).trim());
-                    }
-                });
-            }
-            if (modData.fieldsMap && typeof modData.fieldsMap === "object") {
-                Object.keys(modData.fieldsMap).forEach(fKey => activeFieldKeys.add(String(fKey).trim()));
-            }
-        });
+            const fieldsArr = Array.isArray(modData.fields) ? modData.fields : [];
 
-        console.log("🔍 [DEBUG] activeFieldKeys sau khi sửa:", Array.from(activeFieldKeys));
+            fieldsArr.forEach(fieldObj => {
+                if (!fieldObj) return;
 
-        const fieldsSnapshot = await db
-            .collection("organizations")
-            .doc(orgId)
-            .collection("fields")
-            .get();
+                const fieldKey = String(
+                    fieldObj.key ||
+                    fieldObj.id ||
+                    fieldObj.fieldKey ||
+                    ""
+                ).trim();
 
-        fieldsSnapshot.forEach(fieldDoc => {
-            const fieldData = fieldDoc.data() || {};
+                if (!fieldKey) return;
 
-            if (fieldData.isKpi !== true) {
-                return;
-            }
-
-            const fieldKey = String(
-                fieldData.key ||
-                fieldDoc.id ||
-                ""
-            ).trim();
-
-            if (!fieldKey) {
-                return;
-            }
-
-            // Nếu module có cấu hình giới hạn trường thì kiểm tra
-            if (activeFieldKeys.size > 0 && !activeFieldKeys.has(fieldKey)) {
-                return;
-            }
-
-            kpiFieldsMap[fieldKey] = {
-                id: fieldKey,
-                key: fieldKey,
-                name: fieldData.label || fieldKey,
-                label: fieldData.label || fieldKey,
-                type: fieldData.type || "text",
-                scoreWeight: Number(fieldData.scoreWeight ?? 0),
-                kpiWeekly: Number(fieldData.kpiWeekly ?? 0),
-                kpiMonthly: Number(fieldData.kpiMonthly ?? 0),
-                kpiOptions: (fieldData.kpiOptions && typeof fieldData.kpiOptions === "object") ? fieldData.kpiOptions : {},
-                options: Array.isArray(fieldData.options) ? fieldData.options : []
-            };
+                // Đưa vào map để gom nhóm và lấy đúng cấu hình KPI chi tiết của trường đó
+                kpiFieldsMap[fieldKey] = {
+                    id: fieldKey,
+                    key: fieldKey,
+                    name: fieldObj.label || fieldObj.name || fieldKey,
+                    label: fieldObj.label || fieldObj.name || fieldKey,
+                    type: fieldObj.type || "text",
+                    scoreWeight: Number(fieldObj.scoreWeight ?? 0),
+                    kpiWeekly: Number(fieldObj.kpiWeekly ?? 0),
+                    kpiMonthly: Number(fieldObj.kpiMonthly ?? 0),
+                    kpiOptions: (fieldObj.kpiOptions && typeof fieldObj.kpiOptions === "object") ? fieldObj.kpiOptions : {},
+                    options: Array.isArray(fieldObj.options) ? fieldObj.options : []
+                };
+            });
         });
 
         const kpiFieldsList = Object.values(kpiFieldsMap);
 
         console.log(
-            "📊 [DEBUG] KPI fields chính thức sau khi sửa cho " + targetType + ":",
+            "📊 [DEBUG] KPI fields chính thức lấy trực tiếp từ module cho " + targetType + ":",
             kpiFieldsList
         );
 
@@ -8093,15 +8929,10 @@ async function loadGridSection3Monthly(forceRefresh = false) {
                 usersMap[entityId];
 
             summaryMap[entityId] = {
-
-                id:
-                    entityId,
-
-                name:
-                    user.fullName,
-
-                className:
-                    user.category,
+				id: entityId,
+				code: user.code, // 🌟 Truyền code vào đây
+				name: user.fullName,
+				className: user.category,
 
                 // Tổng tất cả lượt KPI
                 totalCount:
@@ -8262,6 +9093,11 @@ async function loadGridSection3Monthly(forceRefresh = false) {
                         entityId || ""
                     ).trim();
 
+                // Record mới lưu entityId = code.
+                // Record cũ có thể vẫn lưu UID -> đổi UID về code.
+                if (!summaryMap[entityId] && usersByUid[entityId]) {
+                    entityId = usersByUid[entityId];
+                }
 
                 if (
                     !entityId ||
@@ -8624,6 +9460,10 @@ async function loadGridSection3Monthly(forceRefresh = false) {
 
         let kpiRules = {
 
+            // Điểm gốc theo từng nhóm, lấy từ KPIconfig/student hoặc teacher.
+            // 90 chỉ là fallback cho cấu hình cũ chưa có BasePoint.
+            BasePoint: 90,
+
             kha_weeks: 1,
             kha_count: 5,
             kha_score: 5,
@@ -8729,22 +9569,43 @@ async function loadGridSection3Monthly(forceRefresh = false) {
         }
 
 
+        const basePointRaw =
+            Number(
+                kpiRules.BasePoint ??
+                kpiRules.basePoint ??
+                90
+            );
+
+        const basePoint =
+            Number.isFinite(basePointRaw)
+                ? basePointRaw
+                : 90;
+
+        console.log(
+            "🎯 BasePoint tháng:",
+            {
+                targetType,
+                BasePoint: basePoint
+            }
+        );
+
+
         const processedList =
             Object.values(summaryMap)
                 .map(item => {
 
+                    // Tổng điểm KPI âm được lưu dưới dạng số dương
+                    // để thể hiện số điểm bị trừ.
+                    const totalPenalty =
+                        Number(
+                            item.totalPenalty || 0
+                        );
+
+                    // Tổng điểm KPI dương.
                     const totalBonus =
                         Number(
                             item.totalBonus || 0
                         );
-						
-					const totalPenalty =
-                        Number(
-                            item.totalPenalty || 0
-                        ) - totalBonus;
-
-                    
-					
 
                     const negativeCount =
                         Number(
@@ -8760,18 +9621,28 @@ async function loadGridSection3Monthly(forceRefresh = false) {
                     // ---------------------------------------------
                     // ĐIỂM THÁNG
                     //
-                    // 90 - điểm trừ + điểm cộng
+                    // Điểm gốc theo nhóm
+                    // - Tổng điểm KPI âm
+                    // + Tổng điểm KPI dương
+                    //
+                    // Ví dụ:
+                    // BasePoint = 80
+                    // KPI âm = 7
+                    // KPI dương = 3
+                    // => Điểm tháng = 76
                     // ---------------------------------------------
 
                     const totalPoints =
-                        90 -
-							totalPenalty;
-					//    totalPenalty +
-                    //    totalBonus;
+                        basePoint -
+                        totalPenalty +
+                        totalBonus;
 
 
                     // ---------------------------------------------
                     // XẾP LOẠI
+                    //
+                    // Ngưỡng score vẫn dùng tổng điểm KPI âm,
+                    // không dùng điểm tháng cuối cùng.
                     // ---------------------------------------------
 
                     let rank =
@@ -8781,64 +9652,60 @@ async function loadGridSection3Monthly(forceRefresh = false) {
                         "background:#d1e7dd;color:#0f5132;";
 
 
-                    const actualPenalty = Math.max(
-    0,
-    Number(totalPenalty || 0) - Number(totalBonus || 0)
-);
+                    const actualPenalty =
+                        totalPenalty;
 
 
-// CHƯA ĐẠT
-if (
-    reachedAnyThreshold(
-        negativeWeeks,
-        negativeCount,
-        actualPenalty,
-        kpiRules,
-        "chuadat"
-    )
-) {
+                    // CHƯA ĐẠT
+                    if (
+                        reachedAnyThreshold(
+                            negativeWeeks,
+                            negativeCount,
+                            actualPenalty,
+                            kpiRules,
+                            "chuadat"
+                        )
+                    ) {
 
-    rank = "🔴 Chưa đạt";
+                        rank = "🔴 Chưa đạt";
 
-    badgeStyle =
-        "background:#f8d7da;color:#842029;";
-}
+                        badgeStyle =
+                            "background:#f8d7da;color:#842029;";
+                    }
 
+                    // ĐẠT
+                    else if (
+                        reachedAnyThreshold(
+                            negativeWeeks,
+                            negativeCount,
+                            actualPenalty,
+                            kpiRules,
+                            "dat"
+                        )
+                    ) {
 
-// ĐẠT
-else if (
-    reachedAnyThreshold(
-        negativeWeeks,
-        negativeCount,
-        actualPenalty,
-        kpiRules,
-        "dat"
-    )
-) {
+                        rank = "🟠 Đạt";
 
-    rank = "🟠 Đạt";
+                        badgeStyle =
+                            "background:#fff3cd;color:#664d03;";
+                    }
 
-    badgeStyle =
-        "background:#fff3cd;color:#664d03;";
-}
+                    // KHÁ
+                    else if (
+                        reachedAnyThreshold(
+                            negativeWeeks,
+                            negativeCount,
+                            actualPenalty,
+                            kpiRules,
+                            "kha"
+                        )
+                    ) {
 
+                        rank = "🟡 Khá";
 
-// KHÁ
-else if (
-    reachedAnyThreshold(
-        negativeWeeks,
-        negativeCount,
-        actualPenalty,
-        kpiRules,
-        "kha"
-    )
-) {
-
-    rank = "🟡 Khá";
-
-    badgeStyle =
-        "background:#fff3cd;color:#664d03;";
-}
+                        badgeStyle =
+                            "background:#fff3cd;color:#664d03;";
+                    }
 
 
                     return {
@@ -8859,6 +9726,9 @@ else if (
 
                         negativeWeeks:
                             negativeWeeks,
+
+                        basePoint:
+                            basePoint,
 
                         rank:
                             rank,
@@ -8919,7 +9789,9 @@ else if (
 
         const debugKL001 =
             processedList.find(
-                item => item.id === "KL001"
+                item =>
+                    item.code === "KL001" ||
+                    item.id === "KL001"
             );
 
 
@@ -9126,37 +9998,13 @@ else if (
 		dataList.forEach(item => {
 
 			let rowHtml = `
-
-				<tr
-					style="
-						border-bottom:1px solid #dee2e6;
-					"
-				>
-
-					<!-- =====================================
-						 MÃ ID
-						 ===================================== -->
-
-					<td
-						style="
-							vertical-align:middle;
-						"
-					>
-						<b>
-							${item.id || ""}
-						</b>
+				<tr style="border-bottom:1px solid #dee2e6;">
+					<!-- MÃ ID -->
+					<td style="vertical-align:middle;">
+						<b>${item.code || item.id || ""}</b>
 					</td>
-
-
-					<!-- =====================================
-						 HỌ VÀ TÊN
-						 ===================================== -->
-
-					<td
-						style="
-							vertical-align:middle;
-						"
-					>
+					<!-- HỌ VÀ TÊN -->
+					<td style="vertical-align:middle;">
 						${item.name || ""}
 					</td>
 
@@ -9638,165 +10486,181 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 		let foundUser = null;
 
 		// -----------------------------------------------------
-		// 5A. Ưu tiên cache thành viên đang có
+		// 5A. ƯU TIÊN CACHE THÀNH VIÊN
 		// -----------------------------------------------------
+		//
+		// Mã định danh chính = code.
+		// UID chỉ dùng để tương thích dữ liệu cũ.
+		//
 
 		const preloadedEntities =
-			window.card2CachedMembers ||
-			window.currentLoadedEntities ||
-			[];
+		    window.card2CachedMembers ||
+		    window.currentLoadedEntities ||
+		    [];
 
 		if (
-			Array.isArray(preloadedEntities) &&
-			preloadedEntities.length > 0
+		    Array.isArray(preloadedEntities) &&
+		    preloadedEntities.length > 0
 		) {
 
-			foundUser =
-				preloadedEntities.find(u => {
+		    foundUser =
+		        preloadedEntities.find(u => {
 
-					const uId =
-						String(
-							u.id ||
-							u.uid ||
-							""
-						).trim().toLowerCase();
+		            const uCode =
+		                String(
+		                    u.code || ""
+		                ).trim().toLowerCase();
 
-					const uName =
-						String(
-							u.fullName ||
-							""
-						).trim().toLowerCase();
+		            const uId =
+		                String(
+		                    u.id ||
+		                    u.uid ||
+		                    ""
+		                ).trim().toLowerCase();
 
-					return (
-						uId === keyword ||
-						uName.includes(keyword)
-					);
-				});
+		            const uName =
+		                String(
+		                    u.fullName ||
+		                    ""
+		                ).trim().toLowerCase();
+
+		            return (
+		                uCode === keyword ||
+		                uId === keyword ||
+		                uName.includes(keyword)
+		            );
+		        });
 		}
 
+
 		// -----------------------------------------------------
-		// 5B. Cache user riêng
+		// 5B. CACHE USER RIÊNG
 		// -----------------------------------------------------
 
 		if (!foundUser) {
 
-			const cachedUser =
-				window.individualAuditUserCache.get(
-					keyword
-				);
+		    const cachedUser =
+		        window.individualAuditUserCache.get(
+		            keyword
+		        );
 
-			if (cachedUser) {
-
-				console.log(
-					"[AUDIT USER CACHE] HIT:",
-					keyword
-				);
-
-				foundUser =
-					cachedUser;
-			}
+		    if (cachedUser) {
+		        foundUser = cachedUser;
+		    }
 		}
 
-		// -----------------------------------------------------
-		// 5C. Nếu keyword có vẻ là UID -> đọc trực tiếp doc
-		// -----------------------------------------------------
-
-		if (!foundUser) {
-
-			const userRef =
-				db
-					.collection("organizations")
-					.doc(orgId)
-					.collection("users")
-					.doc(rawKeyword);
-
-			const userSnap =
-				await userRef.get();
-
-			if (userSnap.exists) {
-
-				const uData =
-					userSnap.data() || {};
-
-				foundUser = {
-					id: userSnap.id,
-					uid:
-						uData.uid ||
-						userSnap.id,
-					fullName:
-						uData.fullName ||
-						userSnap.id,
-					category:
-						uData.category ||
-						uData.className ||
-						"Chưa phân loại"
-				};
-
-				console.log(
-					"[AUDIT USER READ] 1 document:",
-					userSnap.id
-				);
-			}
-		}
 
 		// -----------------------------------------------------
-		// 5D. Nếu không phải UID -> mới fallback tìm tên
+		// 5C. TRA CỨU USERS COLLECTION
 		// -----------------------------------------------------
 		//
-		// Chỉ chạy khi nhập tên hoặc UID không tồn tại.
-		// Đây là trường hợp duy nhất vẫn cần đọc users collection.
+		// Tìm theo thứ tự:
+		// code -> UID/document ID -> tên.
 		//
 
 		if (!foundUser) {
 
-			console.log(
-				"[AUDIT USER FALLBACK] Tìm theo tên:",
-				rawKeyword
-			);
+		    console.log(
+		        "[AUDIT USER LOOKUP]:",
+		        rawKeyword
+		    );
 
-			const usersSnap =
-				await db
-					.collection("organizations")
-					.doc(orgId)
-					.collection("users")
-					.get();
+		    const usersSnap =
+		        await db
+		            .collection("organizations")
+		            .doc(orgId)
+		            .collection("users")
+		            .get();
 
-			usersSnap.forEach(uDoc => {
+		    usersSnap.forEach(uDoc => {
 
-				if (foundUser) return;
+		        if (foundUser) return;
 
-				const uData =
-					uDoc.data() || {};
+		        const uData =
+		            uDoc.data() || {};
 
-				const uId =
-					uDoc.id
-						.toLowerCase();
+		        const code =
+		            String(
+		                uData.code || ""
+		            ).trim();
 
-				const uName =
-					String(
-						uData.fullName || ""
-					).toLowerCase();
+		        const uid =
+		            String(
+		                uData.uid ||
+		                uDoc.id ||
+		                ""
+		            ).trim();
 
-				if (
-					uId === keyword ||
-					uName.includes(keyword)
-				) {
+		        const fullName =
+		            String(
+		                uData.fullName ||
+		                uData.displayName ||
+		                uData.name ||
+		                ""
+		            ).trim();
 
-					foundUser = {
-						id: uDoc.id,
-						uid:
-							uData.uid ||
-							uDoc.id,
-						fullName:
-							uData.fullName ||
-							uDoc.id,
-						category:
-							uData.category ||
-							uData.className ||
-							"Chưa phân loại"
-					};
-				}
-			});
+		        const codeLower =
+		            code.toLowerCase();
+
+		        const uidLower =
+		            uid.toLowerCase();
+
+		        const nameLower =
+		            fullName.toLowerCase();
+
+		        if (
+		            codeLower === keyword ||
+		            uidLower === keyword ||
+		            nameLower.includes(keyword)
+		        ) {
+
+		            foundUser = {
+		                // code là ID chính của hệ thống mới.
+		                id:
+		                    code ||
+		                    uid,
+
+		                code:
+		                    code,
+
+		                uid:
+		                    uid,
+
+		                fullName:
+		                    fullName ||
+		                    code ||
+		                    uid,
+
+		                category:
+		                    uData.category ||
+		                    uData.className ||
+		                    "Chưa phân loại"
+		            };
+		        }
+		    });
+		}
+
+
+		// Chuẩn hóa user tìm được.
+		// code là mã dùng để hiển thị và truy vấn dữ liệu mới.
+		if (foundUser) {
+		    foundUser.code =
+		        String(
+		            foundUser.code ||
+		            ""
+		        ).trim();
+
+		    foundUser.uid =
+		        String(
+		            foundUser.uid ||
+		            foundUser.id ||
+		            ""
+		        ).trim();
+
+		    foundUser.id =
+		        foundUser.code ||
+		        foundUser.id ||
+		        foundUser.uid;
 		}
 
 		// =====================================================
@@ -9831,12 +10695,21 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 
 			return null;
 		}
+		// Cache theo code là khóa chính.
+		if (foundUser.code) {
+		    window.individualAuditUserCache.set(
+		        String(foundUser.code).toLowerCase(),
+		        foundUser
+		    );
+		}
 
-		// Cache user
-		window.individualAuditUserCache.set(
-			String(foundUser.id).toLowerCase(),
-			foundUser
-		);
+		// Cache thêm UID để hỗ trợ dữ liệu lịch sử.
+		if (foundUser.uid) {
+		    window.individualAuditUserCache.set(
+		        String(foundUser.uid).toLowerCase(),
+		        foundUser
+		    );
+		}
 
 		// =====================================================
 		// 7. HIỂN THỊ THÔNG TIN CÁ NHÂN
@@ -9854,7 +10727,7 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 
 		if (idEl)
 			idEl.innerText =
-				foundUser.id;
+				foundUser.code || foundUser.id || "";
 
 		// =====================================================
 		// 8. FIELD LABEL MAP
@@ -9942,90 +10815,166 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 		// =====================================================
 
 		const modulePromises =
-			modules.map(async mod => {
+		    modules.map(async mod => {
 
-				let query =
-					db
-						.collection("organizations")
-						.doc(orgId)
-						.collection("academicYears")
-						.doc(academicYearId)
-						.collection("modulesData")
-						.doc(mod.id)
-						.collection("auditLogs")
-						.where(
-							"entityId",
-							"==",
-							foundUser.id
-						);
+		        // Dữ liệu mới: auditLogs.entityId = code.
+		        // Dữ liệu cũ: có thể vẫn là UID.
+		        const primaryEntityId =
+		            foundUser.code ||
+		            foundUser.id;
 
-				// ------------------------------------------------
-				// LỌC THỜI GIAN NGAY TẠI FIRESTORE
-				// ------------------------------------------------
+		        let query =
+		            db
+		                .collection("organizations")
+		                .doc(orgId)
+		                .collection("academicYears")
+		                .doc(academicYearId)
+		                .collection("modulesData")
+		                .doc(mod.id)
+		                .collection("auditLogs")
+		                .where(
+		                    "entityId",
+		                    "==",
+		                    primaryEntityId
+		                );
 
-				if (
-					startDate &&
-					endDate
-				) {
+		        // ------------------------------------------------
+		        // LỌC THỜI GIAN NGAY TẠI FIRESTORE
+		        // ------------------------------------------------
 
-					const startDateObj =
-						new Date(
-							`${startDate}T00:00:00`
-						);
+		        if (
+		            startDate &&
+		            endDate
+		        ) {
 
-					const endDateObj =
-						new Date(
-							`${endDate}T00:00:00`
-						);
+		            const startDateObj =
+		                new Date(
+		                    `${startDate}T00:00:00`
+		                );
 
-					endDateObj.setDate(
-						endDateObj.getDate() + 1
-					);
+		            const endDateObj =
+		                new Date(
+		                    `${endDate}T00:00:00`
+		                );
 
-					const startTimestamp =
-						firebase.firestore.Timestamp.fromDate(
-							startDateObj
-						);
+		            endDateObj.setDate(
+		                endDateObj.getDate() + 1
+		            );
 
-					const endTimestamp =
-						firebase.firestore.Timestamp.fromDate(
-							endDateObj
-						);
+		            const startTimestamp =
+		                firebase.firestore.Timestamp.fromDate(
+		                    startDateObj
+		                );
 
-					query =
-						query
-							.where(
-								"timestamp",
-								">=",
-								startTimestamp
-							)
-							.where(
-								"timestamp",
-								"<",
-								endTimestamp
-							);
-				}
+		            const endTimestamp =
+		                firebase.firestore.Timestamp.fromDate(
+		                    endDateObj
+		                );
 
-				const logsSnap =
-					await query.get();
+		            query =
+		                query
+		                    .where(
+		                        "timestamp",
+		                        ">=",
+		                        startTimestamp
+		                    )
+		                    .where(
+		                        "timestamp",
+		                        "<",
+		                        endTimestamp
+		                    );
+		        }
 
-				console.log(
-					"[AUDIT LOG READ]",
-					{
-						moduleId: mod.id,
-						count: logsSnap.size,
-						period:
-							startDate && endDate
-								? `${startDate} → ${endDate}`
-								: "ALL"
-					}
-				);
+		        let logsSnap =
+		            await query.get();
 
-				return {
-					moduleId: mod.id,
-					docs: logsSnap.docs
-				};
-			});
+		        let logsDocs =
+		            logsSnap.docs;
+
+		        // Nếu chưa có log theo code, thử UID của dữ liệu cũ.
+		        if (
+		            logsDocs.length === 0 &&
+		            foundUser.uid &&
+		            foundUser.uid !== primaryEntityId
+		        ) {
+
+		            let legacyQuery =
+		                db
+		                    .collection("organizations")
+		                    .doc(orgId)
+		                    .collection("academicYears")
+		                    .doc(academicYearId)
+		                    .collection("modulesData")
+		                    .doc(mod.id)
+		                    .collection("auditLogs")
+		                    .where(
+		                        "entityId",
+		                        "==",
+		                        foundUser.uid
+		                    );
+
+		            if (
+		                startDate &&
+		                endDate
+		            ) {
+
+		                const legacyStart =
+		                    new Date(
+		                        `${startDate}T00:00:00`
+		                    );
+
+		                const legacyEnd =
+		                    new Date(
+		                        `${endDate}T00:00:00`
+		                    );
+
+		                legacyEnd.setDate(
+		                    legacyEnd.getDate() + 1
+		                );
+
+		                legacyQuery =
+		                    legacyQuery
+		                        .where(
+		                            "timestamp",
+		                            ">=",
+		                            firebase.firestore.Timestamp.fromDate(
+		                                legacyStart
+		                            )
+		                        )
+		                        .where(
+		                            "timestamp",
+		                            "<",
+		                            firebase.firestore.Timestamp.fromDate(
+		                                legacyEnd
+		                            )
+		                        );
+		            }
+
+		            const legacySnap =
+		                await legacyQuery.get();
+
+		            logsDocs =
+		                legacySnap.docs;
+		        }
+
+		        console.log(
+		            "[AUDIT LOG READ]",
+		            {
+		                moduleId: mod.id,
+		                entityId: primaryEntityId,
+		                count: logsDocs.length,
+		                period:
+		                    startDate && endDate
+		                        ? `${startDate} → ${endDate}`
+		                        : "ALL"
+		            }
+		        );
+
+		        return {
+		            moduleId: mod.id,
+		            docs: logsDocs
+		        };
+		    });
 
 		// =====================================================
 		// 11. ĐỌC CÁC MODULE SONG SONG
@@ -10205,8 +11154,14 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 		console.log(
 			"[AUDIT RESULT]",
 			{
+				code:
+
+				    foundUser.code || foundUser.id,
+
+
 				uid:
-					foundUser.id,
+
+				    foundUser.uid || "",
 
 				name:
 					foundUser.fullName,
@@ -10257,6 +11212,7 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 		return null;
 	}
 }
+
 
 
 	// ==========================================
@@ -10430,46 +11386,152 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 	//=========================================
 	//	EMPLOYEE panel
 	//=========================================
+	// ============================================================
+	// GLOBAL STATE - EMPLOYEE TABLE
+	// ============================================================
+
+	window.currentEmployeeEntitiesGlobal = [];
+	window.currentEmployeeModuleConfigGlobal = null;
+	window.currentEmployeeDynamicFieldsGlobal = [];
+	window.currentEmployeeModuleIdGlobal = "";
+	window.currentEmployeeAcademicIdGlobal = "";
+	window.currentEmployeeOrgIdGlobal = "";
+
+
 	// 🌟 1. Chuyển đổi qua lại giữa các Tab của Nhân viên (Từ 1 đến 5)
-	function switchEmpTab(tabIndex) {
-	  for (let i = 1; i <= 5; i++) {
-		const tabContent = document.getElementById(`emp-tab-sec-${i}`);
-		const tabBtn = document.getElementById(`btn-emp-tab-${i}`);
-		
-		if (tabContent) tabContent.style.display = "none";
-		if (tabBtn) {
-		  tabBtn.style.background = "#e9ecef";
-		  tabBtn.style.color = "#333";
+	async function switchEmpTab(tabIndex) {
+
+		// ============================================================
+		// 1. ĐÓNG TẤT CẢ CÁC TAB
+		// ============================================================
+
+		for (let i = 1; i <= 5; i++) {
+
+			const tabContent =
+				document.getElementById(`emp-tab-sec-${i}`);
+
+			const tabBtn =
+				document.getElementById(`btn-emp-tab-${i}`);
+
+			if (tabContent) {
+				tabContent.style.display = "none";
+			}
+
+			if (tabBtn) {
+				tabBtn.style.background = "#e9ecef";
+				tabBtn.style.color = "#333";
+			}
 		}
-	  }
 
-	  // Hiển thị thẻ được chọn
-	  const activeContent = document.getElementById(`emp-tab-sec-${tabIndex}`);
-	  const activeBtn = document.getElementById(`btn-emp-tab-${tabIndex}`);
-	  
-	  if (activeContent) activeContent.style.display = "block";
-	  if (activeBtn) {
-		activeBtn.style.background = "#0d6efd";
-		activeBtn.style.color = "white";
-	  }
 
-	  // Gọi hàm load dữ liệu tương ứng cho từng tab nếu cần
-	  if (tabIndex === 1) {
-		// Tải dữ liệu nhập liệu hàng ngày
-		if (typeof loadEmployeeEntryData === 'function') loadEmployeeEntryData();
-	  
-	  } else if (tabIndex === 4) {
-		// Tải dữ liệu lớp chủ nhiệm
-		if (typeof loadHomeroomClassData === 'function') loadHomeroomClassData();
-	  
-	  }	else if (tabIndex === 3) {
-		// Tải log
-			loadAuditLogsTimeline();
-	  
-	  } else if (tabIndex === 5) {
-		// Tải dữ liệu tổ chuyên môn
-		if (typeof loadDepartmentData === 'function') loadDepartmentData();
-	  }
+		// ============================================================
+		// 2. HIỂN THỊ TAB ĐƯỢC CHỌN
+		// ============================================================
+
+		const activeContent =
+			document.getElementById(`emp-tab-sec-${tabIndex}`);
+
+		const activeBtn =
+			document.getElementById(`btn-emp-tab-${tabIndex}`);
+
+		if (activeContent) {
+			activeContent.style.display = "block";
+		}
+
+		if (activeBtn) {
+			activeBtn.style.background = "#0d6efd";
+			activeBtn.style.color = "white";
+		}
+
+
+		// ============================================================
+		// 3. TAB EMPLOYEE ENTRY
+		// ============================================================
+
+		if (tabIndex === 1) {
+
+			if (
+				typeof refreshAndRenderEmployeeData === "function"
+			) {
+				await refreshAndRenderEmployeeData();
+			}
+
+
+			/*
+			 * Sau khi load xong, bảo đảm các state toàn cục
+			 * phản ánh đúng dữ liệu hiện tại.
+			 */
+
+			if (
+				typeof currentEmployeeEntities !== "undefined"
+			) {
+				window.currentEmployeeEntitiesGlobal =
+					Array.isArray(currentEmployeeEntities)
+						? [...currentEmployeeEntities]
+						: [];
+			}
+
+			if (
+				typeof currentModuleConfig !== "undefined"
+			) {
+				window.currentEmployeeModuleConfigGlobal =
+					currentModuleConfig || {};
+			}
+
+			if (
+				window.currentEmployeeModuleConfigGlobal &&
+				Array.isArray(
+					window.currentEmployeeModuleConfigGlobal.fields
+				)
+			) {
+				window.currentEmployeeDynamicFieldsGlobal =
+					[
+						...window.currentEmployeeModuleConfigGlobal.fields
+					];
+			}
+		}
+
+
+		// ============================================================
+		// 4. TAB HOMEROOM
+		// ============================================================
+
+		else if (tabIndex === 4) {
+
+			if (
+				typeof loadHomeroomClassData === "function"
+			) {
+				await loadHomeroomClassData();
+			}
+		}
+
+
+		// ============================================================
+		// 5. TAB AUDIT LOG
+		// ============================================================
+
+		else if (tabIndex === 3) {
+
+			if (
+				typeof loadAuditLogsTimeline === "function"
+			) {
+				await loadAuditLogsTimeline();
+			}
+		}
+
+
+		// ============================================================
+		// 6. TAB DEPARTMENT
+		// ============================================================
+
+		else if (tabIndex === 5) {
+
+			if (
+				typeof loadDepartmentData === "function"
+			) {
+				await loadDepartmentData();
+			}
+		}
 	}
 
 	// 🌟 2. Hàm kiểm tra quyền và hiển thị Tab 4, Tab 5 động khi nhân viên đăng nhập thành công
@@ -10597,6 +11659,143 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 
 		// Sau khi nạp xong năm học, tiến hành khởi tạo tiếp các module/nhiệm vụ
 		await initEmployeeModules();
+	}
+	
+	
+	// ============================================================
+	// CACHE DỮ LIỆU NHÂN SỰ / RECORDS
+	// Dùng chung cho các hàm:
+	// - refreshAndRenderEmployeeData()
+	// - saveAllEmployeeEntries()
+	// - saveSingleEmployeeEntry()
+	// - clearSingleCellData()
+	// - clearSingleLogEntry()
+	// ============================================================
+
+	window.employeeDataCache = {
+		orgId: null,
+		academicId: null,
+
+		// Danh sách users
+		users: [],
+
+		// Cấu hình các module
+		modules: {},
+
+		// Records theo module
+		// Cấu trúc:
+		// records[moduleId][dailyDocId] = dữ liệu record
+		records: {},
+
+		// Đánh dấu module nào đã tải records
+		loadedModules: {},
+
+		// Ngày mà records đang được cache
+		todayStr: null
+	};
+
+
+	// ------------------------------------------------------------
+	// Khởi tạo / reset cache khi tổ chức hoặc năm học thay đổi
+	// ------------------------------------------------------------
+	function resetEmployeeDataCache(orgId, academicId) {
+
+		const cache = window.employeeDataCache;
+
+		// Nếu tổ chức hoặc năm học thay đổi
+		// thì dữ liệu cũ không còn phù hợp.
+		if (
+			cache.orgId !== orgId ||
+			cache.academicId !== academicId
+		) {
+
+			cache.orgId = orgId;
+			cache.academicId = academicId;
+
+			cache.users = [];
+			cache.modules = {};
+			cache.records = {};
+			cache.loadedModules = {};
+
+			cache.todayStr = new Date().toLocaleDateString('en-CA');
+
+			console.log(
+				"[EmployeeCache] Đã reset cache:",
+				{
+					orgId,
+					academicId,
+					todayStr: cache.todayStr
+				}
+			);
+
+		} else if (!cache.todayStr) {
+
+			// Trường hợp cache đã có org/năm học
+			// nhưng chưa có ngày.
+			cache.todayStr = new Date().toLocaleDateString('en-CA');
+		}
+	}
+
+
+	// ------------------------------------------------------------
+	// Lấy record từ cache
+	// ------------------------------------------------------------
+	function getCachedEmployeeRecord(moduleId, dailyDocId) {
+
+		const cache = window.employeeDataCache;
+
+		if (!moduleId || !dailyDocId) {
+			return null;
+		}
+
+		if (
+			!cache.records[moduleId] ||
+			!cache.records[moduleId][dailyDocId]
+		) {
+			return null;
+		}
+
+		return cache.records[moduleId][dailyDocId];
+	}
+
+
+	// ------------------------------------------------------------
+	// Ghi / cập nhật record vào cache
+	// ------------------------------------------------------------
+	function setCachedEmployeeRecord(moduleId, dailyDocId, data) {
+
+		const cache = window.employeeDataCache;
+
+		if (!moduleId || !dailyDocId) {
+			return;
+		}
+
+		if (!cache.records[moduleId]) {
+			cache.records[moduleId] = {};
+		}
+
+		cache.records[moduleId][dailyDocId] = {
+			...data
+		};
+	}
+
+
+	// ------------------------------------------------------------
+	// Xóa record khỏi cache
+	// ------------------------------------------------------------
+	function removeCachedEmployeeRecord(moduleId, dailyDocId) {
+
+		const cache = window.employeeDataCache;
+
+		if (
+			!moduleId ||
+			!dailyDocId ||
+			!cache.records[moduleId]
+		) {
+			return;
+		}
+
+		delete cache.records[moduleId][dailyDocId];
 	}
 	
 	// 1. Hàm khởi tạo danh sách nhiệm vụ / module từ collection `modules` của tổ chức
@@ -10741,26 +11940,79 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 	}
 
 	// 2. Sự kiện khi thay đổi Nhiệm vụ / Module trên giao diện
-	function switchEmployeeModule() {
-		const selectedModuleId = document.getElementById("emp-module-select").value;
-		
-		// 🌟 Lưu thẳng vào biến toàn cục để các hàm khác dùng chung
-		window.currentModuleIdGlobal = selectedModuleId;
+	async function switchEmployeeModule() {
 
-		const selectedAcademicYear = document.getElementById("emp-academic-year-select")?.value;
-		const orgId = window.currentOrgIdGlobal;
+		const selectedModuleId =
+			document.getElementById("emp-module-select")?.value || "";
 
-		console.log(`Đã chọn module ID: [${window.currentModuleIdGlobal}] trong năm học [${selectedAcademicYear}]`);
+		const selectedAcademicYear =
+			document.getElementById("emp-academic-year-select")?.value || "";
 
-		if (!selectedModuleId) return;
+		const orgId =
+			window.currentOrgIdGlobal;
 
-		// Gọi hàm tải và vẽ bảng dữ liệu
-		if (typeof refreshAndRenderEmployeeData === 'function') {
-			refreshAndRenderEmployeeData();
+
+		// ============================================================
+		// 1. CẬP NHẬT MODULE HIỆN TẠI
+		// ============================================================
+
+		window.currentModuleIdGlobal =
+			selectedModuleId;
+
+
+		if (!selectedModuleId) {
+			return;
 		}
-		
-		if (typeof loadModuleDetails === 'function') {
-			loadModuleDetails(orgId, selectedModuleId, selectedAcademicYear);
+
+
+		console.log(
+			`Đã chọn module ID: [${selectedModuleId}] trong năm học [${selectedAcademicYear}]`
+		);
+
+
+		// ============================================================
+		// 2. XÓA STATE CỦA MODULE CŨ
+		// ============================================================
+
+		window.currentEmployeeEntitiesGlobal = [];
+
+		window.currentEmployeeModuleConfigGlobal = null;
+
+		window.currentEmployeeDynamicFieldsGlobal = [];
+
+		window.currentEmployeeModuleIdGlobal =
+			selectedModuleId;
+
+		window.currentEmployeeAcademicIdGlobal =
+			selectedAcademicYear;
+
+		window.currentEmployeeOrgIdGlobal =
+			orgId;
+
+
+		// ============================================================
+		// 3. TẢI LẠI DỮ LIỆU MODULE MỚI
+		// ============================================================
+
+		if (
+			typeof refreshAndRenderEmployeeData === "function"
+		) {
+			await refreshAndRenderEmployeeData();
+		}
+
+
+		// ============================================================
+		// 4. TẢI CHI TIẾT MODULE MỚI
+		// ============================================================
+
+		if (
+			typeof loadModuleDetails === "function"
+		) {
+			await loadModuleDetails(
+				orgId,
+				selectedModuleId,
+				selectedAcademicYear
+			);
 		}
 	}
 
@@ -10802,288 +12054,1296 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 	let currentEmployeeEntities = [];
 	let currentModuleConfig = null;
 
-	async function refreshAndRenderEmployeeData() {
+	async function refreshAndRenderEmployeeData(forceRefresh = false) {
+
 		const orgId = window.currentOrgIdGlobal;
-		
+
 		const academicSelect = document.getElementById("emp-academic-year-select");
 		let academicId = academicSelect ? academicSelect.value : "";
-		if (!academicId && Array.isArray(window.currentAcademicYearsGlobal) && window.currentAcademicYearsGlobal.length > 0) {
-			academicId = window.currentAcademicYearsGlobal[window.currentAcademicYearsGlobal.length - 1];
+
+		if (
+			!academicId &&
+			Array.isArray(window.currentAcademicYearsGlobal) &&
+			window.currentAcademicYearsGlobal.length > 0
+		) {
+			academicId =
+				window.currentAcademicYearsGlobal[
+					window.currentAcademicYearsGlobal.length - 1
+				];
 		}
 
 		const moduleSelectEl = document.getElementById("emp-module-select");
-		const moduleId = (moduleSelectEl && moduleSelectEl.value) ? moduleSelectEl.value : window.currentModuleIdGlobal;
-		
+		const moduleId =
+			(moduleSelectEl && moduleSelectEl.value)
+				? moduleSelectEl.value
+				: window.currentModuleIdGlobal;
+
 		if (moduleId) {
-			window.currentModuleIdGlobal = moduleId; 
+			window.currentModuleIdGlobal = moduleId;
 		}
 
 		const tableBody = document.getElementById("emp-entry-table-body");
+
 		if (!tableBody) return;
 
+		// ============================================================
+		// 1. KIỂM TRA THÔNG TIN CƠ BẢN
+		// ============================================================
+
 		if (!orgId || !academicId || !moduleId) {
-			tableBody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: red; padding: 20px;">Vui lòng chọn đầy đủ Tổ chức, Năm học và Nhiệm vụ!</td></tr>`;
+
+			tableBody.innerHTML = `
+				<tr>
+					<td colspan="10"
+						style="text-align: center; color: red; padding: 20px;">
+						Vui lòng chọn đầy đủ Tổ chức, Năm học và Nhiệm vụ!
+					</td>
+				</tr>
+			`;
+
 			return;
 		}
 
+
 		try {
+
 			const db = firebase.firestore();
-			const todayStr = new Date().toLocaleDateString('en-CA'); // Lấy ngày hiện tại "YYYY-MM-DD"
 
-			const moduleDoc = await db.collection("organizations").doc(orgId).collection("modules").doc(moduleId).get();
-			currentModuleConfig = moduleDoc.exists ? moduleDoc.data() : {};
-			const targetType = currentModuleConfig.targetType || "";
+			const todayStr = new Date().toLocaleDateString('en-CA');
 
-			// 1. Lấy danh sách nhân sự / học sinh
-			const usersSnapshot = await db.collection("organizations").doc(orgId).collection("users").get();
+
+			// ========================================================
+			// 2. KHỞI TẠO / RESET CACHE KHI CẦN
+			// ========================================================
+
+			resetEmployeeDataCache(orgId, academicId);
+
+			const cache = window.employeeDataCache;
+
+			// Nếu sang ngày mới thì không dùng records của ngày hôm qua
+			if (cache.todayStr !== todayStr) {
+
+				cache.records = {};
+				cache.loadedModules = {};
+				cache.todayStr = todayStr;
+
+				console.log(
+					"[EmployeeCache] Sang ngày mới, đã reset records."
+				);
+			}
+
+
+			// ========================================================
+			// 3. TẢI DANH SÁCH USERS CHỈ 1 LẦN
+			// ========================================================
+
+			if (
+				!Array.isArray(cache.users) ||
+				cache.users.length === 0
+			) {
+
+				console.log(
+					"[EmployeeCache] Đang tải danh sách users từ Firestore..."
+				);
+
+				const usersSnapshot = await db
+					.collection("organizations")
+					.doc(orgId)
+					.collection("users")
+					.get();
+
+				cache.users = [];
+
+				usersSnapshot.forEach(doc => {
+
+					const userData = doc.data();
+
+					cache.users.push({
+						id: doc.id,
+						code: userData.code || doc.id,
+						...userData
+					});
+				});
+
+				console.log(
+					`[EmployeeCache] Đã cache ${cache.users.length} users.`
+				);
+
+			} else {
+
+				console.log(
+					`[EmployeeCache] Dùng ${cache.users.length} users từ RAM.`
+				);
+			}
+
+
+			// ========================================================
+			// 4. TẢI CONFIG MODULE
+			//    Mỗi module chỉ đọc 1 lần
+			// ========================================================
+
+			let currentModuleConfig = null;
+
+			if (
+				!forceRefresh &&
+				cache.modules &&
+				cache.modules[moduleId]
+			) {
+
+				currentModuleConfig = cache.modules[moduleId];
+
+				console.log(
+					`[EmployeeCache] Dùng config module ${moduleId} từ RAM.`
+				);
+
+			} else {
+
+				console.log(
+					`[EmployeeCache] Đang tải config module ${moduleId}...`
+				);
+
+				const moduleDoc = await db
+					.collection("organizations")
+					.doc(orgId)
+					.collection("modules")
+					.doc(moduleId)
+					.get();
+
+				currentModuleConfig =
+					moduleDoc.exists
+						? moduleDoc.data()
+						: {};
+
+				cache.modules[moduleId] = currentModuleConfig;
+
+				console.log(
+					`[EmployeeCache] Đã cache config module ${moduleId}.`
+				);
+			}
+
+
+			// Giữ lại biến toàn cục hiện tại của hệ thống
+			currentModuleConfig = currentModuleConfig || {};
+
+			window.currentModuleConfig = currentModuleConfig;
+
+
+			const targetType =
+				currentModuleConfig.targetType || "";
+
+
+			// ========================================================
+			// 5. LỌC USERS CHO MODULE HIỆN TẠI
+			//    Không đọc Firestore ở bước này
+			// ========================================================
+
 			let entities = [];
-			usersSnapshot.forEach(doc => {
-				const userData = doc.data();
-				if (!targetType || userData.role === targetType) {
-					entities.push({ id: doc.id, ...userData });
+
+			cache.users.forEach(userData => {
+
+				if (
+					!targetType ||
+					userData.role === targetType
+				) {
+
+					entities.push({
+						...userData
+					});
 				}
 			});
 
-			// 2. 🌟 CHỈ LẤY DỮ LIỆU CỦA ĐÚNG HÔM NAY (Tiết kiệm băng thông, không đọc rác cũ)
-			const recordsSnapshot = await db.collection("organizations")
-				.doc(orgId)
-				.collection("academicYears")
-				.doc(academicId)
-				.collection("modulesData")
-				.doc(moduleId)
-				.collection("records")
-				.where("date", "==", todayStr)
-				.get();
+
+			// ========================================================
+			// 6. TẢI RECORDS CỦA MODULE
+			//    CHỈ ĐỌC FIRESTORE LẦN ĐẦU
+			// ========================================================
+
+			if (!cache.records[moduleId]) {
+				cache.records[moduleId] = {};
+			}
+
+
+			const moduleAlreadyLoaded =
+				cache.loadedModules[moduleId] === todayStr;
+
+
+			if (
+				!forceRefresh &&
+				moduleAlreadyLoaded
+			) {
+
+				console.log(
+					`[EmployeeCache] Dùng records module ${moduleId} từ RAM.`
+				);
+
+			} else {
+
+				console.log(
+					`[EmployeeCache] Đang tải records module ${moduleId} ngày ${todayStr}...`
+				);
+
+
+				const recordsSnapshot = await db
+					.collection("organizations")
+					.doc(orgId)
+					.collection("academicYears")
+					.doc(academicId)
+					.collection("modulesData")
+					.doc(moduleId)
+					.collection("records")
+					.where("date", "==", todayStr)
+					.get();
+
+
+				// Khi forceRefresh thì xóa cache cũ của module
+				cache.records[moduleId] = {};
+
+
+				recordsSnapshot.forEach(doc => {
+
+					const data = doc.data();
+
+					const entityId =
+						data.entityId ||
+						doc.id.split('_')[0];
+
+
+					cache.records[moduleId][doc.id] = {
+						...data,
+
+						// Đảm bảo luôn có entityId
+						entityId: entityId,
+
+						// Lưu document ID để sau này
+						// save/delete có thể sử dụng trực tiếp
+						_docId: doc.id
+					};
+				});
+
+
+				cache.loadedModules[moduleId] = todayStr;
+
+
+				console.log(
+					`[EmployeeCache] Đã cache ${
+						recordsSnapshot.size
+					} records cho module ${moduleId}.`
+				);
+			}
+
+
+			// ========================================================
+			// 7. TẠO MAP RECORDS CHO MODULE HIỆN TẠI
+			// ========================================================
 
 			const recordsMap = {};
-			recordsSnapshot.forEach(doc => {
-				const data = doc.data();
-				const entityId = data.entityId || doc.id.split('_')[0];
+
+
+			const moduleRecords =
+				cache.records[moduleId] || {};
+
+
+			Object.keys(moduleRecords).forEach(docId => {
+
+				const data = moduleRecords[docId];
+
+				if (!data) return;
+
+
+				const entityId =
+					data.entityId ||
+					docId.split('_')[0];
+
+
 				recordsMap[entityId] = data;
 			});
 
-			currentEmployeeEntities = entities.map(item => ({
-				...item,
-				savedRecord: recordsMap[item.id] || {}
-			}));
 
-			// Lưu ngữ cảnh toàn cục phục vụ hiển thị
-			window.currentUserEmailGlobal = window.currentUserEmailGlobal || firebase.auth().currentUser?.email || "";
+			// ========================================================
+			// 8. GHÉP USERS + RECORDS
+			// ========================================================
+
+			currentEmployeeEntities = entities.map(item => {
+
+				const memberId =
+					item.code || item.id || "";
+
+				return {
+					...item,
+
+					// Giữ Firebase document ID trong item.id
+					// nhưng dùng MemberId/code để tìm record
+					savedRecord:
+						recordsMap[memberId] || {}
+				};
+			});
+			
+			
+
+
+			// ========================================================
+			// 9. LƯU THÔNG TIN TOÀN CỤC
+			// ========================================================
+			
+			// ============================================================
+			// LƯU EMPLOYEE STATE TOÀN CỤC
+			// Đây là nguồn dữ liệu ổn định cho search / render lại.
+			// ============================================================
+
+			window.currentEmployeeEntitiesGlobal =
+				[...currentEmployeeEntities];
+
+			window.currentEmployeeModuleConfigGlobal =
+				currentModuleConfig || {};
+
+			window.currentEmployeeDynamicFieldsGlobal =
+				Array.isArray(currentModuleConfig?.fields)
+					? [...currentModuleConfig.fields]
+					: [];
+
+			window.currentEmployeeOrgIdGlobal =
+				orgId;
+
+			window.currentEmployeeAcademicIdGlobal =
+				academicId;
+
+			window.currentEmployeeModuleIdGlobal =
+				moduleId;
+				
+			window.currentUserEmailGlobal =
+				window.currentUserEmailGlobal ||
+				firebase.auth().currentUser?.email ||
+				"";
+
 			window.currentTodayStrGlobal = todayStr;
 
-			// Vẽ bảng giao diện
-			renderEmployeeTable(currentEmployeeEntities, currentModuleConfig);
+			
+			// ========================================================
+			// 10. RENDER
+			// ========================================================
+
+			renderEmployeeTable(
+				currentEmployeeEntities,
+				currentModuleConfig
+			);
+
+
+			console.log(
+				"[EmployeeCache] Render hoàn tất:",
+				{
+					moduleId: moduleId,
+					users: entities.length,
+					records: Object.keys(moduleRecords).length,
+					fromCache: moduleAlreadyLoaded && !forceRefresh
+				}
+			);
+
 
 		} catch (err) {
-			console.error("Lỗi tải dữ liệu bảng:", err);
-			tableBody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: red; padding: 20px;">Lỗi tải dữ liệu: ${err.message}</td></tr>`;
+
+			console.error(
+				"Lỗi tải dữ liệu bảng:",
+				err
+			);
+
+			tableBody.innerHTML = `
+				<tr>
+					<td colspan="10"
+						style="text-align: center; color: red; padding: 20px;">
+						Lỗi tải dữ liệu: ${err.message}
+					</td>
+				</tr>
+			`;
 		}
 	}
 
 	window.currentDynamicFieldsGlobal = null;
 
 	async function renderEmployeeTable(listToRender, moduleConfig) {
-		const tableBody = document.getElementById("emp-entry-table-body");
-		const tableHeader = document.getElementById("emp-entry-table-header");
+
+		const tableBody =
+			document.getElementById("emp-entry-table-body");
+
+		const tableHeader =
+			document.getElementById("emp-entry-table-header");
+
 		if (!tableBody || !tableHeader) return;
 
-		// 🌟 1. Đảm bảo kho schema toàn cục đã được nạp dữ liệu.
-		if ((!window.cachedSchemaFields || window.cachedSchemaFields.length === 0) && typeof loadSchemaFields === 'function') {
+
+		// ============================================================
+		// 1. ĐẢM BẢO SCHEMA ĐÃ ĐƯỢC LOAD
+		// ============================================================
+
+		if (
+			(!window.cachedSchemaFields ||
+				window.cachedSchemaFields.length === 0) &&
+			typeof loadSchemaFields === "function"
+		) {
 			await loadSchemaFields(false);
 		}
 
-		window.currentDynamicFieldsGlobal = moduleConfig?.fields;
-		let rawFields = window.currentDynamicFieldsGlobal;
-		
-		if (!Array.isArray(rawFields) || rawFields.length === 0) {
-			rawFields = [{ key: 'value', label: 'Giá trị / Đánh giá' }];
+
+		window.currentDynamicFieldsGlobal =
+			moduleConfig?.fields;
+
+		let rawFields =
+		Array.isArray(window.currentEmployeeDynamicFieldsGlobal) &&
+		window.currentEmployeeDynamicFieldsGlobal.length > 0
+			? [...window.currentEmployeeDynamicFieldsGlobal]
+			: (
+				Array.isArray(moduleConfig?.fields)
+					? [...moduleConfig.fields]
+					: []
+			);
+
+
+		if (
+			!Array.isArray(rawFields) ||
+			rawFields.length === 0
+		) {
+			rawFields = [
+				{
+					key: "value",
+					label: "Giá trị / Đánh giá"
+				}
+			];
 		}
 
-		// 🌟 2. Chuẩn hóa mảng trường: Tự động ghép nối type và options từ window.cachedSchemaFields dựa vào key
-		let dynamicFields = rawFields.map(f => {
-			let fieldKey = '';
-			let fieldObj = {};
 
-			if (typeof f === 'string') {
-				fieldKey = f;
-				fieldObj = { key: f, label: f, type: 'text' };
-			} else if (typeof f === 'object' && f !== null) {
-				fieldKey = f.key;
-				fieldObj = { ...f };
-			}
+		// ============================================================
+		// 2. CHUẨN HÓA DYNAMIC FIELDS
+		// ============================================================
 
-			if (fieldKey && window.cachedSchemaFields) {
-				const schemaMatch = window.cachedSchemaFields.find(s => s.key === fieldKey);
-				if (schemaMatch) {
-					fieldObj.type = fieldObj.type || schemaMatch.type || 'text';
-					fieldObj.options = fieldObj.options || schemaMatch.options || [];
-					fieldObj.label = fieldObj.label || schemaMatch.label || fieldKey;
+		let dynamicFields =
+			rawFields.map(f => {
+
+				let fieldKey = "";
+				let fieldObj = {};
+
+
+				if (typeof f === "string") {
+
+					fieldKey = f;
+
+					fieldObj = {
+						key: f,
+						label: f,
+						type: "text"
+					};
+
+				} else if (
+					typeof f === "object" &&
+					f !== null
+				) {
+
+					fieldKey = f.key;
+
+					fieldObj = {
+						...f
+					};
 				}
-			}
 
-			fieldObj.type = fieldObj.type || 'text';
-			return fieldObj;
-		});
 
-		window.currentDynamicFieldsGlobal = dynamicFields;
+				if (
+					fieldKey &&
+					window.cachedSchemaFields
+				) {
 
-		// Dựng phần Header cho bảng
+					const schemaMatch =
+						window.cachedSchemaFields.find(
+							s => s.key === fieldKey
+						);
+
+
+					if (schemaMatch) {
+
+						fieldObj.type =
+							fieldObj.type ||
+							schemaMatch.type ||
+							"text";
+
+						fieldObj.options =
+							fieldObj.options ||
+							schemaMatch.options ||
+							[];
+
+						fieldObj.label =
+							fieldObj.label ||
+							schemaMatch.label ||
+							fieldKey;
+					}
+				}
+
+
+				fieldObj.type =
+					fieldObj.type ||
+					"text";
+
+
+				return fieldObj;
+			});
+
+
+		window.currentDynamicFieldsGlobal =
+			dynamicFields;
+		window.currentEmployeeDynamicFieldsGlobal =
+			[...dynamicFields];
+
+		window.currentDynamicFieldsGlobal = 
+			[...dynamicFields];
+
+		// ============================================================
+		// 3. HEADER
+		// ============================================================
+
 		let headerHtml = `
-			<th style="width: 100px; text-align: center;">Mã ID</th>
-			<th style="width: 180px;">Họ và Tên</th>
-			<th style="width: 100px; text-align: center;">Tổ / Lớp</th>
+			<th style="width: 100px; text-align: center;">
+				Mã ID
+			</th>
+
+			<th style="width: 180px;">
+				Họ và Tên
+			</th>
+
+			<th style="width: 100px; text-align: center;">
+				Tổ / Lớp
+			</th>
 		`;
 
+
 		dynamicFields.forEach(field => {
-			const headerText = field.label || field.key || 'Trường dữ liệu';
-			headerHtml += `<th style="min-width: 180px; text-align: center;">${headerText}</th>`;
+
+			const headerText =
+				field.label ||
+				field.key ||
+				"Trường dữ liệu";
+
+
+			headerHtml += `
+				<th style="min-width: 180px; text-align: center;">
+					${headerText}
+				</th>
+			`;
 		});
 
-		headerHtml += `<th style="width: 110px; text-align: center;">Thao tác</th>`;
-		tableHeader.innerHTML = headerHtml;
+
+		headerHtml += `
+			<th style="width: 110px; text-align: center;">
+				Thao tác
+			</th>
+		`;
+
+
+		tableHeader.innerHTML =
+			headerHtml;
+
+
+		// ============================================================
+		// 4. KHÔNG CÓ DỮ LIỆU
+		// ============================================================
 
 		if (listToRender.length === 0) {
-			let totalCols = 4 + dynamicFields.length;
-			tableBody.innerHTML = `<tr><td colspan="${totalCols}" style="text-align: center; color: #6c757d; padding: 20px;">Không tìm thấy đối tượng nào phù hợp.</td></tr>`;
+
+			const totalCols =
+				4 + dynamicFields.length;
+
+
+			tableBody.innerHTML = `
+				<tr>
+					<td
+						colspan="${totalCols}"
+						style="
+							text-align: center;
+							color: #6c757d;
+							padding: 20px;
+						"
+					>
+						Không tìm thấy đối tượng nào phù hợp.
+					</td>
+				</tr>
+			`;
+
 			return;
 		}
 
+
+		// ============================================================
+		// 5. RENDER BODY
+		// ============================================================
+
 		let bodyHtml = "";
-		const myEmail = (window.currentUserEmailGlobal || firebase.auth().currentUser?.email || "").toLowerCase().trim();
 
-		listToRender.forEach((item) => {
-			const savedData = item.savedRecord || {};
 
-			bodyHtml += `<tr data-id="${item.id}">
-				<td style="font-weight: bold; text-align: center; vertical-align: middle;">${item.id}</td>
-				<td style="vertical-align: middle;">${item.fullName || "Chưa cập nhật"}</td>
-				<td style="text-align: center; vertical-align: middle;">${item.category || item.classOrGroup || "-"}</td>`;
+		const myEmail =
+			(
+				window.currentUserEmailGlobal ||
+				firebase.auth().currentUser?.email ||
+				""
+			)
+			.toLowerCase()
+			.trim();
+
+
+		listToRender.forEach(item => {
+
+			const savedData =
+				item.savedRecord || {};
+
+
+			// ========================================================
+			// QUAN TRỌNG
+			//
+			// item.id   = Firebase UID
+			// item.code = MemberId
+			//
+			// Record nghiệp vụ sử dụng MemberId.
+			// ========================================================
+
+			const memberId =
+				item.code || "";
+
+
+			const firebaseUid =
+				item.id || "";
+
+
+			// Nếu không có MemberId thì không render row
+			// để tránh tạo record sai ID.
+			if (!memberId) {
+
+				console.warn(
+					"[EmployeeTable] Không có MemberId:",
+					item
+				);
+
+				return;
+			}
+
+
+			// ========================================================
+			// ROW
+			//
+			// data-id = MemberId
+			// ========================================================
+
+			bodyHtml += `
+				<tr data-id="${memberId}">
+
+					<td
+						style="
+							font-weight: bold;
+							text-align: center;
+							vertical-align: middle;
+						"
+					>
+						${memberId}
+					</td>
+
+					<td
+						style="
+							vertical-align: middle;
+						"
+					>
+						${item.fullName || "Chưa cập nhật"}
+					</td>
+
+					<td
+						style="
+							text-align: center;
+							vertical-align: middle;
+						"
+					>
+						${
+							item.category ||
+							item.classOrGroup ||
+							"-"
+						}
+					</td>
+			`;
+
+
+			// ========================================================
+			// 6. DYNAMIC FIELDS
+			// ========================================================
 
 			dynamicFields.forEach(field => {
-				const fieldType = field.type; 
-				const fieldKey = field.key;
-				const storedValue = savedData[fieldKey] !== undefined ? savedData[fieldKey] : '';
-				
-				const fieldEmail = (savedData[`${fieldKey}_email`] || "").toLowerCase().trim();
-				const fieldLabelBy = savedData[`${fieldKey}_by`] || "";
 
-				let cellHtml = `<div style="display: flex; flex-direction: column; gap: 6px; align-items: stretch; text-align: left;">`;
+				const fieldType =
+					field.type;
 
-				// 1. XỬ LÝ CHO KIỂU DỮ LIỆU NHIỀU LỰA CHỌN (OPTIONS / CHECKBOX) - PHÂN QUYỀN RẠCH RÒI
-				if (fieldType === 'options' && Array.isArray(field.options) && field.options.length > 0) {
-					// Hỗ trợ cả cấu trúc cũ (mảng chuỗi) hoặc cấu trúc mới (mảng đối tượng lưu chi tiết email)
-					const storedValueRaw = storedValue;
-					let storedOptionsList = []; // Danh sách các lựa chọn kèm theo metadata người tích
+				const fieldKey =
+					field.key;
 
-					if (Array.isArray(storedValueRaw)) {
-						storedOptionsList = storedValueRaw.map(item => {
-							if (typeof item === 'object' && item !== null) return item;
-							return { value: item, email: fieldEmail, by: fieldLabelBy }; // Tương thích dữ liệu cũ
-						});
+
+				const storedValue =
+					savedData[fieldKey] !== undefined
+						? savedData[fieldKey]
+						: "";
+
+
+				const fieldEmail =
+					(
+						savedData[`${fieldKey}_email`] ||
+						""
+					)
+					.toLowerCase()
+					.trim();
+
+
+				const fieldLabelBy =
+					savedData[`${fieldKey}_by`] ||
+					"";
+
+
+				let cellHtml = `
+					<div
+						style="
+							display: flex;
+							flex-direction: column;
+							gap: 6px;
+							align-items: stretch;
+							text-align: left;
+						"
+					>
+				`;
+
+
+				// ====================================================
+				// 6A. OPTIONS / CHECKBOX
+				// ====================================================
+
+				if (
+					fieldType === "options" &&
+					Array.isArray(field.options) &&
+					field.options.length > 0
+				) {
+
+					const storedValueRaw =
+						storedValue;
+
+
+					let storedOptionsList = [];
+
+
+					if (
+						Array.isArray(
+							storedValueRaw
+						)
+					) {
+
+						storedOptionsList =
+							storedValueRaw.map(
+								optItem => {
+
+									if (
+										typeof optItem === "object" &&
+										optItem !== null
+									) {
+										return optItem;
+									}
+
+
+									return {
+										value: optItem,
+										email: fieldEmail,
+										by: fieldLabelBy
+									};
+								}
+							);
+
 					} else if (storedValueRaw) {
-						storedOptionsList = [{ value: storedValueRaw, email: fieldEmail, by: fieldLabelBy }];
+
+						storedOptionsList = [
+							{
+								value: storedValueRaw,
+								email: fieldEmail,
+								by: fieldLabelBy
+							}
+						];
 					}
 
-					cellHtml += `<div style="display: flex; flex-direction: column; gap: 4px; background: #f8f9fa; padding: 6px; border-radius: 4px; border: 1px solid #dee2e6;">`;
-					
-					field.options.forEach(opt => {
-						// Tìm xem option này đã được ai tích chưa
-						const matchRecord = storedOptionsList.find(x => x.value === opt);
-						const isChecked = !!matchRecord;
-						
-						// Kiểm tra xem option này có phải do CHÍNH MÌNH tích không
-						const recordEmail = matchRecord ? (matchRecord.email || "").toLowerCase().trim() : "";
-						const isMyOptToday = isChecked && (recordEmail === myEmail);
 
-						// Điều kiện khóa: Nếu đã được tích bởi người khác -> Khóa (disabled)
-						// Nếu chưa tích hoặc do chính mình tích -> Cho phép tương tác
-						const isDisabled = isChecked && !isMyOptToday;
-						const disabledAttr = isDisabled ? 'disabled' : '';
-						const opacityStyle = isDisabled ? 'opacity: 0.6; cursor: not-allowed;' : 'cursor: pointer;';
+					cellHtml += `
+						<div
+							style="
+								display: flex;
+								flex-direction: column;
+								gap: 4px;
+								background: #f8f9fa;
+								padding: 6px;
+								border-radius: 4px;
+								border: 1px solid #dee2e6;
+							"
+						>
+					`;
+
+
+					field.options.forEach(opt => {
+
+						const matchRecord =
+							storedOptionsList.find(
+								x => x.value === opt
+							);
+
+
+						const isChecked =
+							!!matchRecord;
+
+
+						const recordEmail =
+							matchRecord
+								? (
+									matchRecord.email ||
+									""
+								)
+								.toLowerCase()
+								.trim()
+								: "";
+
+
+						const isMyOptToday =
+							isChecked &&
+							recordEmail === myEmail;
+
+
+						const isDisabled =
+							isChecked &&
+							!isMyOptToday;
+
+
+						const disabledAttr =
+							isDisabled
+								? "disabled"
+								: "";
+
+
+						const opacityStyle =
+							isDisabled
+								? "opacity: 0.6; cursor: not-allowed;"
+								: "cursor: pointer;";
+
 
 						cellHtml += `
-							<label style="font-size: 0.85em; display: flex; align-items: center; gap: 5px; ${opacityStyle}" title="${isDisabled ? 'Đã tích bởi: ' + (matchRecord.by || recordEmail) : ''}">
-								<input type="checkbox" class="emp-dynamic-checkbox" 
-									data-id="${item.id}" 
-									data-field="${fieldKey}" 
-									value="${opt}" 
-									${isChecked ? 'checked' : ''} 
-									${disabledAttr}> 
-								<span ${isDisabled ? 'style="color: #6c757d; text-decoration: line-through;"' : ''}>${opt}</span>
-								${isDisabled ? `<small style="font-size: 0.75em; color: #dc3545; margin-left: auto;">(${matchRecord.by || 'Khác'})</small>` : ''}
+							<label
+								style="
+									font-size: 0.85em;
+									display: flex;
+									align-items: center;
+									gap: 5px;
+									${opacityStyle}
+								"
+								title="${
+									isDisabled
+										? "Đã tích bởi: " +
+										  (
+											  matchRecord.by ||
+											  recordEmail
+										  )
+										: ""
+								}"
+							>
+
+								<input
+									type="checkbox"
+									class="emp-dynamic-checkbox"
+
+									data-id="${memberId}"
+
+									data-field="${fieldKey}"
+
+									value="${opt}"
+
+									${
+										isChecked
+											? "checked"
+											: ""
+									}
+
+									${disabledAttr}
+								>
+
+								<span
+									${
+										isDisabled
+											? 'style="color: #6c757d; text-decoration: line-through;"'
+											: ""
+									}
+								>
+									${opt}
+								</span>
+
+								${
+									isDisabled
+										? `
+											<small
+												style="
+													font-size: 0.75em;
+													color: #dc3545;
+													margin-left: auto;
+												"
+											>
+												${
+													matchRecord.by ||
+													"Khác"
+												}
+											</small>
+										`
+										: ""
+								}
+
 							</label>
 						`;
 					});
-					
-					cellHtml += `</div>`;
-				}
-				// 2. XỬ LÝ CHO KIỂU DỮ LIỆU VĂN BẢN / SỐ (TEXT / NUMBER) - Duyệt mảng nhiều mốc trong ngày
-				else {
-					let logsArray = Array.isArray(storedValue) ? storedValue : (storedValue ? [{ id: 'legacy', content: storedValue, email: fieldEmail, by: fieldLabelBy, time: 'Hôm nay' }] : []);
+
+
+					cellHtml += `
+						</div>
+					`;
+
+
+				// ====================================================
+				// 6B. TEXT / NUMBER
+				// ====================================================
+
+				} else {
+
+					let logsArray =
+						Array.isArray(storedValue)
+							? storedValue
+							: (
+								storedValue
+									? [
+										{
+											id: "legacy",
+											content: storedValue,
+											email: fieldEmail,
+											by: fieldLabelBy,
+											time: "Hôm nay"
+										}
+									]
+									: []
+							);
+
 
 					if (logsArray.length > 0) {
+
 						logsArray.forEach(logItem => {
-							const isMyLog = (logItem.email && logItem.email.toLowerCase() === myEmail);
+
+							const isMyLog =
+								(
+									logItem.email &&
+									logItem.email
+										.toLowerCase() ===
+									myEmail
+								);
+
 
 							if (isMyLog) {
+
 								cellHtml += `
-									<div style="background: #e7f1ff; padding: 6px; border-radius: 4px; border: 1px solid #b6d4fe; margin-bottom: 4px;">
-										<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-											<small style="color: #0d6efd; font-weight: bold;">Do bạn ghi (${logItem.time || 'Hôm nay'})</small>
-											<button type="button" onclick="clearSingleLogEntry('${item.id}', '${fieldKey}', '${logItem.id}')" style="color: red; background: none; border: none; cursor: pointer; font-size: 0.85em; font-weight: bold;" title="Xóa mốc này">
-												<i class="fa-solid fa-trash"></i> Xóa
+									<div
+										style="
+											background: #e7f1ff;
+											padding: 6px;
+											border-radius: 4px;
+											border: 1px solid #b6d4fe;
+											margin-bottom: 4px;
+										"
+									>
+
+										<div
+											style="
+												display: flex;
+												justify-content: space-between;
+												align-items: center;
+												margin-bottom: 2px;
+											"
+										>
+
+											<small
+												style="
+													color: #0d6efd;
+													font-weight: bold;
+												"
+											>
+												Do bạn ghi
+												(
+													${
+														logItem.time ||
+														"Hôm nay"
+													}
+												)
+											</small>
+
+
+											<button
+												type="button"
+
+												onclick="
+													clearSingleLogEntry(
+														'${memberId}',
+														'${fieldKey}',
+														'${logItem.id}'
+													)
+												"
+
+												style="
+													color: red;
+													background: none;
+													border: none;
+													cursor: pointer;
+													font-size: 0.85em;
+													font-weight: bold;
+												"
+
+												title="Xóa mốc này"
+											>
+												<i class="fa-solid fa-trash"></i>
+												Xóa
 											</button>
+
 										</div>
-										<div style="color: #084298; font-weight: 500; font-size: 0.9em;">${logItem.content}</div>
+
+
+										<div
+											style="
+												color: #084298;
+												font-weight: 500;
+												font-size: 0.9em;
+											"
+										>
+											${logItem.content}
+										</div>
+
 									</div>
 								`;
+
 							} else {
+
 								cellHtml += `
-									<div style="background: #e9ecef; padding: 6px; border-radius: 4px; border: 1px solid #ced4da; margin-bottom: 4px; font-size: 0.85em;">
-										<div style="color: #495057;">🔒 <b>${logItem.content}</b></div>
-										<small style="color: #6c757d; display: block; margin-top: 2px;">
-											<i>${logItem.by || 'Ghi nhận trước đó'}</i>
+									<div
+										style="
+											background: #e9ecef;
+											padding: 6px;
+											border-radius: 4px;
+											border: 1px solid #ced4da;
+											margin-bottom: 4px;
+											font-size: 0.85em;
+										"
+									>
+
+										<div
+											style="
+												color: #495057;
+											"
+										>
+											🔒
+											<b>
+												${logItem.content}
+											</b>
+										</div>
+
+										<small
+											style="
+												color: #6c757d;
+												display: block;
+												margin-top: 2px;
+											"
+										>
+											<i>
+												${
+													logItem.by ||
+													"Ghi nhận trước đó"
+												}
+											</i>
 										</small>
+
 									</div>
 								`;
 							}
 						});
 					}
 
-					// Ô input luôn sẵn sàng để nhập thêm mốc mới trong ngày
+
+					// =================================================
+					// INPUT MỚI
+					//
+					// data-id = MemberId
+					// =================================================
+
 					cellHtml += `
-						<input type="text" class="emp-dynamic-input" 
-							data-id="${item.id}" 
-							data-field="${fieldKey}" 
-							value="" 
-							placeholder="+ Nhập bổ sung (tiết mới)..." 
-							style="width: 100%; padding: 5px 6px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 0.9em; margin-top: 4px;">
+						<input
+							type="text"
+							class="emp-dynamic-input"
+
+							data-id="${memberId}"
+
+							data-field="${fieldKey}"
+
+							value=""
+
+							placeholder="+ Nhập bổ sung (tiết mới)..."
+
+							style="
+								width: 100%;
+								padding: 5px 6px;
+								border: 1px solid #ccc;
+								border-radius: 4px;
+								box-sizing: border-box;
+								font-size: 0.9em;
+								margin-top: 4px;
+							"
+						>
 					`;
 				}
 
-				cellHtml += `</div>`;
+
+				cellHtml += `
+					</div>
+				`;
+
 
 				bodyHtml += `
-					<td style="vertical-align: middle; padding: 6px;">
+					<td
+						style="
+							vertical-align: middle;
+							padding: 6px;
+						"
+					>
 						${cellHtml}
 					</td>
 				`;
 			});
 
-			// Cột thao tác với nút Lưu từng dòng riêng biệt
+
+			// ========================================================
+			// 7. NÚT SAVE TỪNG DÒNG
+			//
+			// QUAN TRỌNG:
+			// Truyền MemberId, KHÔNG truyền Firebase UID.
+			// ========================================================
+
 			bodyHtml += `
-				<td style="text-align: center; vertical-align: middle;">
-					<button type="button" onclick="saveSingleEmployeeEntry('${item.id}')" style="padding: 6px 12px; background: #198754; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;" title="Lưu dòng này">
-						<i class="fa-solid fa-floppy-disk"></i> Lưu
+				<td
+					style="
+						text-align: center;
+						vertical-align: middle;
+					"
+				>
+
+					<button
+						type="button"
+
+						onclick="
+							saveSingleEmployeeEntry('${memberId}')
+						"
+
+						style="
+							padding: 6px 12px;
+							background: #198754;
+							color: white;
+							border: none;
+							border-radius: 4px;
+							cursor: pointer;
+							font-weight: bold;
+						"
+
+						title="Lưu dòng này"
+					>
+						<i class="fa-solid fa-floppy-disk"></i>
+						Lưu
 					</button>
+
 				</td>
-			</tr>`;
+			`;
+
+
+			bodyHtml += `
+				</tr>
+			`;
 		});
 
-		tableBody.innerHTML = bodyHtml;
+
+		// ============================================================
+		// 8. ĐƯA HTML VÀO BẢNG
+		// ============================================================
+
+		tableBody.innerHTML =
+			bodyHtml;
 	}
 
-	
+	async function clearSingleLogEntry(entityId, moduleId, fieldId) {
+		try {
+			const orgId = document.getElementById("orgSelect")?.value;
+			const academicId = document.getElementById("academicYearSelect")?.value;
+
+			if (!orgId || !academicId || !moduleId || !entityId) {
+				console.warn("Thiếu thông tin để xóa dữ liệu.");
+				return;
+			}
+
+			const todayStr = new Date().toISOString().split("T")[0];
+			const dailyDocId = `${entityId}_${todayStr}`;
+
+			// Lấy record từ CACHE — không đọc Firestore
+			const cachedRecord = getCachedEmployeeRecord(moduleId, dailyDocId);
+
+			if (!cachedRecord) {
+				console.warn("Không tìm thấy record trong cache:", dailyDocId);
+				return;
+			}
+
+			// Clone để không sửa trực tiếp object trong cache
+			const updatedData = JSON.parse(JSON.stringify(cachedRecord));
+
+			// Tìm field cần xóa
+			if (updatedData[fieldId]) {
+				if (Array.isArray(updatedData[fieldId])) {
+					// Xóa dữ liệu của đúng MemberId
+					updatedData[fieldId] = updatedData[fieldId].filter(
+						item => item?.entityId !== entityId
+					);
+
+					// Nếu không còn dữ liệu thì xóa luôn field
+					if (updatedData[fieldId].length === 0) {
+						delete updatedData[fieldId];
+					}
+				}
+			}
+
+			// Giữ entityId của document
+			updatedData.entityId = entityId;
+
+			const docRef = db
+				.collection("organizations")
+				.doc(orgId)
+				.collection("academicYears")
+				.doc(academicId)
+				.collection("records")
+				.doc(dailyDocId);
+
+			// Ghi Firestore
+			await docRef.set(updatedData, { merge: false });
+
+			// Cập nhật CACHE sau khi Firestore thành công
+			setCachedEmployeeRecord(
+				moduleId,
+				dailyDocId,
+				updatedData
+			);
+
+			// Render lại từ cache — KHÔNG đọc Firestore
+			await renderEmployeeTable();
+
+			console.log(
+				`Đã xóa ${fieldId} của ${entityId} và cập nhật cache.`
+			);
+
+		} catch (error) {
+			console.error("Lỗi clearSingleLogEntry:", error);
+			alert("Không thể xóa dữ liệu. Vui lòng thử lại.");
+		}
+	}
 	
 	//Hàm cho phép người nhập liệu xóa dữ liệu nhập sai trong ngày
 	async function clearSingleCellData(entityId, fieldKey) {
@@ -11126,74 +13386,852 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 
 	// 3. Hàm tìm kiếm trực tiếp trên bảng (Live Search)
 	function searchAndRenderTodayPersonnelRecords() {
-		const keyword = document.getElementById("emp-live-search-input").value.toLowerCase().trim();
-		
+
+		const input =
+			document.getElementById("emp-live-search-input");
+
+		const keyword =
+			(input?.value || "")
+				.toLowerCase()
+				.trim();
+
+		console.log(
+			"[EmployeeSearch] keyword:",
+			keyword
+		);
+
+		// ============================================================
+		// LẤY STATE ĐÃ ĐƯỢC refreshAndRenderEmployeeData() LƯU
+		// ============================================================
+
+		const entities =
+			Array.isArray(window.currentEmployeeEntitiesGlobal)
+				? window.currentEmployeeEntitiesGlobal
+				: [];
+
+		const moduleConfig =
+			window.currentEmployeeModuleConfigGlobal || {};
+
+
+		// ============================================================
+		// KHÔNG NHẬP TỪ KHÓA → RENDER TOÀN BỘ
+		// ============================================================
+
 		if (!keyword) {
-			renderEmployeeTable(currentEmployeeEntities, currentModuleConfig);
+
+			renderEmployeeTable(
+				entities,
+				moduleConfig
+			);
+
 			return;
 		}
 
-		const filtered = currentEmployeeEntities.filter(item => {
-			const id = (item.id || "").toLowerCase();
-			const name = (item.fullName || "").toLowerCase();
-			const category = (item.category || "").toLowerCase();
-			return id.includes(keyword) || name.includes(keyword) || category.includes(keyword);
-		});
 
-		renderEmployeeTable(filtered, currentModuleConfig);
+		// ============================================================
+		// LỌC NHÂN SỰ
+		// ============================================================
+
+		const filtered =
+			entities.filter(item => {
+
+				const id =
+					(item.code || "")
+						.toLowerCase();
+
+				const name =
+					(item.fullName || "")
+						.toLowerCase();
+
+				const category =
+					(
+						item.category ||
+						item.classOrGroup ||
+						""
+					).toLowerCase();
+
+				return (
+					id.includes(keyword) ||
+					name.includes(keyword) ||
+					category.includes(keyword)
+				);
+			});
+
+
+		// ============================================================
+		// RENDER KẾT QUẢ
+		// ============================================================
+
+		renderEmployeeTable(
+			filtered,
+			moduleConfig
+		);
 	}
 
 	// 4. Hàm lưu TẤT CẢ thay đổi trên bảng (Nút "LƯU TẤT CẢ THAY ĐỔI")
 	async function saveAllEmployeeEntries() {
+
 		const orgId = window.currentOrgIdGlobal;
-		const academicId = document.getElementById("emp-academic-year-select")?.value;
-		const moduleId = document.getElementById("emp-module-select")?.value;
-		const msgEl = document.getElementById("emp-save-msg");
+
+		const academicId =
+			document.getElementById("emp-academic-year-select")?.value;
+
+		const moduleId =
+			document.getElementById("emp-module-select")?.value;
+
+		const msgEl =
+			document.getElementById("emp-save-msg");
+
+
+		// ============================================================
+		// 1. KIỂM TRA THÔNG TIN CƠ BẢN
+		// ============================================================
 
 		if (!orgId || !academicId || !moduleId) {
+
 			alert("Thiếu thông tin tổ chức, năm học hoặc nhiệm vụ!");
+
 			return;
 		}
 
+
 		if (msgEl) {
+
 			msgEl.style.color = "#0d6efd";
-			msgEl.textContent = `⏳ Đang xử lý lưu tất cả bảng, vui lòng chờ...`;
+
+			msgEl.textContent =
+				"⏳ Đang kiểm tra các thay đổi...";
 		}
 
+
 		try {
+
 			const db = firebase.firestore();
-			const updaterName = window.currentUserNameGlobal || "Giáo viên";
-			const updaterEmail = window.currentUserEmailGlobal || firebase.auth().currentUser?.email || "unknown@school.edu.vn";
-			const todayStr = new Date().toLocaleDateString('en-CA');
 
-			// Lấy thời gian hiển thị nhãn
-			const now = new Date();
-			const hours = String(now.getHours()).padStart(2, '0');
-			const minutes = String(now.getMinutes()).padStart(2, '0');
-			const day = String(now.getDate()).padStart(2, '0');
-			const month = String(now.getMonth() + 1).padStart(2, '0');
-			const year = now.getFullYear();
-			const timeString = `${hours}:${minutes} ngày ${day}/${month}/${year}`;
-			const labelText = `Ghi bởi ${updaterName} lúc ${timeString}`;
-			const timeStr = `${hours}:${minutes}`;
+			const updaterName =
+				window.currentUserNameGlobal || "Giáo viên";
 
-			// Lấy danh sách tất cả các hàng (tr) đang hiển thị trên bảng
-			const tableRows = document.querySelectorAll("#emp-entry-table-body tr[data-id]");
-			if (tableRows.length === 0) {
-				alert("Không có dữ liệu trên bảng để lưu!");
-				if (msgEl) msgEl.textContent = "";
+			const updaterEmail =
+				(
+					window.currentUserEmailGlobal ||
+					firebase.auth().currentUser?.email ||
+					"unknown@school.edu.vn"
+				).toLowerCase().trim();
+
+
+			const todayStr =
+				new Date().toLocaleDateString("en-CA");
+
+
+		await checkAndExpireSupporters(academicId);
+			// ========================================================
+			// 2. LẤY CACHE
+			// ========================================================
+
+			const cache =
+				window.employeeDataCache;
+
+
+			if (!cache) {
+
+				alert(
+					"Chưa khởi tạo bộ nhớ dữ liệu. Vui lòng tải lại bảng trước khi lưu!"
+				);
+
+				if (msgEl) {
+					msgEl.textContent = "";
+				}
+
 				return;
 			}
 
+
+			if (
+				cache.orgId !== orgId ||
+				cache.academicId !== academicId
+			) {
+
+				alert(
+					"Dữ liệu bộ nhớ không khớp với tổ chức hoặc năm học hiện tại. Vui lòng tải lại bảng!"
+				);
+
+				if (msgEl) {
+					msgEl.textContent = "";
+				}
+
+				return;
+			}
+
+
+			if (!cache.records[moduleId]) {
+				cache.records[moduleId] = {};
+			}
+
+
+			// ========================================================
+			// 3. LẤY CÁC ROW ĐANG HIỂN THỊ
+			//
+			// QUAN TRỌNG:
+			// row[data-id] = MEMBER ID
+			// ========================================================
+
+			const tableRows =
+				document.querySelectorAll(
+					"#emp-entry-table-body tr[data-id]"
+				);
+
+
+			if (tableRows.length === 0) {
+
+				alert("Không có dữ liệu trên bảng để lưu!");
+
+				if (msgEl) {
+					msgEl.textContent = "";
+				}
+
+				return;
+			}
+
+
+			// ========================================================
+			// 4. CHUẨN BỊ FIRESTORE BATCH
+			// ========================================================
+
 			const batch = db.batch();
+
+			const pendingCacheUpdates = [];
+
 			let totalUpdatedRows = 0;
 
-			for (const row of tableRows) {
-				const entityId = row.getAttribute("data-id");
-				if (!entityId) continue;
 
-				const dailyDocId = `${entityId}_${todayStr}`;
-				const docRef = db.collection("organizations")
+			// ========================================================
+			// 5. DUYỆT TỪNG ROW
+			// ========================================================
+
+			for (const row of tableRows) {
+
+				// row[data-id] chính là MemberId
+				const memberId =
+					row.getAttribute("data-id");
+
+
+				if (!memberId) {
+					continue;
+				}
+
+
+				// ====================================================
+				// DOCUMENT ID:
+				// MemberId_YYYY-MM-DD
+				// ====================================================
+
+				const dailyDocId =
+					`${memberId}_${todayStr}`;
+
+
+				const docRef =
+					db.collection("organizations")
+						.doc(orgId)
+						.collection("academicYears")
+						.doc(academicId)
+						.collection("modulesData")
+						.doc(moduleId)
+						.collection("records")
+						.doc(dailyDocId);
+
+
+				// ====================================================
+				// 6. LẤY DỮ LIỆU CŨ TỪ CACHE
+				//
+				// KHÔNG gọi docRef.get()
+				// ====================================================
+
+				const cachedRecord =
+					getCachedEmployeeRecord(
+						moduleId,
+						dailyDocId
+					);
+
+
+				const existingData =
+					cachedRecord
+						? { ...cachedRecord }
+						: {};
+
+
+				let rowHasChanges = false;
+
+				const updatedFields = {
+					...existingData
+				};
+
+				const auditChanges = {};
+
+
+				// ====================================================
+				// 7. XỬ LÝ INPUT TEXT
+				// ====================================================
+
+				const rowInputs =
+					row.querySelectorAll(
+						".emp-dynamic-input"
+					);
+
+
+				rowInputs.forEach(input => {
+
+					const fieldKey =
+						input.getAttribute("data-field");
+
+					const val =
+						input.value.trim();
+
+
+					if (val === "") {
+						return;
+					}
+
+
+					rowHasChanges = true;
+
+
+					if (!Array.isArray(updatedFields[fieldKey])) {
+
+						updatedFields[fieldKey] = [];
+					}
+
+
+					const logEntryId =
+						"log_" +
+						Date.now() +
+						"_" +
+						Math.random()
+							.toString(36)
+							.substring(2, 7);
+
+
+					updatedFields[fieldKey].push({
+
+						id: logEntryId,
+
+						content: val,
+
+						email: updaterEmail,
+
+						by:
+							`Ghi bởi ${updaterName} lúc ` +
+							new Date().toLocaleTimeString(
+								"vi-VN",
+								{
+									hour: "2-digit",
+									minute: "2-digit"
+								}
+							),
+
+						time:
+							new Date().toLocaleTimeString(
+								"vi-VN",
+								{
+									hour: "2-digit",
+									minute: "2-digit"
+								}
+							)
+					});
+
+
+					auditChanges[fieldKey] =
+						`Thêm mới: "${val}"`;
+
+
+					// Xóa nội dung input sau khi đã đưa vào payload
+					input.value = "";
+				});
+
+
+				// ====================================================
+				// 8. XỬ LÝ CHECKBOX / OPTIONS
+				// ====================================================
+
+				const allCheckboxesInRow =
+					row.querySelectorAll(
+						".emp-dynamic-checkbox"
+					);
+
+
+				if (allCheckboxesInRow.length > 0) {
+
+					const currentMyCheckedMap = {};
+
+					const affectedFields = new Set();
+
+
+					allCheckboxesInRow.forEach(chk => {
+
+						const fieldKey =
+							chk.getAttribute("data-field");
+
+
+						if (!fieldKey) {
+							return;
+						}
+
+
+						affectedFields.add(fieldKey);
+
+
+						if (
+							chk.checked &&
+							!chk.disabled
+						) {
+
+							if (
+								!currentMyCheckedMap[fieldKey]
+							) {
+
+								currentMyCheckedMap[fieldKey] = [];
+							}
+
+
+							currentMyCheckedMap[fieldKey].push(
+								chk.value
+							);
+						}
+					});
+
+
+					// ==================================================
+					// 9. SO SÁNH CHECKBOX CỦA GIÁO VIÊN HIỆN TẠI
+					// ==================================================
+
+					affectedFields.forEach(fieldKey => {
+
+						const mySelectedValues =
+							currentMyCheckedMap[fieldKey] || [];
+
+
+						const oldFieldData =
+							Array.isArray(existingData[fieldKey])
+								? existingData[fieldKey]
+								: [];
+
+
+						// ------------------------------------------------
+						// Giữ nguyên lựa chọn của giáo viên khác
+						// ------------------------------------------------
+
+						const otherPeopleOpts =
+							oldFieldData.filter(item => {
+
+								const itemEmail =
+									(
+										typeof item === "object" &&
+										item !== null
+									)
+										? (item.email || "")
+										: "";
+
+
+								return (
+									itemEmail.toLowerCase() !==
+									updaterEmail.toLowerCase()
+								);
+							});
+
+
+						// ------------------------------------------------
+						// Tạo dữ liệu mới của giáo viên hiện tại
+						// ------------------------------------------------
+
+						const myNewOptsObjects =
+							mySelectedValues.map(value => ({
+
+								value: value,
+
+								email: updaterEmail,
+
+								by:
+									`Ghi bởi ${updaterName}`,
+
+								time:
+									new Date().toLocaleTimeString(
+										"vi-VN",
+										{
+											hour: "2-digit",
+											minute: "2-digit"
+										}
+									)
+							}));
+
+
+						const combinedOpts = [
+							...otherPeopleOpts,
+							...myNewOptsObjects
+						];
+
+
+						// ------------------------------------------------
+						// Lấy các option cũ của chính giáo viên này
+						// ------------------------------------------------
+
+						const oldMyValues =
+							oldFieldData
+								.filter(item => {
+
+									return (
+										typeof item === "object" &&
+										item !== null &&
+										(item.email || "")
+											.toLowerCase() ===
+										updaterEmail.toLowerCase()
+									);
+								})
+								.map(item => item.value)
+								.sort();
+
+
+						const newMyValues =
+							[...mySelectedValues].sort();
+
+
+						// ------------------------------------------------
+						// Chỉ đánh dấu thay đổi nếu thực sự khác
+						// ------------------------------------------------
+
+						if (
+							JSON.stringify(oldMyValues) !==
+							JSON.stringify(newMyValues)
+						) {
+
+							rowHasChanges = true;
+
+
+							updatedFields[fieldKey] =
+								combinedOpts;
+
+
+							auditChanges[fieldKey] =
+								`Cập nhật options: [${mySelectedValues.join(", ")}]`;
+						}
+					});
+				}
+
+
+				// ====================================================
+				// 10. ROW KHÔNG THAY ĐỔI
+				// ====================================================
+
+				if (!rowHasChanges) {
+					continue;
+				}
+
+
+				// ====================================================
+				// 11. TẠO PAYLOAD
+				// ====================================================
+
+				totalUpdatedRows++;
+
+
+				const payload = {
+
+					...updatedFields,
+
+					// Luôn lưu MemberId
+					entityId: memberId,
+
+					date: todayStr,
+
+					updatedAt:
+						getVietnamTimestamp()
+				};
+
+
+				// Nếu cache chưa có record
+				if (!cachedRecord) {
+
+					payload.createdDate =
+						todayStr;
+				}
+
+
+				// ====================================================
+				// 12. CHỈ GHI RECORD THAY ĐỔI
+				// ====================================================
+
+				batch.set(
+					docRef,
+					payload,
+					{ merge: true }
+				);
+
+
+				// ====================================================
+				// 13. GHI AUDIT LOG
+				// ====================================================
+
+				const auditLogsRef =
+					db.collection("organizations")
+						.doc(orgId)
+						.collection("academicYears")
+						.doc(academicId)
+						.collection("modulesData")
+						.doc(moduleId)
+						.collection("auditLogs");
+
+
+				const newLogRef =
+					auditLogsRef.doc();
+
+
+				batch.set(
+					newLogRef,
+					{
+
+						entityId: memberId,
+
+						updaterEmail: updaterEmail,
+
+						updaterName: updaterName,
+
+						action:
+							"Lưu hàng loạt (Save All)",
+
+						changes: auditChanges,
+
+						date: todayStr,
+
+						timestamp:
+							getVietnamTimestamp()
+					}
+				);
+
+
+				// ====================================================
+				// 14. CHƯA SỬA CACHE NGAY
+				//
+				// Chỉ đưa vào danh sách chờ.
+				// Nếu batch.commit() lỗi thì cache vẫn đúng.
+				// ====================================================
+
+				pendingCacheUpdates.push({
+
+					moduleId: moduleId,
+
+					dailyDocId: dailyDocId,
+
+					payload: payload
+				});
+			}
+
+
+			// ========================================================
+			// 15. KHÔNG CÓ THAY ĐỔI
+			// ========================================================
+
+			if (totalUpdatedRows === 0) {
+
+				alert(
+					"Không có thay đổi hoặc nội dung mới nào trên bảng để lưu!"
+				);
+
+				if (msgEl) {
+					msgEl.textContent = "";
+				}
+
+				return;
+			}
+
+
+			// ========================================================
+			// 16. COMMIT FIRESTORE
+			// ========================================================
+
+			await batch.commit();
+
+
+			// ========================================================
+			// 17. FIRESTORE THÀNH CÔNG
+			//     → BÂY GIỜ MỚI CẬP NHẬT CACHE
+			// ========================================================
+
+			pendingCacheUpdates.forEach(item => {
+
+				setCachedEmployeeRecord(
+					item.moduleId,
+					item.dailyDocId,
+					item.payload
+				);
+			});
+
+
+			// ========================================================
+			// 18. THÔNG BÁO
+			// ========================================================
+
+			if (msgEl) {
+
+				msgEl.style.color = "#198754";
+
+				msgEl.textContent =
+					`✅ Đã lưu thành công ${totalUpdatedRows} bản ghi thay đổi!`;
+
+				setTimeout(() => {
+
+					msgEl.textContent = "";
+
+				}, 3000);
+			}
+
+
+			console.log(
+				`[EmployeeCache] Save All hoàn tất. ` +
+				`Đã ghi ${totalUpdatedRows} records thay đổi.`
+			);
+
+
+		} catch (err) {
+
+			console.error(
+				"Lỗi khi lưu tất cả:",
+				err
+			);
+
+
+			alert(
+				"Lỗi khi lưu hàng loạt: " +
+				err.message
+			);
+
+
+			if (msgEl) {
+				msgEl.textContent = "";
+			}
+		}
+	}
+
+	//	SAVE DỮ LIỆU ĐƠN
+	
+	async function saveSingleEmployeeEntry(entityId) {
+
+		const orgId = window.currentOrgIdGlobal;
+
+		const academicId =
+			document.getElementById("emp-academic-year-select")?.value;
+
+		const moduleId =
+			document.getElementById("emp-module-select")?.value;
+
+		const msgEl =
+			document.getElementById("emp-save-msg");
+
+
+		// ============================================================
+		// 1. KIỂM TRA THÔNG TIN
+		// ============================================================
+
+		if (!orgId || !academicId || !moduleId) {
+
+			alert("Thiếu thông tin tổ chức, năm học hoặc nhiệm vụ!");
+
+			return;
+		}
+
+		// KIỂM TRA THU HỒI QUYỀN NHẬP LIỆU CHO SUPPORTER KHI QUÁ HẠN
+		if (typeof checkAndExpireSupporters === "function") {
+			await checkAndExpireSupporters(academicId);
+		}
+
+
+		if (!entityId) {
+
+			alert("Không xác định được MemberId của đối tượng cần lưu!");
+
+			return;
+		}
+
+
+		if (msgEl) {
+
+			msgEl.style.color = "#0d6efd";
+
+			msgEl.textContent =
+				`⏳ Đang lưu bản ghi [${entityId}], vui lòng chờ...`;
+		}
+
+
+		try {
+
+			const db = firebase.firestore();
+
+			const updaterName =
+				window.currentUserNameGlobal || "Giáo viên";
+
+			const updaterEmail =
+				(
+					window.currentUserEmailGlobal ||
+					firebase.auth().currentUser?.email ||
+					"unknown@school.edu.vn"
+				).toLowerCase().trim();
+
+
+			const todayStr =
+				new Date().toLocaleDateString("en-CA");
+
+
+			// ========================================================
+			// 2. KIỂM TRA CACHE
+			// ========================================================
+
+			const cache =
+				window.employeeDataCache;
+
+
+			if (!cache) {
+
+				alert(
+					"Chưa khởi tạo bộ nhớ dữ liệu. Vui lòng tải lại bảng trước khi lưu!"
+				);
+
+				if (msgEl) {
+					msgEl.textContent = "";
+				}
+
+				return;
+			}
+
+
+			if (
+				cache.orgId !== orgId ||
+				cache.academicId !== academicId
+			) {
+
+				alert(
+					"Dữ liệu bộ nhớ không khớp với tổ chức hoặc năm học hiện tại. Vui lòng tải lại bảng!"
+				);
+
+				if (msgEl) {
+					msgEl.textContent = "";
+				}
+
+				return;
+			}
+
+
+			if (!cache.records[moduleId]) {
+				cache.records[moduleId] = {};
+			}
+
+
+			// ========================================================
+			// 3. DOCUMENT ID = MEMBER ID + NGÀY
+			// ========================================================
+
+			const dailyDocId =
+				`${entityId}_${todayStr}`;
+
+
+			const docRef =
+				db.collection("organizations")
 					.doc(orgId)
 					.collection("academicYears")
 					.doc(academicId)
@@ -11202,415 +14240,457 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 					.collection("records")
 					.doc(dailyDocId);
 
-				const docSnap = await docRef.get();
-				const existingData = docSnap.exists ? docSnap.data() : {};
 
-				let rowHasChanges = false;
-				let updatedFields = { ...existingData };
-				let auditChanges = {};
+			// ========================================================
+			// 4. LẤY RECORD CŨ TỪ CACHE
+			//
+			// KHÔNG docRef.get()
+			// ========================================================
 
-				// 1. Quét các ô input văn bản của dòng này
-				const rowInputs = row.querySelectorAll(`.emp-dynamic-input[data-id="${entityId}"]`);
-				rowInputs.forEach(input => {
-					const fieldKey = input.getAttribute("data-field");
-					const val = input.value.trim();
+			const cachedRecord =
+				getCachedEmployeeRecord(
+					moduleId,
+					dailyDocId
+				);
 
-					if (val !== "") {
-						rowHasChanges = true;
-						if (!Array.isArray(updatedFields[fieldKey])) {
-							updatedFields[fieldKey] = [];
+
+			const existingData =
+				cachedRecord
+					? { ...cachedRecord }
+					: {};
+
+
+			// ========================================================
+			// 5. THỜI GIAN
+			// ========================================================
+
+			const now = new Date();
+
+			const hours =
+				String(now.getHours()).padStart(2, "0");
+
+			const minutes =
+				String(now.getMinutes()).padStart(2, "0");
+
+			const day =
+				String(now.getDate()).padStart(2, "0");
+
+			const month =
+				String(now.getMonth() + 1).padStart(2, "0");
+
+			const year =
+				now.getFullYear();
+
+
+			const timeString =
+				`${hours}:${minutes} ngày ${day}/${month}/${year}`;
+
+
+			const labelText =
+				`Ghi bởi ${updaterName} lúc ${timeString}`;
+
+
+			const timeStr =
+				`${hours}:${minutes}`;
+
+
+			// ========================================================
+			// 6. CHUẨN BỊ DỮ LIỆU
+			// ========================================================
+
+			let rowHasChanges = false;
+
+			const updatedFields = {
+				...existingData
+			};
+
+			const auditChanges = {};
+
+
+			// ========================================================
+			// 7. XỬ LÝ INPUT TEXT
+			// ========================================================
+
+			const rowInputs =
+				document.querySelectorAll(
+					`.emp-dynamic-input[data-id="${entityId}"]`
+				);
+
+
+			rowInputs.forEach(input => {
+
+				const fieldKey =
+					input.getAttribute("data-field");
+
+				const val =
+					input.value.trim();
+
+
+				if (!fieldKey || val === "") {
+					return;
+				}
+
+
+				rowHasChanges = true;
+
+
+				if (!Array.isArray(updatedFields[fieldKey])) {
+
+					updatedFields[fieldKey] = [];
+				}
+
+
+				const logEntryId =
+					"log_" +
+					Date.now() +
+					"_" +
+					Math.random()
+						.toString(36)
+						.substring(2, 7);
+
+
+				updatedFields[fieldKey].push({
+
+					id: logEntryId,
+
+					content: val,
+
+					email: updaterEmail,
+
+					by: labelText,
+
+					time: timeStr
+				});
+
+
+				auditChanges[fieldKey] =
+					`Thêm mới: "${val}"`;
+
+
+				input.value = "";
+			});
+
+
+			// ========================================================
+			// 8. XỬ LÝ CHECKBOX / OPTIONS
+			// ========================================================
+
+			const allCheckboxesInRow =
+				document.querySelectorAll(
+					`.emp-dynamic-checkbox[data-id="${entityId}"]`
+				);
+
+
+			if (allCheckboxesInRow.length > 0) {
+
+				const currentMyCheckedMap = {};
+
+				const affectedFields = new Set();
+
+
+				allCheckboxesInRow.forEach(chk => {
+
+					const fieldKey =
+						chk.getAttribute("data-field");
+
+
+					if (!fieldKey) {
+						return;
+					}
+
+
+					affectedFields.add(fieldKey);
+
+
+					if (
+						chk.checked &&
+						!chk.disabled
+					) {
+
+						if (!currentMyCheckedMap[fieldKey]) {
+
+							currentMyCheckedMap[fieldKey] = [];
 						}
 
-						const logEntryId = 'log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
-						updatedFields[fieldKey].push({
-							id: logEntryId,
-							content: val,
-							email: updaterEmail,
-							by: labelText,
-							time: timeStr
-						});
 
-						auditChanges[fieldKey] = `Thêm mới: "${val}"`;
-						input.value = ""; // Reset ô input sau khi gom
+						currentMyCheckedMap[fieldKey].push(
+							chk.value
+						);
 					}
 				});
 
-				// 2. Quét các ô checkbox / options của dòng này
-				const allCheckboxesInRow = row.querySelectorAll(`.emp-dynamic-checkbox[data-id="${entityId}"]`);
-				if (allCheckboxesInRow.length > 0) {
-					const currentMyCheckedMap = {};
-					const affectedFields = new Set();
 
-					allCheckboxesInRow.forEach(chk => {
-						const fieldKey = chk.getAttribute("data-field");
-						affectedFields.add(fieldKey);
-						if (chk.checked && !chk.disabled) {
-							if (!currentMyCheckedMap[fieldKey]) {
-								currentMyCheckedMap[fieldKey] = [];
-							}
-							currentMyCheckedMap[fieldKey].push(chk.value);
-						}
-					});
+				// ====================================================
+				// 9. SO SÁNH TỪNG FIELD OPTIONS
+				// ====================================================
 
-					affectedFields.forEach(fieldKey => {
-						const mySelectedValues = currentMyCheckedMap[fieldKey] || [];
-						const oldFieldData = Array.isArray(existingData[fieldKey]) ? existingData[fieldKey] : [];
+				affectedFields.forEach(fieldKey => {
 
-						// Giữ lại phần tích của giáo viên khác
-						const otherPeopleOpts = oldFieldData.filter(item => {
-							const itemEmail = (typeof item === 'object' && item !== null) ? (item.email || "") : "";
-							return itemEmail.toLowerCase() !== updaterEmail.toLowerCase();
+					const mySelectedValues =
+						currentMyCheckedMap[fieldKey] || [];
+
+
+					const oldFieldData =
+						Array.isArray(existingData[fieldKey])
+							? existingData[fieldKey]
+							: [];
+
+
+					// -----------------------------------------------
+					// Giữ lại option của giáo viên khác
+					// -----------------------------------------------
+
+					const otherPeopleOpts =
+						oldFieldData.filter(item => {
+
+							const itemEmail =
+								(
+									typeof item === "object" &&
+									item !== null
+								)
+									? (item.email || "")
+									: "";
+
+
+							return (
+								itemEmail.toLowerCase() !==
+								updaterEmail.toLowerCase()
+							);
 						});
 
-						// Tạo mảng giá trị tích mới của chính mình
-						const myNewOptsObjects = mySelectedValues.map(val => ({
-							value: val,
+
+					// -----------------------------------------------
+					// Tạo option mới của giáo viên hiện tại
+					// -----------------------------------------------
+
+					const myNewOptsObjects =
+						mySelectedValues.map(value => ({
+
+							value: value,
+
 							email: updaterEmail,
+
 							by: labelText,
+
 							time: timeStr
 						}));
 
-						const combinedOpts = [...otherPeopleOpts, ...myNewOptsObjects];
 
-						const oldMyValues = oldFieldData
-							.filter(item => (typeof item === 'object' && item !== null ? (item.email || "").toLowerCase() === updaterEmail.toLowerCase() : false))
-							.map(item => item.value);
+					const combinedOpts = [
+						...otherPeopleOpts,
+						...myNewOptsObjects
+					];
 
-						if (JSON.stringify(oldMyValues.sort()) !== JSON.stringify(mySelectedValues.sort())) {
-							rowHasChanges = true;
-							updatedFields[fieldKey] = combinedOpts;
-							auditChanges[fieldKey] = `Cập nhật options: [${mySelectedValues.join(', ')}]`;
-						}
-					});
-				}
 
-				// Nếu dòng này có sự thay đổi, tiến hành đưa vào batch
-				if (rowHasChanges) {
-					totalUpdatedRows++;
-					const payload = {
-						...updatedFields,
-						entityId: entityId,
-						date: todayStr,
-						updatedAt: getVietnamTimestamp()
-					};
+					// -----------------------------------------------
+					// Các option cũ của chính mình
+					// -----------------------------------------------
 
-					if (!docSnap.exists) {
-						payload.createdDate = todayStr;
-					}
+					const oldMyValues =
+						oldFieldData
+							.filter(item => {
 
-					batch.set(docRef, payload, { merge: true });
+								return (
+									typeof item === "object" &&
+									item !== null &&
+									(item.email || "")
+										.toLowerCase() ===
+									updaterEmail.toLowerCase()
+								);
+							})
+							.map(item => item.value)
+							.sort();
 
-					// Ghi log audit cho từng đối tượng thay đổi
-					const auditLogsRef = db.collection("organizations")
-						.doc(orgId)
-						.collection("academicYears")
-						.doc(academicId)
-						.collection("modulesData")
-						.doc(moduleId)
-						.collection("auditLogs");
 
-					const newLogRef = auditLogsRef.doc();
-					batch.set(newLogRef, {
-						entityId: entityId,
-						updaterEmail: updaterEmail,
-						updaterName: updaterName,
-						action: "Lưu hàng loạt (Save All)",
-						changes: auditChanges,
-						date: todayStr,
-						timestamp: getVietnamTimestamp()
-					});
-				}
-			}
+					const newMyValues =
+						[...mySelectedValues].sort();
 
-			if (totalUpdatedRows === 0) {
-				alert("Không có thay đổi hoặc nội dung mới nào trên bảng để lưu!");
-				if (msgEl) msgEl.textContent = "";
-				return;
-			}
 
-			// Thực hiện ghi toàn bộ batch lên Firestore trong 1 transaction duy nhất
-			await batch.commit();
+					// -----------------------------------------------
+					// Chỉ đánh dấu thay đổi nếu thực sự khác
+					// -----------------------------------------------
 
-			if (msgEl) {
-				msgEl.style.color = "#198754";
-				msgEl.textContent = `✅ Đã lưu thành công ${totalUpdatedRows} bản ghi thay đổi!`;
-				setTimeout(() => { msgEl.textContent = ""; }, 3000);
-			}
+					if (
+						JSON.stringify(oldMyValues) !==
+						JSON.stringify(newMyValues)
+					) {
 
-			if (typeof refreshAndRenderEmployeeData === 'function') {
-				refreshAndRenderEmployeeData();
-			}
+						rowHasChanges = true;
 
-		} catch (err) {
-			console.error("Lỗi khi lưu tất cả:", err);
-			alert("Lỗi khi lưu hàng loạt: " + err.message);
-			if (msgEl) msgEl.textContent = "";
-		}
-	}
 
-	//	SAVE DỮ LIỆU ĐƠN
-	
-	async function saveSingleEmployeeEntry(entityId) {
-		const orgId = window.currentOrgIdGlobal;
-		const academicId = document.getElementById("emp-academic-year-select")?.value;
-		const moduleId = document.getElementById("emp-module-select")?.value;
-		const msgEl = document.getElementById("emp-save-msg");
+						updatedFields[fieldKey] =
+							combinedOpts;
 
-		if (!orgId || !academicId || !moduleId) {
-			alert("Thiếu thông tin tổ chức, năm học hoặc nhiệm vụ!");
-			return;
-		}
 
-		if (msgEl) {
-			msgEl.style.color = "#0d6efd";
-			msgEl.textContent = `⏳ Đang lưu bản ghi [${entityId}], vui lòng chờ...`;
-		}
-
-		try {
-			const db = firebase.firestore();
-			const updaterName = window.currentUserNameGlobal || "Giáo viên";
-			const updaterEmail = window.currentUserEmailGlobal || firebase.auth().currentUser?.email || "unknown@school.edu.vn";
-			const todayStr = new Date().toLocaleDateString('en-CA');
-			const dailyDocId = `${entityId}_${todayStr}`;
-
-			const docRef = db.collection("organizations")
-				.doc(orgId)
-				.collection("academicYears")
-				.doc(academicId)
-				.collection("modulesData")
-				.doc(moduleId)
-				.collection("records")
-				.doc(dailyDocId);
-
-			const auditLogsRef = db.collection("organizations")
-				.doc(orgId)
-				.collection("academicYears")
-				.doc(academicId)
-				.collection("modulesData")
-				.doc(moduleId)
-				.collection("auditLogs");
-
-			const docSnap = await docRef.get();
-			const existingData = docSnap.exists ? docSnap.data() : {};
-
-			// Lấy thời gian hiển thị
-			const now = new Date();
-			const hours = String(now.getHours()).padStart(2, '0');
-			const minutes = String(now.getMinutes()).padStart(2, '0');
-			const day = String(now.getDate()).padStart(2, '0');
-			const month = String(now.getMonth() + 1).padStart(2, '0');
-			const year = now.getFullYear();
-			const timeString = `${hours}:${minutes} ngày ${day}/${month}/${year}`;
-			const labelText = `Ghi bởi ${updaterName} lúc ${timeString}`;
-			const timeStr = `${hours}:${minutes}`;
-
-			let newEntriesFound = false;
-			let updatedFields = { ...existingData };
-			let auditChanges = {};
-
-			// 1. Xử lý các ô input văn bản (Thêm bổ sung vào mảng logs)
-			const rowInputs = document.querySelectorAll(`.emp-dynamic-input[data-id="${entityId}"]`);
-			rowInputs.forEach(input => {
-				const fieldKey = input.getAttribute("data-field");
-				const val = input.value.trim();
-				
-				if (val !== "") {
-					newEntriesFound = true;
-					
-					if (!Array.isArray(updatedFields[fieldKey])) {
-						updatedFields[fieldKey] = [];
-					}
-
-					const logEntryId = 'log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
-					
-					updatedFields[fieldKey].push({
-						id: logEntryId,
-						content: val,
-						email: updaterEmail,
-						by: labelText,
-						time: timeStr
-					});
-
-					auditChanges[fieldKey] = `Thêm mới: "${val}"`;
-					input.value = ""; 
-				}
-			});
-
-			// 2. Xử lý checkbox / options (Lưu kèm metadata chi tiết, bảo vệ phần của giáo viên khác)
-			const allCheckboxesInRow = document.querySelectorAll(`.emp-dynamic-checkbox[data-id="${entityId}"]`);
-			if (allCheckboxesInRow.length > 0) {
-				const currentMyCheckedMap = {};
-				const affectedFields = new Set();
-
-				allCheckboxesInRow.forEach(chk => {
-					const fieldKey = chk.getAttribute("data-field");
-					affectedFields.add(fieldKey);
-					if (chk.checked && !chk.disabled) { // Chỉ lấy các ô được tích và không bị khóa
-						if (!currentMyCheckedMap[fieldKey]) {
-							currentMyCheckedMap[fieldKey] = [];
-						}
-						currentMyCheckedMap[fieldKey].push(chk.value);
-					}
-				});
-
-				affectedFields.forEach(fieldKey => {
-					const mySelectedValues = currentMyCheckedMap[fieldKey] || [];
-					const oldFieldData = Array.isArray(existingData[fieldKey]) ? existingData[fieldKey] : [];
-
-					// Tách phần dữ liệu do NGƯỜI KHÁC tích từ trước (để giữ nguyên không làm mất)
-					const otherPeopleOpts = oldFieldData.filter(item => {
-						const itemEmail = (typeof item === 'object' && item !== null) ? (item.email || "") : "";
-						return itemEmail.toLowerCase() !== updaterEmail.toLowerCase();
-					});
-
-					// Tạo danh sách đối tượng chi tiết cho phần mới tích của CHÍNH MÌNH
-					const myNewOptsObjects = mySelectedValues.map(val => ({
-						value: val,
-						email: updaterEmail,
-						by: labelText,
-						time: timeStr
-					}));
-
-					// Gộp lại: Phần của người khác + Phần mới của mình
-					const combinedOpts = [...otherPeopleOpts, ...myNewOptsObjects];
-
-					// Kiểm tra xem có sự thay đổi thực sự so với cũ không
-					const oldMyValues = oldFieldData
-						.filter(item => (typeof item === 'object' && item !== null ? (item.email || "").toLowerCase() === updaterEmail.toLowerCase() : false))
-						.map(item => item.value);
-
-					if (JSON.stringify(oldMyValues.sort()) !== JSON.stringify(mySelectedValues.sort())) {
-						newEntriesFound = true;
-						updatedFields[fieldKey] = combinedOpts;
-						auditChanges[fieldKey] = `Cập nhật options: [${mySelectedValues.join(', ')}]`;
+						auditChanges[fieldKey] =
+							`Cập nhật options: [${mySelectedValues.join(", ")}]`;
 					}
 				});
 			}
 
-			if (!newEntriesFound) {
-				alert("Vui lòng nhập nội dung mới hoặc thay đổi lựa chọn trước khi lưu!");
-				if (msgEl) msgEl.textContent = "";
+
+			// ========================================================
+			// 10. KHÔNG CÓ THAY ĐỔI
+			// ========================================================
+
+			if (!rowHasChanges) {
+
+				alert(
+					"Vui lòng nhập nội dung mới hoặc thay đổi lựa chọn trước khi lưu!"
+				);
+
+				if (msgEl) {
+					msgEl.textContent = "";
+				}
+
 				return;
 			}
+
+
+			// ========================================================
+			// 11. TẠO PAYLOAD
+			// ========================================================
 
 			const payload = {
+
 				...updatedFields,
+
+				// QUAN TRỌNG:
+				// Đây là MemberId, không phải Firebase UID
 				entityId: entityId,
+
 				date: todayStr,
-				updatedAt: getVietnamTimestamp()
+
+				updatedAt:
+					getVietnamTimestamp()
 			};
 
-			if (!docSnap.exists) {
-				payload.createdDate = todayStr;
+
+			if (!cachedRecord) {
+
+				payload.createdDate =
+					todayStr;
 			}
 
-			const batch = db.batch();
-			batch.set(docRef, payload, { merge: true });
 
-			const newLogRef = auditLogsRef.doc();
-			batch.set(newLogRef, {
-				entityId: entityId,
-				updaterEmail: updaterEmail,
-				updaterName: updaterName,
-				action: "Cập nhật / Bổ sung dữ liệu trong ngày",
-				changes: auditChanges,
-				date: todayStr,
-				timestamp: getVietnamTimestamp()
-			});
+			// ========================================================
+			// 12. BATCH
+			// ========================================================
+
+			const batch =
+				db.batch();
+
+
+			// Record chính
+			batch.set(
+				docRef,
+				payload,
+				{ merge: true }
+			);
+
+
+			// ========================================================
+			// 13. AUDIT LOG
+			// ========================================================
+
+			const auditLogsRef =
+				db.collection("organizations")
+					.doc(orgId)
+					.collection("academicYears")
+					.doc(academicId)
+					.collection("modulesData")
+					.doc(moduleId)
+					.collection("auditLogs");
+
+
+			const newLogRef =
+				auditLogsRef.doc();
+
+
+			batch.set(
+				newLogRef,
+				{
+
+					entityId: entityId,
+
+					updaterEmail: updaterEmail,
+
+					updaterName: updaterName,
+
+					action:
+						"Cập nhật / Bổ sung dữ liệu trong ngày",
+
+					changes: auditChanges,
+
+					date: todayStr,
+
+					timestamp:
+						getVietnamTimestamp()
+				}
+			);
+
+
+			// ========================================================
+			// 14. COMMIT FIRESTORE
+			// ========================================================
 
 			await batch.commit();
 
+
+			// ========================================================
+			// 15. FIRESTORE THÀNH CÔNG
+			//     → CẬP NHẬT CACHE
+			// ========================================================
+
+			setCachedEmployeeRecord(
+				moduleId,
+				dailyDocId,
+				payload
+			);
+
+
+			// ========================================================
+			// 16. THÔNG BÁO
+			// ========================================================
+
 			if (msgEl) {
+
 				msgEl.style.color = "#198754";
-				msgEl.textContent = `✅ Đã lưu thành công bản ghi [${entityId}]!`;
-				setTimeout(() => { msgEl.textContent = ""; }, 3000);
+
+				msgEl.textContent =
+					`✅ Đã lưu thành công bản ghi [${entityId}]!`;
+
+				setTimeout(() => {
+
+					msgEl.textContent = "";
+
+				}, 3000);
 			}
 
-			if (typeof refreshAndRenderEmployeeData === 'function') {
-				refreshAndRenderEmployeeData();
+
+			console.log(
+				`[EmployeeCache] Đã lưu ${dailyDocId} ` +
+				`và cập nhật cache.`
+			);
+
+
+		} catch (err) {
+
+			console.error(
+				"Lỗi lưu bổ sung:",
+				err
+			);
+
+
+			alert(
+				"Lỗi khi lưu: " +
+				err.message
+			);
+
+
+			if (msgEl) {
+				msgEl.textContent = "";
 			}
-
-		} catch (err) {
-			console.error("Lỗi lưu bổ sung:", err);
-			alert("Lỗi khi lưu: " + err.message);
-			if (msgEl) msgEl.textContent = "";
-		}
-	}
-	
-	async function clearSingleLogEntry(entityId, fieldKey, logEntryId) {
-		if (!confirm("Bạn có chắc chắn muốn xóa mốc ghi nhận này không?")) return;
-
-		const orgId = window.currentOrgIdGlobal;
-		const academicId = document.getElementById("emp-academic-year-select")?.value;
-		const moduleId = document.getElementById("emp-module-select")?.value;
-		const todayStr = new Date().toLocaleDateString('en-CA');
-		const dailyDocId = `${entityId}_${todayStr}`;
-
-		const db = firebase.firestore();
-		const docRef = db.collection("organizations")
-			.doc(orgId)
-			.collection("academicYears")
-			.doc(academicId)
-			.collection("modulesData")
-			.doc(moduleId)
-			.collection("records")
-			.doc(dailyDocId);
-
-		try {
-			const docSnap = await docRef.get();
-			if (!docSnap.exists) return;
-
-			const data = docSnap.data();
-			const currentList = data[fieldKey];
-
-			if (Array.isArray(currentList)) {
-				// Lọc bỏ phần tử có id trùng khớp
-				const updatedList = currentList.filter(item => item.id !== logEntryId);
-
-				await docRef.update({
-					[fieldKey]: updatedList,
-					updatedAt: getVietnamTimestamp()
-				});
-
-				alert("Đã xóa thành công mốc ghi nhận!");
-				refreshAndRenderEmployeeData();
-			}
-		} catch (err) {
-			console.error("Lỗi khi xóa mốc log:", err);
-			alert("Lỗi khi xóa: " + err.message);
-		}
-	}
-	
-	async function writeAuditLog(orgId, academicId, actionType, moduleId, targetEntityId, changesData) {
-		try {
-			const user = firebase.auth().currentUser;
-			if (!user) return;
-
-			const db = firebase.firestore();
-			const now = new Date();
-			const dateStr = now.toISOString().split('T')[0]; // Lấy chuỗi "YYYY-MM-DD"
-
-			// Lấy thông tin user hiện tại từ cache hoặc localStorage nếu có, hoặc dùng trực tiếp email
-			const userEmail = user.email || "";
-
-			await db.collection("organizations")
-				.doc(orgId)
-				.collection("academicYears")
-				.doc(academicId)
-				.collection("auditlogs")
-				.add({
-					timestamp: getVietnamTimestamp(),
-					date: dateStr,
-					userEmail: userEmail,
-					action: actionType, // "UPDATE", "INSERT", "DELETE"
-					moduleId: moduleId || "",
-					targetEntityId: targetEntityId || "",
-					changes: changesData || {},
-					createdAt: now.toISOString()
-				});
-		} catch (err) {
-			console.error("Không thể ghi audit log:", err);
-			// Không chặn luồng chính của người dùng nếu log lỗi
 		}
 	}
 	
@@ -11717,740 +14797,2723 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 	}
 	
 	//	THẺ 4 - LỚP CHỦ NHIỆM
-	async function loadHomeroomClassData(forceRefresh = false) {
-		const tableBody = document.getElementById("emp-homeroom-body-rows");
-		const headerRow = document.getElementById("emp-homeroom-header-row");
-		const classNameSpan = document.getElementById("emp-homeroom-class-name");
-		const modeSelect = document.getElementById("emp-homeroom-mode-select");
-		const badge = document.getElementById("emp-homeroom-cache-badge");
-
-		if (!tableBody) return;
-
-		const orgId = window.currentOrgIdGlobal;
-		if (!orgId) {
-			tableBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: red;">Chưa xác định được thông tin đơn vị (OrgId).</td></tr>';
-			return;
-		}
-
-		let academicYearId = "";
-		const yearsArr = window.currentAcademicYearsGlobal;
-
-		if (Array.isArray(yearsArr) && yearsArr.length > 0) {
-			const lastYearItem = yearsArr[yearsArr.length - 1];
-
-			academicYearId = String(
-				typeof lastYearItem === 'object' && lastYearItem !== null
-					? (lastYearItem.id || lastYearItem.name || lastYearItem.year)
-					: lastYearItem
-			).trim();
-
-		} else if (window.currentAcademicYearIdGlobal) {
-			academicYearId = String(window.currentAcademicYearIdGlobal).trim();
-		}
-
-		if (!academicYearId) {
-			tableBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: red;">Chưa xác định được năm học hiện tại.</td></tr>';
-			return;
-		}
-
-		const authUser = firebase.auth().currentUser;
-
-		if (!authUser) {
-			tableBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: red;">Chưa đăng nhập hệ thống.</td></tr>';
-			return;
-		}
-
-		const teacherId = authUser.uid;
-		const mode = modeSelect ? modeSelect.value : "daily";
-
-		tableBody.innerHTML = `
-			<tr>
-				<td colspan="10" style="text-align: center; color: #6c757d;">
-					Đang tải dữ liệu lớp chủ nhiệm theo chế độ
-					(${mode === 'monthly' ? 'Tháng' : mode === 'weekly' ? 'Tuần' : 'Ngày'})...
-				</td>
-			</tr>
-		`;
-
-		try {
-			const db = firebase.firestore();
-
-			// ============================================================
-			// 1. LẤY THÔNG TIN LỚP CHỦ NHIỆM
-			// ============================================================
-
-			let homeroomClasses = window.currentTeacherHomerooms || [];
-
-			if (homeroomClasses.length === 0 || forceRefresh) {
-				try {
-					const assignRef = db.collection("organizations")
-						.doc(orgId)
-						.collection("academicYears")
-						.doc(academicYearId)
-						.collection("assignments");
-
-					let assignData = null;
-
-					const allAssigns = await assignRef.get();
-
-					const currentEmail = (
-						window.currentUserEmailGlobal ||
-						authUser.email ||
-						""
-					).toLowerCase().trim();
-
-					allAssigns.forEach(d => {
-						const data = d.data();
-
-						if (
-							d.id === teacherId ||
-							data.memberId === teacherId ||
-							(
-								data.email &&
-								data.email.toLowerCase().trim() === currentEmail
-							)
-						) {
-							assignData = data;
-						}
-					});
-
-					if (assignData) {
-						let rawData =
-							assignData.homeroom ||
-							assignData.homeroomClasses ||
-							assignData.classes ||
-							[];
-
-						let itemsList = [];
-
-						if (typeof rawData === "string") {
-							itemsList = rawData
-								.split(",")
-								.map(s => s.trim())
-								.filter(Boolean);
-
-						} else if (Array.isArray(rawData)) {
-							itemsList = rawData;
-						}
-
-						let parsedHomerooms = [];
-						let parsedDepartments = [];
-
-						itemsList.forEach(item => {
-							const val = String(item).trim();
-
-							if (/\d/.test(val)) {
-								parsedHomerooms.push(val);
-							} else {
-								parsedDepartments.push(val);
-							}
-						});
-
-						homeroomClasses = parsedHomerooms;
-
-						window.currentTeacherHomerooms = parsedHomerooms;
-						window.currentTeacherDepartments = parsedDepartments;
-					}
-
-				} catch (err) {
-					console.warn(
-						"⚠️ Không thể đọc phân công lớp chủ nhiệm từ Firestore:",
-						err
-					);
-				}
-			}
-
-			if (homeroomClasses.length === 0) {
-				if (classNameSpan) {
-					classNameSpan.innerText = "Không có lớp chủ nhiệm";
-				}
-
-				tableBody.innerHTML = `
-					<tr>
-						<td colspan="10"
-							style="text-align: center; color: #6c757d; font-style: italic;">
-							Bạn không được phân công chủ nhiệm lớp nào trong năm học này
-							(hoặc chưa cấu hình trong bảng assignments).
-						</td>
-					</tr>
-				`;
-
-				return;
-			}
-
-			if (classNameSpan) {
-				classNameSpan.innerText = homeroomClasses.join(", ");
-			}
-
-			// ============================================================
-			// 2. LẤY DANH SÁCH HỌC SINH
-			// ============================================================
-
-			if (
-				!window.cachedUsersMap ||
-				Object.keys(window.cachedUsersMap).length === 0
-			) {
-				const usersSnap = await db
-					.collection("organizations")
-					.doc(orgId)
-					.collection("users")
-					.get();
-
-				window.cachedUsersMap = {};
-
-				usersSnap.forEach(uDoc => {
-					const uData = uDoc.data();
-
-					window.cachedUsersMap[uDoc.id] = {
-						fullName: uData.fullName || uDoc.id,
-						category: uData.category || uData.className || ""
-					};
-				});
-			}
-
-			let homeroomStudents = [];
-
-			for (const [uId, uInfo] of Object.entries(window.cachedUsersMap)) {
-				if (homeroomClasses.includes(uInfo.category)) {
-					homeroomStudents.push({
-						id: uId,
-						name: uInfo.fullName,
-						category: uInfo.category
-					});
-				}
-			}
-
-			if (homeroomStudents.length === 0) {
-				tableBody.innerHTML = `
-					<tr>
-						<td colspan="10"
-							style="text-align: center; color: #6c757d; font-style: italic;">
-							Không tìm thấy học sinh nào thuộc lớp chủ nhiệm
-							(${homeroomClasses.join(", ")}).
-						</td>
-					</tr>
-				`;
-
-				return;
-			}
-
-			// ============================================================
-			// 3. KPI CONFIG
-			// ============================================================
-
-			const kpiConfigDoc = await db
-				.collection("organizations")
-				.doc(orgId)
-				.collection("academicYears")
-				.doc(academicYearId)
-				.collection("KPIconfig")
-				.doc("student")
-				.get();
-
-			const kpiRules = kpiConfigDoc.exists
-				? kpiConfigDoc.data()
-				: {};
-
-			// ============================================================
-			// 4. MODULE STUDENT
-			// ============================================================
-
-			const modulesSnap = await db
-				.collection("organizations")
-				.doc(orgId)
-				.collection("modules")
-				.where("targetType", "==", "STUDENT")
-				.get();
-
-			let kpiFieldsMap = {};
-
-			modulesSnap.forEach(modDoc => {
-				const modData = modDoc.data();
-
-				const fieldsArr = Array.isArray(modData.fields)
-					? modData.fields
-					: [];
-
-				fieldsArr.forEach(fObj => {
-					if (fObj && fObj.isKpi && fObj.key) {
-						kpiFieldsMap[fObj.key] = {
-							id: fObj.key,
-							name: fObj.label || fObj.key,
-							scoreWeight: Number(fObj.scoreWeight || -1)
-						};
-					}
-				});
-			});
-
-			const kpiFieldsList = Object.values(kpiFieldsMap);
-
-			// ============================================================
-			// 5. HEADER
-			// ============================================================
-
-			let headerHtml = `
-				<th style="width: 90px;">Mã ID</th>
-				<th style="width: 170px;">Họ và Tên</th>
-				<th style="width: 100px;">Lớp</th>
-			`;
-
-			kpiFieldsList.forEach(field => {
-				headerHtml += `
-					<th style="text-align: center; min-width: 90px;">
-						${field.name}
-					</th>
-				`;
-			});
-
-			if (mode === "monthly") {
-				headerHtml += `
-					<th style="width: 110px; text-align: center;">Tổng lượt</th>
-					<th style="width: 100px; text-align: center;">Tổng điểm</th>
-					<th style="width: 120px; text-align: center;">Xếp loại Tháng</th>
-				`;
-			} else {
-				headerHtml += `
-					<th style="width: 110px; text-align: center;">
-						Tổng lượt vi phạm
-					</th>
-				`;
-			}
-
-			if (headerRow) {
-				headerRow.innerHTML = headerHtml;
-			}
-
-			// ============================================================
-			// 6. KHỞI TẠO THỐNG KÊ
-			// ============================================================
-
-			let studentStatsMap = {};
-
-			homeroomStudents.forEach(st => {
-				studentStatsMap[st.id] = {
-					id: st.id,
-					name: st.name,
-					className: st.category,
-					totalCount: 0,
-					totalScore: 0,
-					kpiCounts: {}
-				};
-			});
-
-			// ============================================================
-			// 7. XÁC ĐỊNH KHOẢNG THỜI GIAN
-			// ============================================================
-
-			const formatDateLocal = (date) => {
-				const y = date.getFullYear();
-				const m = String(date.getMonth() + 1).padStart(2, "0");
-				const d = String(date.getDate()).padStart(2, "0");
-
-				return `${y}-${m}-${d}`;
-			};
-
-			const now = new Date();
-
-			const todayStr = formatDateLocal(now);
-
-			let startDateStr = todayStr;
-			let endDateStr = todayStr;
-
-			if (mode === "weekly") {
-
-				const dayOfWeek = now.getDay();
-
-				// Thứ 2 là ngày đầu tuần
-				const diffToMonday =
-					dayOfWeek === 0
-						? -6
-						: 1 - dayOfWeek;
-
-				const monday = new Date(now);
-				monday.setDate(
-					now.getDate() + diffToMonday
-				);
-
-				const sunday = new Date(monday);
-				sunday.setDate(
-					monday.getDate() + 6
-				);
-
-				startDateStr = formatDateLocal(monday);
-				endDateStr = formatDateLocal(sunday);
-
-			} else if (mode === "monthly") {
-
-				const firstDay = new Date(
-					now.getFullYear(),
-					now.getMonth(),
-					1
-				);
-
-				const lastDay = new Date(
-					now.getFullYear(),
-					now.getMonth() + 1,
-					0
-				);
-
-				startDateStr = formatDateLocal(firstDay);
-				endDateStr = formatDateLocal(lastDay);
-			}
-
-			// ============================================================
-			// HÀM CỘNG DỮ LIỆU RECORD VÀO HỌC SINH
-			// ============================================================
-
-			const processRecord = (recDoc) => {
-
-				const data = recDoc.data() || {};
-
-				const entityId =
-					data.entityId ||
-					String(recDoc.id).split("_")[0];
-
-				if (!studentStatsMap[entityId]) {
-					return;
-				}
-
-				kpiFieldsList.forEach(kpiField => {
-
-					const fKey = kpiField.id;
-
-					let val = data[fKey];
-
-					if (
-						val === undefined &&
-						data.changes &&
-						data.changes[fKey] !== undefined
-					) {
-						val = data.changes[fKey];
-					}
-
-					if (
-						val !== undefined &&
-						val !== null &&
-						val !== ""
-					) {
-
-						const countInc = Array.isArray(val)
-							? val.length
-							: 1;
-
-						studentStatsMap[entityId].totalCount += countInc;
-
-						studentStatsMap[entityId].totalScore +=
-							countInc * kpiField.scoreWeight;
-
-						studentStatsMap[entityId].kpiCounts[fKey] =
-							(
-								studentStatsMap[entityId]
-									.kpiCounts[fKey] || 0
-							) + countInc;
-					}
-				});
-			};
-
-			// ============================================================
-			// 8. ĐỌC RECORDS - TỐI ƯU READ
-			// ============================================================
-
-			for (const modDoc of modulesSnap.docs) {
-
-				const recordsRef = db
-					.collection("organizations")
-					.doc(orgId)
-					.collection("academicYears")
-					.doc(academicYearId)
-					.collection("modulesData")
-					.doc(modDoc.id)
-					.collection("records");
-
-				// --------------------------------------------------------
-				// DAILY
-				// --------------------------------------------------------
-				// recordId:
-				//     entityId_YYYY-MM-DD
-				//
-				// Ví dụ:
-				//     HS001_2026-09-16
-				//
-				// Không query collection.
-				// Đọc thẳng document.
-				// --------------------------------------------------------
-
-				if (mode === "daily") {
-
-					const dailyReadPromises =
-						homeroomStudents.map(async student => {
-
-							const recordId =
-								`${student.id}_${todayStr}`;
-
-							const recDoc =
-								await recordsRef
-									.doc(recordId)
-									.get();
-
-							if (recDoc.exists) {
-								processRecord(recDoc);
-							}
-						});
-
-					await Promise.all(dailyReadPromises);
-
-				// --------------------------------------------------------
-				// WEEKLY / MONTHLY
-				// --------------------------------------------------------
-				} else {
-
-					// Firestore "in" tối đa 30 phần tử.
-					// Chia học sinh thành từng nhóm 30.
-					const studentIds = homeroomStudents.map(
-						student => student.id
-					);
-
-					const chunks = [];
-
-					for (let i = 0; i < studentIds.length; i += 30) {
-						chunks.push(
-							studentIds.slice(i, i + 30)
-						);
-					}
-
-					// Chạy toàn bộ query của module song song.
-					const queryPromises = chunks.map(async ids => {
-
-						const snap = await recordsRef
-							.where(
-								"entityId",
-								"in",
-								ids
-							)
-							.where(
-								"date",
-								">=",
-								startDateStr
-							)
-							.where(
-								"date",
-								"<=",
-								endDateStr
-							)
-							.get();
-
-						snap.forEach(recDoc => {
-							processRecord(recDoc);
-						});
-					});
-
-					await Promise.all(queryPromises);
-				}
-			}
-
-			// ============================================================
-			// 9. XẾP LOẠI
-			// ============================================================
-
-			const processedList =
-				Object.values(studentStatsMap).map(item => {
-
-					let rank = "🟢 Tốt";
-
-					let badgeStyle =
-						"background: #d1e7dd; color: #0f5132;";
-
-					if (mode === "monthly") {
-
-						const chuadatCount =
-							Number(kpiRules.chuadat_count || 15);
-
-						const chuadatScore =
-							Number(kpiRules.chuadat_score || 15);
-
-						const datCount =
-							Number(kpiRules.dat_count || 10);
-
-						const datScore =
-							Number(kpiRules.dat_score || 10);
-
-						const khaCount =
-							Number(kpiRules.kha_count || 5);
-
-						const khaScore =
-							Number(kpiRules.kha_score || 5);
-
-						if (
-							item.totalCount >= chuadatCount ||
-							Math.abs(item.totalScore) >= chuadatScore
-						) {
-							rank = "🔴 Chưa đạt";
-
-							badgeStyle =
-								"background: #f8d7da; color: #842029;";
-
-						} else if (
-							item.totalCount >= datCount ||
-							Math.abs(item.totalScore) >= datScore
-						) {
-							rank = "🟠 Đạt";
-
-							badgeStyle =
-								"background: #fff3cd; color: #664d03;";
-
-						} else if (
-							item.totalCount >= khaCount ||
-							Math.abs(item.totalScore) >= khaScore
-						) {
-							rank = "🔵 Khá";
-
-							badgeStyle =
-								"background: #cff4fc; color: #055160;";
-						}
-					}
-
-					return {
-						...item,
-						rank,
-						badgeStyle
-					};
-				});
-
-			// ============================================================
-			// 10. RENDER
-			// ============================================================
-
-			if (processedList.length === 0) {
-				tableBody.innerHTML = `
-					<tr>
-						<td colspan="10"
-							style="text-align: center; color: #6c757d; font-style: italic;">
-							Chưa có dữ liệu vi phạm nào trong lớp chủ nhiệm.
-						</td>
-					</tr>
-				`;
-
-				return;
-			}
-
-			let html = "";
-
-			processedList.forEach(item => {
-
-				html += `
-					<tr style="border-bottom: 1px solid #dee2e6;">
-						<td style="font-family: monospace; font-weight: bold;">
-							${item.id}
-						</td>
-
-						<td>
-							${item.name}
-						</td>
-
-						<td>
-							<span style="
-								background: #e9ecef;
-								padding: 2px 6px;
-								border-radius: 4px;
-								font-size: 0.9em;
-							">
-								${item.className}
-							</span>
-						</td>
-				`;
-
-				kpiFieldsList.forEach(field => {
-
-					const countVal =
-						item.kpiCounts[field.id] || 0;
-
-					html += `
-						<td style="text-align: center;">
-							${
-								countVal > 0
-									? `<span style="
-											color: #dc3545;
-											font-weight: bold;
-										">${countVal}</span>`
-									: '<span style="color: #ccc;">0</span>'
-							}
-						</td>
-					`;
-				});
-
-				if (mode === "monthly") {
-
-					html += `
-						<td style="
-							text-align: center;
-							font-weight: bold;
-						">
-							${item.totalCount}
-						</td>
-
-						<td style="
-							text-align: center;
-							color: #dc3545;
-							font-weight: bold;
-						">
-							${item.totalScore}đ
-						</td>
-
-						<td style="text-align: center;">
-							<span style="
-								${item.badgeStyle}
-								padding: 3px 10px;
-								border-radius: 4px;
-								font-weight: bold;
-								display: inline-block;
-							">
-								${item.rank}
-							</span>
-						</td>
-					`;
-
-				} else {
-
-					html += `
-						<td style="
-							text-align: center;
-							font-weight: bold;
-							color: #0d6efd;
-						">
-							${item.totalCount} lượt
-						</td>
-					`;
-				}
-
-				html += `</tr>`;
-			});
-
-			tableBody.innerHTML = html;
-
-			if (badge) {
-				badge.innerText =
-					"🌐 Cập nhật lúc: " +
-					new Date().toLocaleTimeString();
-			}
-
-		} catch (error) {
-
-			console.error(
-				"Lỗi tải dữ liệu lớp chủ nhiệm:",
-				error
-			);
-
-			tableBody.innerHTML = `
-				<tr>
-					<td colspan="10"
-						style="text-align: center; color: red;">
-						Lỗi tải dữ liệu lớp chủ nhiệm.
-					</td>
-				</tr>
-			`;
-		}
-	}
-	
+async function loadHomeroomClassData(forceRefresh = false) {
+    const tableBody = document.getElementById("emp-homeroom-body-rows");
+    const headerRow = document.getElementById("emp-homeroom-header-row");
+    const classNameSpan = document.getElementById("emp-homeroom-class-name");
+    const modeSelect = document.getElementById("emp-homeroom-mode-select");
+    const badge = document.getElementById("emp-homeroom-cache-badge");
+
+    if (!tableBody) return;
+
+    const orgId = String(window.currentOrgIdGlobal || "").trim();
+
+    if (!orgId) {
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="10" style="text-align:center;color:red;">
+                    Chưa xác định được thông tin đơn vị (OrgId).
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    // ============================================================
+    // 1. XÁC ĐỊNH NĂM HỌC
+    // ============================================================
+
+    let academicYearId = "";
+    const yearsArr = window.currentAcademicYearsGlobal;
+
+    if (Array.isArray(yearsArr) && yearsArr.length > 0) {
+        const lastYearItem = yearsArr[yearsArr.length - 1];
+
+        academicYearId = String(
+            typeof lastYearItem === "object" && lastYearItem !== null
+                ? (
+                    lastYearItem.id ||
+                    lastYearItem.name ||
+                    lastYearItem.year ||
+                    ""
+                )
+                : lastYearItem
+        ).trim();
+    }
+
+    if (!academicYearId) {
+        academicYearId = String(
+            window.currentAcademicYearIdGlobal || ""
+        ).trim();
+    }
+
+    if (!academicYearId) {
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="10" style="text-align:center;color:red;">
+                    Chưa xác định được năm học hiện tại.
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    // ============================================================
+    // 2. USER ĐĂNG NHẬP
+    // ============================================================
+
+    const authUser = firebase.auth().currentUser;
+
+    if (!authUser) {
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="10" style="text-align:center;color:red;">
+                    Chưa đăng nhập hệ thống.
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    const teacherUid = String(authUser.uid || "").trim();
+
+    const currentEmail = String(
+        window.currentUserEmailGlobal ||
+        authUser.email ||
+        ""
+    ).trim().toLowerCase();
+
+    const mode = modeSelect?.value || "daily";
+
+    tableBody.innerHTML = `
+        <tr>
+            <td colspan="10" style="text-align:center;color:#6c757d;">
+                Đang tải dữ liệu lớp chủ nhiệm theo chế độ
+                ${
+                    mode === "monthly"
+                        ? "Tháng"
+                        : mode === "weekly"
+                            ? "Tuần"
+                            : "Ngày"
+                }...
+            </td>
+        </tr>
+    `;
+
+    try {
+        const db = firebase.firestore();
+
+        // ============================================================
+        // 3. CACHE PHÂN CÔNG LỚP CHỦ NHIỆM
+        // ============================================================
+
+        window._homeroomAssignmentCache =
+            window._homeroomAssignmentCache || {};
+
+        const assignmentCacheKey =
+            `${orgId}__${academicYearId}__${teacherUid}`;
+
+        let assignmentCache =
+            window._homeroomAssignmentCache[assignmentCacheKey];
+
+        let homeroomClasses = [];
+        let teacherDepartments = [];
+
+        if (assignmentCache && !forceRefresh) {
+            homeroomClasses =
+                Array.isArray(assignmentCache.homeroomClasses)
+                    ? [...assignmentCache.homeroomClasses]
+                    : [];
+
+            teacherDepartments =
+                Array.isArray(assignmentCache.departments)
+                    ? [...assignmentCache.departments]
+                    : [];
+        } else {
+            const assignRef = db
+                .collection("organizations")
+                .doc(orgId)
+                .collection("academicYears")
+                .doc(academicYearId)
+                .collection("assignments");
+
+            const allAssigns = await assignRef.get();
+
+            let assignData = null;
+
+            allAssigns.forEach(d => {
+                const data = d.data() || {};
+
+                const dataUid = String(
+                    data.uid ||
+                    data.userId ||
+                    data.memberId ||
+                    ""
+                ).trim();
+
+                const dataEmail = String(
+                    data.email || ""
+                ).trim().toLowerCase();
+
+                if (
+                    d.id === teacherUid ||
+                    dataUid === teacherUid ||
+                    (
+                        currentEmail &&
+                        dataEmail === currentEmail
+                    )
+                ) {
+                    assignData = data;
+                }
+            });
+
+            if (assignData) {
+                const rawData =
+                    assignData.homeroom ||
+                    assignData.homeroomClasses ||
+                    assignData.classes ||
+                    [];
+
+                let itemsList = [];
+
+                if (typeof rawData === "string") {
+                    itemsList = rawData
+                        .split(",")
+                        .map(s => s.trim())
+                        .filter(Boolean);
+                } else if (Array.isArray(rawData)) {
+                    itemsList = rawData;
+                }
+
+                itemsList.forEach(item => {
+                    const val = String(item).trim();
+
+                    if (!val) return;
+
+                    if (/\d/.test(val)) {
+                        homeroomClasses.push(val);
+                    } else {
+                        teacherDepartments.push(val);
+                    }
+                });
+            }
+
+            assignmentCache = {
+                homeroomClasses: [...homeroomClasses],
+                departments: [...teacherDepartments],
+                cachedAt: Date.now()
+            };
+
+            window._homeroomAssignmentCache[assignmentCacheKey] =
+                assignmentCache;
+
+            window.currentTeacherHomerooms = [...homeroomClasses];
+            window.currentTeacherDepartments = [...teacherDepartments];
+        }
+
+        if (homeroomClasses.length === 0) {
+            if (classNameSpan) {
+                classNameSpan.innerText = "Không có lớp chủ nhiệm";
+            }
+
+            tableBody.innerHTML = `
+                <tr>
+                    <td colspan="10" style="
+                        text-align:center;
+                        color:#6c757d;
+                        font-style:italic;
+                    ">
+                        Bạn không được phân công chủ nhiệm lớp nào trong năm học này.
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        if (classNameSpan) {
+            classNameSpan.innerText = homeroomClasses.join(", ");
+        }
+
+        // ============================================================
+        // 4. CACHE USERS
+        // ============================================================
+
+        window._usersCacheByOrg = window._usersCacheByOrg || {};
+
+        let usersCache = window._usersCacheByOrg[orgId];
+
+        let cachedUsersNeedRefresh =
+            !usersCache ||
+            !usersCache.users ||
+            Object.keys(usersCache.users).length === 0;
+
+        if (!cachedUsersNeedRefresh) {
+            const cachedList = Object.values(usersCache.users);
+
+            cachedUsersNeedRefresh = cachedList.some(
+                user => user.code === undefined
+            );
+        }
+
+        if (
+            window.cachedUsersMap &&
+            Object.keys(window.cachedUsersMap).length > 0
+        ) {
+            const globalCachedList =
+                Object.values(window.cachedUsersMap);
+
+            const globalMissingCode =
+                globalCachedList.some(
+                    user => user.code === undefined
+                );
+
+            if (globalMissingCode) {
+                cachedUsersNeedRefresh = true;
+            }
+        }
+
+        if (forceRefresh || cachedUsersNeedRefresh) {
+            const usersSnap = await db
+                .collection("organizations")
+                .doc(orgId)
+                .collection("users")
+                .get();
+
+            const usersMap = {};
+
+            usersSnap.forEach(uDoc => {
+                const uData = uDoc.data() || {};
+
+                const code = String(
+                    uData.code ||
+                    uData.memberId ||
+                    ""
+                ).trim();
+
+                const uid = String(
+                    uData.uid ||
+                    uData.id ||
+                    uDoc.id ||
+                    ""
+                ).trim();
+
+                const fullName =
+                    uData.fullName ||
+                    uData.displayName ||
+                    uData.name ||
+                    uDoc.id;
+
+                const category = String(
+                    uData.category ||
+                    uData.className ||
+                    ""
+                ).trim();
+
+                usersMap[uDoc.id] = {
+                    id: uDoc.id,
+                    uid,
+                    code,
+                    fullName,
+                    category,
+                    email: String(
+                        uData.email || ""
+                    ).trim().toLowerCase(),
+                    role: uData.role || ""
+                };
+            });
+
+            usersCache = {
+                users: usersMap,
+                cachedAt: Date.now()
+            };
+
+            window._usersCacheByOrg[orgId] = usersCache;
+            window.cachedUsersMap = usersMap;
+        } else {
+            window.cachedUsersMap = usersCache.users;
+        }
+
+        const usersMap = window.cachedUsersMap || {};
+
+        // ============================================================
+        // 5. DANH SÁCH HỌC SINH
+        // ============================================================
+
+        const homeroomStudents = [];
+
+        for (const [uId, uInfo] of Object.entries(usersMap)) {
+            if (!uInfo || !uInfo.category) continue;
+
+            if (
+                !homeroomClasses.includes(
+                    String(uInfo.category).trim()
+                )
+            ) {
+                continue;
+            }
+
+            const code = String(uInfo.code || "").trim();
+
+            const uid = String(
+                uInfo.uid ||
+                uInfo.id ||
+                uId ||
+                ""
+            ).trim();
+
+            homeroomStudents.push({
+                id: code || uid,
+                code,
+                uid,
+                name:
+                    uInfo.fullName ||
+                    uInfo.displayName ||
+                    uInfo.name ||
+                    uId,
+                category: String(uInfo.category).trim()
+            });
+        }
+
+        if (homeroomStudents.length === 0) {
+            tableBody.innerHTML = `
+                <tr>
+                    <td colspan="10" style="
+                        text-align:center;
+                        color:#6c757d;
+                        font-style:italic;
+                    ">
+                        Không tìm thấy học sinh nào thuộc lớp chủ nhiệm
+                        (${homeroomClasses.join(", ")}).
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        // ============================================================
+        // 6. CACHE KPI CONFIG - HỌC SINH
+        // ============================================================
+
+        window._homeroomKpiConfigCache =
+            window._homeroomKpiConfigCache || {};
+
+        const kpiCacheKey =
+            `${orgId}__${academicYearId}`;
+
+        let kpiRules =
+            window._homeroomKpiConfigCache[kpiCacheKey];
+
+        if (!kpiRules || forceRefresh) {
+            const kpiConfigDoc = await db
+                .collection("organizations")
+                .doc(orgId)
+                .collection("academicYears")
+                .doc(academicYearId)
+                .collection("KPIconfig")
+                .doc("student")
+                .get();
+
+            kpiRules =
+                kpiConfigDoc.exists
+                    ? (kpiConfigDoc.data() || {})
+                    : {};
+
+            window._homeroomKpiConfigCache[kpiCacheKey] =
+                kpiRules;
+        }
+
+        // ============================================================
+        // 7. ĐIỂM GỐC HỌC SINH
+        // ============================================================
+        //
+        // Ưu tiên tuyệt đối trường BasePoint trong KPIconfig/student.
+        // Không cộng BasePoint lặp lại theo từng record/KPI.
+        //
+        // Công thức tháng:
+        // BasePoint - tổng điểm âm + tổng điểm dương
+        // ============================================================
+
+        const basePointRaw =
+            kpiRules.BasePoint ??
+            kpiRules.basePoint ??
+            90;
+
+        const basePointNumber =
+            Number(basePointRaw);
+
+        const studentBasePoint =
+            Number.isFinite(basePointNumber)
+                ? basePointNumber
+                : 90;
+
+        // ============================================================
+        // 8. CACHE MODULE STUDENT
+        // ============================================================
+
+        window._homeroomStudentModulesCache =
+            window._homeroomStudentModulesCache || {};
+
+        const moduleCacheKey =
+            `${orgId}__${academicYearId}__student`;
+
+        let cachedModules =
+            window._homeroomStudentModulesCache[moduleCacheKey];
+
+        if (
+            !cachedModules ||
+            !Array.isArray(cachedModules.modules) ||
+            forceRefresh
+        ) {
+            const snap = await db
+                .collection("organizations")
+                .doc(orgId)
+                .collection("modules")
+                .where("targetType", "==", "STUDENT")
+                .get();
+
+            cachedModules = {
+                modules: snap.docs.map(doc => ({
+                    id: doc.id,
+                    data: doc.data() || {}
+                })),
+                cachedAt: Date.now()
+            };
+
+            window._homeroomStudentModulesCache[moduleCacheKey] =
+                cachedModules;
+        }
+
+        const studentModules =
+            cachedModules?.modules || [];
+
+        // ============================================================
+        // 9. KPI FIELDS
+        // ============================================================
+
+        const kpiFieldsMap = {};
+
+        studentModules.forEach(mod => {
+            const modData = mod.data || {};
+
+            const fieldsArr =
+                Array.isArray(modData.fields)
+                    ? modData.fields
+                    : [];
+
+            fieldsArr.forEach(fObj => {
+                if (
+                    fObj &&
+                    fObj.isKpi &&
+                    fObj.key
+                ) {
+                    const rawOptions =
+                        fObj.kpiOptions ||
+                        fObj.options ||
+                        {};
+
+                    let optionsMap = {};
+
+                    if (
+                        Array.isArray(rawOptions)
+                    ) {
+                        rawOptions.forEach(opt => {
+                            if (!opt) return;
+
+                            const optionKey = String(
+                                opt.value ??
+                                opt.key ??
+                                opt.id ??
+                                opt.label ??
+                                opt.name ??
+                                ""
+                            ).trim();
+
+                            if (!optionKey) return;
+
+                            optionsMap[optionKey] = opt;
+                        });
+                    } else if (
+                        rawOptions &&
+                        typeof rawOptions === "object"
+                    ) {
+                        optionsMap = rawOptions;
+                    }
+
+                    const fieldWeightRaw =
+                        Number(fObj.scoreWeight);
+
+                    kpiFieldsMap[fObj.key] = {
+                        id: fObj.key,
+                        name:
+                            fObj.label ||
+                            fObj.key,
+                        scoreWeight:
+                            Number.isFinite(fieldWeightRaw)
+                                ? fieldWeightRaw
+                                : -1,
+                        kpiOptions: optionsMap
+                    };
+                }
+            });
+        });
+
+        const kpiFieldsList =
+            Object.values(kpiFieldsMap);
+
+        // ============================================================
+        // 10. HEADER
+        // ============================================================
+
+        let headerHtml = `
+            <th style="
+                width:100px;
+                text-align:center;
+            ">
+                Mã định danh
+            </th>
+
+            <th style="width:170px;">
+                Họ và Tên
+            </th>
+
+            <th style="
+                width:100px;
+                text-align:center;
+            ">
+                Lớp
+            </th>
+        `;
+
+        kpiFieldsList.forEach(field => {
+            headerHtml += `
+                <th style="
+                    text-align:center;
+                    min-width:90px;
+                ">
+                    ${field.name}
+                </th>
+            `;
+        });
+
+        if (mode === "monthly") {
+            headerHtml += `
+                <th style="
+                    width:100px;
+                    text-align:center;
+                ">
+                    Tổng lượt
+                </th>
+
+                <th style="
+                    width:110px;
+                    text-align:center;
+                ">
+                    Điểm trừ
+                </th>
+
+                <th style="
+                    width:110px;
+                    text-align:center;
+                ">
+                    Điểm cộng
+                </th>
+
+                <th style="
+                    width:110px;
+                    text-align:center;
+                ">
+                    Điểm tháng
+                </th>
+
+                <th style="
+                    width:120px;
+                    text-align:center;
+                ">
+                    Xếp loại Tháng
+                </th>
+            `;
+        } else {
+            headerHtml += `
+                <th style="
+                    width:110px;
+                    text-align:center;
+                ">
+                    Tổng lượt vi phạm
+                </th>
+            `;
+        }
+
+        if (headerRow) {
+            headerRow.innerHTML = headerHtml;
+        }
+
+        // ============================================================
+        // 11. KHỞI TẠO THỐNG KÊ
+        // ============================================================
+
+        const studentStatsMap = {};
+
+        homeroomStudents.forEach(student => {
+            const studentKey =
+                student.code ||
+                student.uid;
+
+            studentStatsMap[studentKey] = {
+                id: studentKey,
+                uid: student.uid,
+                code: student.code,
+                name: student.name,
+                className: student.category,
+
+                totalCount: 0,
+
+                // Tổng score ròng, giữ để tương thích.
+                totalScore: 0,
+
+                // Tách riêng giống bảng tổng hợp tháng.
+                totalPenalty: 0,
+                totalBonus: 0,
+
+                kpiCounts: {}
+            };
+        });
+
+        // ============================================================
+        // 12. KHOẢNG THỜI GIAN
+        // ============================================================
+
+        const formatDateLocal = date => {
+            const y = date.getFullYear();
+
+            const m = String(
+                date.getMonth() + 1
+            ).padStart(2, "0");
+
+            const d = String(
+                date.getDate()
+            ).padStart(2, "0");
+
+            return `${y}-${m}-${d}`;
+        };
+
+        const now = new Date();
+
+        const todayStr =
+            formatDateLocal(now);
+
+        let startDateStr = todayStr;
+        let endDateStr = todayStr;
+
+        if (mode === "weekly") {
+            const dayOfWeek = now.getDay();
+
+            const diffToMonday =
+                dayOfWeek === 0
+                    ? -6
+                    : 1 - dayOfWeek;
+
+            const monday = new Date(now);
+
+            monday.setDate(
+                now.getDate() +
+                diffToMonday
+            );
+
+            const sunday = new Date(monday);
+
+            sunday.setDate(
+                monday.getDate() + 6
+            );
+
+            startDateStr =
+                formatDateLocal(monday);
+
+            endDateStr =
+                formatDateLocal(sunday);
+
+        } else if (mode === "monthly") {
+            const firstDay = new Date(
+                now.getFullYear(),
+                now.getMonth(),
+                1
+            );
+
+            const lastDay = new Date(
+                now.getFullYear(),
+                now.getMonth() + 1,
+                0
+            );
+
+            startDateStr =
+                formatDateLocal(firstDay);
+
+            endDateStr =
+                formatDateLocal(lastDay);
+        }
+
+        // ============================================================
+        // 13. HÀM PHÂN TÍCH ĐIỂM KPI
+        // ============================================================
+        //
+        // Quy tắc:
+        // - Mỗi phần tử có nội dung trong mảng = 1 lượt.
+        // - Nếu option có scoreWeight -> dùng scoreWeight của option.
+        // - Nếu không có option -> dùng scoreWeight của field.
+        // - score < 0 -> totalPenalty += abs(score)
+        // - score > 0 -> totalBonus += score
+        // - score = 0 -> không cộng trừ điểm nhưng vẫn là 1 lượt.
+        //
+        // Các dạng dữ liệu được hỗ trợ:
+        // 1. scalar
+        // 2. object { value, label, name, scoreWeight }
+        // 3. array các scalar/object
+        // ============================================================
+
+        const normalizeOptionKey = value => {
+            if (
+                value === undefined ||
+                value === null
+            ) {
+                return "";
+            }
+
+            if (
+                typeof value === "object"
+            ) {
+                return String(
+                    value.value ??
+                    value.key ??
+                    value.id ??
+                    value.label ??
+                    value.name ??
+                    ""
+                ).trim();
+            }
+
+            return String(value).trim();
+        };
+
+        const findOptionConfig = (
+            field,
+            item
+        ) => {
+            const options =
+                field.kpiOptions || {};
+
+            const candidates = [];
+
+            if (
+                item &&
+                typeof item === "object"
+            ) {
+                candidates.push(
+                    item.value,
+                    item.key,
+                    item.id,
+                    item.label,
+                    item.name
+                );
+            } else {
+                candidates.push(item);
+            }
+
+            for (const candidate of candidates) {
+                const key =
+                    normalizeOptionKey(
+                        candidate
+                    );
+
+                if (!key) continue;
+
+                if (
+                    Object.prototype.hasOwnProperty.call(
+                        options,
+                        key
+                    )
+                ) {
+                    return options[key];
+                }
+
+                const matchedKey =
+                    Object.keys(options).find(
+                        optionKey =>
+                            String(optionKey)
+                                .trim()
+                                .toLowerCase() ===
+                            key.toLowerCase()
+                    );
+
+                if (matchedKey) {
+                    return options[matchedKey];
+                }
+            }
+
+            return null;
+        };
+
+        const getKpiScore = (
+            field,
+            item
+        ) => {
+            const optionConfig =
+                findOptionConfig(
+                    field,
+                    item
+                );
+
+            if (
+                optionConfig &&
+                typeof optionConfig === "object"
+            ) {
+                const optionWeight =
+                    Number(
+                        optionConfig.scoreWeight ??
+                        optionConfig.weight ??
+                        optionConfig.score
+                    );
+
+                if (
+                    Number.isFinite(
+                        optionWeight
+                    )
+                ) {
+                    return optionWeight;
+                }
+            }
+
+            if (
+                item &&
+                typeof item === "object"
+            ) {
+                const itemWeight =
+                    Number(
+                        item.scoreWeight ??
+                        item.weight ??
+                        item.score
+                    );
+
+                if (
+                    Number.isFinite(
+                        itemWeight
+                    )
+                ) {
+                    return itemWeight;
+                }
+            }
+
+            const fieldWeight =
+                Number(field.scoreWeight);
+
+            return Number.isFinite(
+                fieldWeight
+            )
+                ? fieldWeight
+                : -1;
+        };
+
+        const getKpiItems = value => {
+            if (Array.isArray(value)) {
+                return value.filter(item => {
+                    if (
+                        item === undefined ||
+                        item === null
+                    ) {
+                        return false;
+                    }
+
+                    if (
+                        typeof item === "string"
+                    ) {
+                        return item.trim() !== "";
+                    }
+
+                    if (
+                        typeof item === "object"
+                    ) {
+                        return Object.values(item).some(
+                            v =>
+                                v !== undefined &&
+                                v !== null &&
+                                String(v).trim() !== ""
+                        );
+                    }
+
+                    return true;
+                });
+            }
+
+            return [
+                value
+            ];
+        };
+
+        const processKpiValue = (
+            stats,
+            field,
+            value
+        ) => {
+            if (
+                value === undefined ||
+                value === null ||
+                value === ""
+            ) {
+                return;
+            }
+
+            const items =
+                getKpiItems(value);
+
+            for (const item of items) {
+                const score =
+                    getKpiScore(
+                        field,
+                        item
+                    );
+
+                // Mỗi mục KPI là 1 lượt.
+                stats.totalCount += 1;
+
+                stats.kpiCounts[field.id] =
+                    (
+                        stats.kpiCounts[
+                            field.id
+                        ] || 0
+                    ) + 1;
+
+                if (score < 0) {
+                    stats.totalPenalty +=
+                        Math.abs(score);
+                } else if (score > 0) {
+                    stats.totalBonus +=
+                        score;
+                }
+            }
+
+            stats.totalScore =
+                -stats.totalPenalty +
+                stats.totalBonus;
+        };
+
+        // ============================================================
+        // 14. PROCESS RECORD
+        // ============================================================
+
+        const processRecord = recDoc => {
+            const data =
+                recDoc.data() || {};
+
+            const rawEntityId =
+                data.entityId ||
+                data.entityID ||
+                String(recDoc.id)
+                    .split("_")[0];
+
+            const entityId =
+                String(
+                    rawEntityId || ""
+                ).trim();
+
+            if (!entityId) return;
+
+            // CODE trước.
+            let stats =
+                studentStatsMap[
+                    entityId
+                ];
+
+            // UID chỉ fallback dữ liệu cũ.
+            if (!stats) {
+                const student =
+                    homeroomStudents.find(
+                        s =>
+                            s.uid === entityId
+                    );
+
+                if (student) {
+                    stats =
+                        studentStatsMap[
+                            student.code ||
+                            student.uid
+                        ];
+                }
+            }
+
+            if (!stats) return;
+
+            kpiFieldsList.forEach(
+                kpiField => {
+                    const fKey =
+                        kpiField.id;
+
+                    let val =
+                        data[fKey];
+
+                    if (
+                        val === undefined &&
+                        data.changes &&
+                        data.changes[fKey] !== undefined
+                    ) {
+                        val =
+                            data.changes[fKey];
+                    }
+
+                    processKpiValue(
+                        stats,
+                        kpiField,
+                        val
+                    );
+                }
+            );
+        };
+
+        // ============================================================
+        // 15. ĐỌC RECORDS
+        // ============================================================
+
+        for (const mod of studentModules) {
+            const moduleId = mod.id;
+
+            const recordsRef = db
+                .collection("organizations")
+                .doc(orgId)
+                .collection("academicYears")
+                .doc(academicYearId)
+                .collection("modulesData")
+                .doc(moduleId)
+                .collection("records");
+
+            // --------------------------------------------------------
+            // NGÀY
+            // --------------------------------------------------------
+
+            if (mode === "daily") {
+                const dailyPromises =
+                    homeroomStudents.map(
+                        async student => {
+                            const primaryId =
+                                student.code ||
+                                student.uid;
+
+                            const primaryRecordId =
+                                `${primaryId}_${todayStr}`;
+
+                            let recDoc =
+                                await recordsRef
+                                    .doc(
+                                        primaryRecordId
+                                    )
+                                    .get();
+
+                            // Fallback record cũ dùng UID.
+                            if (
+                                !recDoc.exists &&
+                                student.uid &&
+                                student.uid !== student.code
+                            ) {
+                                const oldRecordId =
+                                    `${student.uid}_${todayStr}`;
+
+                                recDoc =
+                                    await recordsRef
+                                        .doc(
+                                            oldRecordId
+                                        )
+                                        .get();
+                            }
+
+                            if (recDoc.exists) {
+                                processRecord(
+                                    recDoc
+                                );
+                            }
+                        }
+                    );
+
+                await Promise.all(
+                    dailyPromises
+                );
+
+            } else {
+                // ----------------------------------------------------
+                // TUẦN / THÁNG
+                // ----------------------------------------------------
+                //
+                // Query cả CODE và UID để không bỏ sót dữ liệu cũ.
+                // ----------------------------------------------------
+
+                const studentIds = [
+                    ...new Set(
+                        homeroomStudents
+                            .flatMap(student => [
+                                student.code,
+                                student.uid
+                            ])
+                            .map(id =>
+                                String(
+                                    id || ""
+                                ).trim()
+                            )
+                            .filter(Boolean)
+                    )
+                ];
+
+                const chunks = [];
+
+                for (
+                    let i = 0;
+                    i < studentIds.length;
+                    i += 30
+                ) {
+                    chunks.push(
+                        studentIds.slice(
+                            i,
+                            i + 30
+                        )
+                    );
+                }
+
+                const queryPromises =
+                    chunks.map(
+                        async ids => {
+                            const snap =
+                                await recordsRef
+                                    .where(
+                                        "entityId",
+                                        "in",
+                                        ids
+                                    )
+                                    .where(
+                                        "date",
+                                        ">=",
+                                        startDateStr
+                                    )
+                                    .where(
+                                        "date",
+                                        "<=",
+                                        endDateStr
+                                    )
+                                    .get();
+
+                            snap.forEach(
+                                recDoc => {
+                                    processRecord(
+                                        recDoc
+                                    );
+                                }
+                            );
+                        }
+                    );
+
+                await Promise.all(
+                    queryPromises
+                );
+            }
+        }
+
+        // ============================================================
+        // 16. TÍNH ĐIỂM THÁNG / XẾP LOẠI
+        // ============================================================
+
+        const processedList =
+            Object.values(
+                studentStatsMap
+            ).map(item => {
+                const totalPenalty =
+                    Number(
+                        item.totalPenalty || 0
+                    );
+
+                const totalBonus =
+                    Number(
+                        item.totalBonus || 0
+                    );
+
+                // ĐIỂM THÁNG:
+                // BasePoint - điểm âm + điểm dương
+                const monthlyScore =
+                    mode === "monthly"
+                        ? (
+                            studentBasePoint -
+                            totalPenalty +
+                            totalBonus
+                        )
+                        : (
+                            -totalPenalty +
+                            totalBonus
+                        );
+
+                let rank = "🟢 Tốt";
+                let badgeStyle =
+                    "background:#d1e7dd;color:#0f5132;";
+
+                if (mode === "monthly") {
+                    const chuadatCount =
+                        Number(
+                            kpiRules.chuadat_count ??
+                            15
+                        );
+
+                    const chuadatScore =
+                        Number(
+                            kpiRules.chuadat_score ??
+                            15
+                        );
+
+                    const datCount =
+                        Number(
+                            kpiRules.dat_count ??
+                            10
+                        );
+
+                    const datScore =
+                        Number(
+                            kpiRules.dat_score ??
+                            10
+                        );
+
+                    const khaCount =
+                        Number(
+                            kpiRules.kha_count ??
+                            5
+                        );
+
+                    const khaScore =
+                        Number(
+                            kpiRules.kha_score ??
+                            5
+                        );
+
+                    // Xếp loại dựa trên mức VI PHẠM:
+                    // - số lượt
+                    // - tổng điểm bị trừ
+                    //
+                    // Không dùng Math.abs(monthlyScore),
+                    // vì điểm cộng không được làm giảm mức vi phạm.
+                    if (
+                        item.totalCount >=
+                            chuadatCount ||
+                        totalPenalty >=
+                            chuadatScore
+                    ) {
+                        rank = "🔴 Chưa đạt";
+                        badgeStyle =
+                            "background:#f8d7da;color:#842029;";
+                    } else if (
+                        item.totalCount >=
+                            datCount ||
+                        totalPenalty >=
+                            datScore
+                    ) {
+                        rank = "🟠 Đạt";
+                        badgeStyle =
+                            "background:#fff3cd;color:#664d03;";
+                    } else if (
+                        item.totalCount >=
+                            khaCount ||
+                        totalPenalty >=
+                            khaScore
+                    ) {
+                        rank = "🔵 Khá";
+                        badgeStyle =
+                            "background:#cff4fc;color:#055160;";
+                    }
+                }
+
+                return {
+                    ...item,
+
+                    totalPenalty,
+                    totalBonus,
+
+                    // Điểm ròng của KPI.
+                    totalScore:
+                        -totalPenalty +
+                        totalBonus,
+
+                    // Điểm cuối tháng.
+                    monthlyScore,
+
+                    rank,
+                    badgeStyle
+                };
+            });
+
+        // ============================================================
+        // 17. RENDER
+        // ============================================================
+
+        if (processedList.length === 0) {
+            tableBody.innerHTML = `
+                <tr>
+                    <td colspan="10" style="
+                        text-align:center;
+                        color:#6c757d;
+                        font-style:italic;
+                    ">
+                        Chưa có dữ liệu vi phạm nào trong lớp chủ nhiệm.
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        let html = "";
+
+        processedList.forEach(item => {
+            html += `
+                <tr style="
+                    border-bottom:1px solid #dee2e6;
+                ">
+                    <td style="
+                        font-family:monospace;
+                        font-weight:bold;
+                        text-align:center;
+                    ">
+                        ${item.code || "--"}
+                    </td>
+
+                    <td>
+                        ${item.name}
+                    </td>
+
+                    <td style="
+                        text-align:center;
+                    ">
+                        <span style="
+                            background:#e9ecef;
+                            padding:2px 6px;
+                            border-radius:4px;
+                            font-size:0.9em;
+                        ">
+                            ${item.className}
+                        </span>
+                    </td>
+            `;
+
+            kpiFieldsList.forEach(
+                field => {
+                    const countVal =
+                        item.kpiCounts[
+                            field.id
+                        ] || 0;
+
+                    html += `
+                        <td style="
+                            text-align:center;
+                        ">
+                            ${
+                                countVal > 0
+                                    ? `
+                                        <span style="
+                                            color:#dc3545;
+                                            font-weight:bold;
+                                        ">
+                                            ${countVal}
+                                        </span>
+                                    `
+                                    : `
+                                        <span style="
+                                            color:#ccc;
+                                        ">
+                                            0
+                                        </span>
+                                    `
+                            }
+                        </td>
+                    `;
+                }
+            );
+
+            if (mode === "monthly") {
+                html += `
+                    <td style="
+                        text-align:center;
+                        font-weight:bold;
+                    ">
+                        ${item.totalCount}
+                    </td>
+
+                    <td style="
+                        text-align:center;
+                        color:#dc3545;
+                        font-weight:bold;
+                    ">
+                        -${item.totalPenalty}
+                    </td>
+
+                    <td style="
+                        text-align:center;
+                        color:#198754;
+                        font-weight:bold;
+                    ">
+                        +${item.totalBonus}
+                    </td>
+
+                    <td style="
+                        text-align:center;
+                        font-weight:bold;
+                        color:${
+                            item.monthlyScore < studentBasePoint
+                                ? "#dc3545"
+                                : "#198754"
+                        };
+                    ">
+                        ${item.monthlyScore}
+                    </td>
+
+                    <td style="
+                        text-align:center;
+                    ">
+                        <span style="
+                            ${item.badgeStyle}
+                            padding:3px 10px;
+                            border-radius:4px;
+                            font-weight:bold;
+                            display:inline-block;
+                        ">
+                            ${item.rank}
+                        </span>
+                    </td>
+                `;
+            } else {
+                html += `
+                    <td style="
+                        text-align:center;
+                        font-weight:bold;
+                        color:#0d6efd;
+                    ">
+                        ${item.totalCount} lượt
+                    </td>
+                `;
+            }
+
+            html += `
+                </tr>
+            `;
+        });
+
+        tableBody.innerHTML = html;
+
+        // ============================================================
+        // 18. CACHE BADGE
+        // ============================================================
+
+        if (badge) {
+            badge.innerText =
+                forceRefresh
+                    ? "🔄 Đã làm mới dữ liệu: " +
+                      new Date().toLocaleTimeString()
+                    : "⚡ Dùng cache: " +
+                      new Date().toLocaleTimeString();
+        }
+
+    } catch (error) {
+        console.error(
+            "Lỗi tải dữ liệu lớp chủ nhiệm:",
+            error
+        );
+
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="10" style="
+                    text-align:center;
+                    color:red;
+                ">
+                    Lỗi tải dữ liệu lớp chủ nhiệm.
+                    <div style="
+                        margin-top:5px;
+                        font-size:0.85em;
+                    ">
+                        ${error.message || ""}
+                    </div>
+                </td>
+            </tr>
+        `;
+    }
+}
+
+async function exportHomeroomMonthlyWord() {
+    const btn = document.querySelector(
+        'button[onclick="exportHomeroomMonthlyWord()"]'
+    );
+
+    const oldHtml = btn ? btn.innerHTML : "";
+
+    try {
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML =
+                '<i class="fa-solid fa-spinner fa-spin"></i> Đang xuất...';
+        }
+
+        const db = firebase.firestore();
+
+        const orgId = String(
+            window.currentOrgIdGlobal ||
+            ""
+        ).trim();
+
+        // Dùng đúng cách xác định năm học như loadHomeroomClassData():
+        // ưu tiên danh sách currentAcademicYearsGlobal, sau đó fallback
+        // currentAcademicYearIdGlobal.
+        let academicYearId = "";
+
+        const yearsArr =
+            window.currentAcademicYearsGlobal;
+
+        if (
+            Array.isArray(yearsArr) &&
+            yearsArr.length > 0
+        ) {
+            const lastYearItem =
+                yearsArr[yearsArr.length - 1];
+
+            academicYearId = String(
+                typeof lastYearItem === "object" &&
+                lastYearItem !== null
+                    ? (
+                        lastYearItem.id ||
+                        lastYearItem.name ||
+                        lastYearItem.year ||
+                        ""
+                    )
+                    : lastYearItem
+            ).trim();
+        }
+
+        if (!academicYearId) {
+            academicYearId = String(
+                window.currentAcademicYearIdGlobal ||
+                ""
+            ).trim();
+        }
+
+        // Lấy UID trực tiếp từ Firebase Auth giống loadHomeroomClassData().
+        const authUser =
+            firebase.auth().currentUser;
+
+        const teacherUid = String(
+            authUser?.uid || ""
+        ).trim();
+
+        const currentEmail = String(
+            window.currentUserEmailGlobal ||
+            (firebase.auth().currentUser
+                ? firebase.auth().currentUser.email
+                : "") ||
+            ""
+        ).trim().toLowerCase();
+
+        if (!orgId || !academicYearId || !teacherUid) {
+            throw new Error(
+                "Không xác định được tổ chức, năm học hoặc giáo viên đang đăng nhập."
+            );
+        }
+
+        // ========================================================
+        // 1. XÁC ĐỊNH LỚP CHỦ NHIỆM
+        // ========================================================
+
+        let homeroomClasses = [];
+
+        const assignmentRef = db
+            .collection("organizations")
+            .doc(orgId)
+            .collection("academicYears")
+            .doc(academicYearId)
+            .collection("assignments");
+
+        const assignmentsSnap = await assignmentRef.get();
+
+        assignmentsSnap.forEach(doc => {
+            const data = doc.data() || {};
+
+            const dataUid = String(
+                data.uid ||
+                data.userId ||
+                data.memberId ||
+                ""
+            ).trim();
+
+            const dataEmail = String(
+                data.email || ""
+            ).trim().toLowerCase();
+
+            if (
+                doc.id === teacherUid ||
+                dataUid === teacherUid ||
+                (
+                    currentEmail &&
+                    dataEmail === currentEmail
+                )
+            ) {
+                const raw =
+                    data.homeroom ||
+                    data.homeroomClasses ||
+                    data.classes ||
+                    [];
+
+                if (typeof raw === "string") {
+                    homeroomClasses = raw
+                        .split(",")
+                        .map(x => String(x).trim())
+                        .filter(Boolean);
+                } else if (Array.isArray(raw)) {
+                    homeroomClasses = raw
+                        .map(x => String(x).trim())
+                        .filter(Boolean);
+                }
+            }
+        });
+
+        homeroomClasses = [
+            ...new Set(homeroomClasses)
+        ];
+
+        if (homeroomClasses.length === 0) {
+            throw new Error(
+                "Bạn không được phân công lớp chủ nhiệm trong năm học này."
+            );
+        }
+
+        // ========================================================
+        // 2. ĐỌC USERS - CODE LÀ MÃ CHÍNH
+        // ========================================================
+
+        let usersMap = {};
+
+        if (
+            window.cachedUsersMap &&
+            Object.keys(window.cachedUsersMap).length > 0
+        ) {
+            usersMap = window.cachedUsersMap;
+        } else {
+            const usersSnap = await db
+                .collection("organizations")
+                .doc(orgId)
+                .collection("users")
+                .get();
+
+            usersSnap.forEach(doc => {
+                const data = doc.data() || {};
+
+                const uid = String(
+                    data.uid ||
+                    data.id ||
+                    doc.id ||
+                    ""
+                ).trim();
+
+                const code = String(
+                    data.code ||
+                    data.memberId ||
+                    ""
+                ).trim();
+
+                usersMap[doc.id] = {
+                    id: doc.id,
+                    uid,
+                    code,
+                    fullName:
+                        data.fullName ||
+                        data.displayName ||
+                        data.name ||
+                        doc.id,
+                    category: String(
+                        data.category ||
+                        data.className ||
+                        ""
+                    ).trim()
+                };
+            });
+        }
+
+        const students = [];
+
+        Object.entries(usersMap).forEach(
+            ([docId, u]) => {
+                if (!u) return;
+
+                const category = String(
+                    u.category || ""
+                ).trim();
+
+                if (!homeroomClasses.includes(category)) {
+                    return;
+                }
+
+                const code = String(
+                    u.code || ""
+                ).trim();
+
+                const uid = String(
+                    u.uid ||
+                    u.id ||
+                    docId ||
+                    ""
+                ).trim();
+
+                students.push({
+                    code,
+                    uid,
+                    name:
+                        u.fullName ||
+                        u.displayName ||
+                        u.name ||
+                        docId,
+                    className: category
+                });
+            }
+        );
+
+        students.sort((a, b) =>
+            String(a.name).localeCompare(
+                String(b.name),
+                "vi"
+            )
+        );
+
+        if (students.length === 0) {
+            throw new Error(
+                "Không tìm thấy học sinh thuộc lớp chủ nhiệm."
+            );
+        }
+
+        // ========================================================
+        // 3. KPI CONFIG - HỌC SINH
+        // ========================================================
+
+        const kpiConfigSnap = await db
+            .collection("organizations")
+            .doc(orgId)
+            .collection("academicYears")
+            .doc(academicYearId)
+            .collection("KPIconfig")
+            .doc("student")
+            .get();
+
+        const kpiRules = kpiConfigSnap.exists
+            ? (kpiConfigSnap.data() || {})
+            : {};
+
+        const basePointRaw =
+            kpiRules.BasePoint ??
+            kpiRules.basePoint ??
+            90;
+
+        const basePointNumber =
+            Number(basePointRaw);
+
+        const basePoint =
+            Number.isFinite(basePointNumber)
+                ? basePointNumber
+                : 90;
+
+        const chuadatCount = Number(
+            kpiRules.chuadat_count ?? 15
+        );
+
+        const chuadatScore = Number(
+            kpiRules.chuadat_score ?? 15
+        );
+
+        const datCount = Number(
+            kpiRules.dat_count ?? 10
+        );
+
+        const datScore = Number(
+            kpiRules.dat_score ?? 10
+        );
+
+        const khaCount = Number(
+            kpiRules.kha_count ?? 5
+        );
+
+        const khaScore = Number(
+            kpiRules.kha_score ?? 5
+        );
+
+        // ========================================================
+        // 4. ĐỌC MODULE STUDENT + CÁC TRƯỜNG KPI
+        // ========================================================
+
+        const modulesSnap = await db
+            .collection("organizations")
+            .doc(orgId)
+            .collection("modules")
+            .where("targetType", "==", "STUDENT")
+            .get();
+
+        const studentModules =
+            modulesSnap.docs.map(doc => ({
+                id: doc.id,
+                data: doc.data() || {}
+            }));
+
+        const kpiFieldsMap = {};
+
+        studentModules.forEach(mod => {
+            const fields = Array.isArray(
+                mod.data.fields
+            )
+                ? mod.data.fields
+                : [];
+
+            fields.forEach(field => {
+                if (
+                    !field ||
+                    !field.isKpi ||
+                    !field.key
+                ) {
+                    return;
+                }
+
+                const rawOptions =
+                    field.kpiOptions ||
+                    field.options ||
+                    {};
+
+                let optionsMap = {};
+
+                if (Array.isArray(rawOptions)) {
+                    rawOptions.forEach(opt => {
+                        if (!opt) return;
+
+                        const optionKey = String(
+                            opt.value ??
+                            opt.key ??
+                            opt.id ??
+                            opt.label ??
+                            opt.name ??
+                            ""
+                        ).trim();
+
+                        if (!optionKey) return;
+
+                        optionsMap[optionKey] = opt;
+                    });
+                } else if (
+                    rawOptions &&
+                    typeof rawOptions === "object"
+                ) {
+                    optionsMap = rawOptions;
+                }
+
+                const fieldWeight =
+                    Number(field.scoreWeight);
+
+                kpiFieldsMap[field.key] = {
+                    id: field.key,
+                    name:
+                        field.label ||
+                        field.key,
+                    scoreWeight:
+                        Number.isFinite(fieldWeight)
+                            ? fieldWeight
+                            : -1,
+                    kpiOptions: optionsMap
+                };
+            });
+        });
+
+        const kpiFields =
+            Object.values(kpiFieldsMap);
+
+        // ========================================================
+        // 5. HÀM XÁC ĐỊNH ITEM KPI + ĐIỂM
+        // ========================================================
+
+        const getKpiItems = value => {
+            if (
+                value === undefined ||
+                value === null ||
+                value === ""
+            ) {
+                return [];
+            }
+
+            if (Array.isArray(value)) {
+                return value.filter(item => {
+                    if (
+                        item === undefined ||
+                        item === null ||
+                        item === ""
+                    ) {
+                        return false;
+                    }
+
+                    if (
+                        typeof item === "object"
+                    ) {
+                        return Object.values(item).some(
+                            v =>
+                                v !== undefined &&
+                                v !== null &&
+                                String(v).trim() !== ""
+                        );
+                    }
+
+                    return String(item).trim() !== "";
+                });
+            }
+
+            return [value];
+        };
+
+        const getKpiScore = (
+            field,
+            item
+        ) => {
+            let option = null;
+
+            if (
+                item !== null &&
+                typeof item === "object"
+            ) {
+                const optionKey = String(
+                    item.value ??
+                    item.key ??
+                    item.id ??
+                    item.label ??
+                    item.name ??
+                    ""
+                ).trim();
+
+                if (
+                    optionKey &&
+                    field.kpiOptions &&
+                    field.kpiOptions[optionKey]
+                ) {
+                    option =
+                        field.kpiOptions[
+                            optionKey
+                        ];
+                }
+            } else {
+                const optionKey =
+                    String(item).trim();
+
+                if (
+                    optionKey &&
+                    field.kpiOptions &&
+                    field.kpiOptions[optionKey]
+                ) {
+                    option =
+                        field.kpiOptions[
+                            optionKey
+                        ];
+                }
+            }
+
+            const optionWeight =
+                option
+                    ? Number(
+                        option.scoreWeight
+                    )
+                    : NaN;
+
+            if (
+                Number.isFinite(optionWeight)
+            ) {
+                return optionWeight;
+            }
+
+            if (
+                item &&
+                typeof item === "object"
+            ) {
+                const itemWeight =
+                    Number(
+                        item.scoreWeight
+                    );
+
+                if (
+                    Number.isFinite(
+                        itemWeight
+                    )
+                ) {
+                    return itemWeight;
+                }
+            }
+
+            const fieldWeight =
+                Number(field.scoreWeight);
+
+            return Number.isFinite(
+                fieldWeight
+            )
+                ? fieldWeight
+                : 0;
+        };
+
+        // ========================================================
+        // 6. KHỞI TẠO THỐNG KÊ + CHI TIẾT
+        // ========================================================
+
+        const studentMap = {};
+
+        students.forEach(student => {
+            const key =
+                student.code ||
+                student.uid;
+
+            studentMap[key] = {
+                ...student,
+
+                totalCount: 0,
+                totalPenalty: 0,
+                totalBonus: 0,
+                monthlyScore: basePoint,
+                rank: "🟢 Tốt",
+                details: []
+            };
+        });
+
+        const resolveStudent = entityId => {
+            const raw =
+                String(entityId || "").trim();
+
+            if (!raw) return null;
+
+            if (studentMap[raw]) {
+                return studentMap[raw];
+            }
+
+            const found = students.find(
+                s =>
+                    s.uid === raw ||
+                    s.code === raw
+            );
+
+            if (!found) return null;
+
+            return studentMap[
+                found.code ||
+                found.uid
+            ] || null;
+        };
+
+        const processRecord = (
+            recDoc,
+            moduleId
+        ) => {
+            const data =
+                recDoc.data() || {};
+
+            const entityId = String(
+                data.entityId ||
+                data.entityID ||
+                String(recDoc.id)
+                    .split("_")[0] ||
+                ""
+            ).trim();
+
+            const student =
+                resolveStudent(entityId);
+
+            if (!student) return;
+
+            const recordDate = String(
+                data.date ||
+                ""
+            ).trim();
+
+            kpiFields.forEach(field => {
+                let value =
+                    data[field.id];
+
+                if (
+                    value === undefined &&
+                    data.changes &&
+                    data.changes[field.id] !== undefined
+                ) {
+                    value =
+                        data.changes[field.id];
+                }
+
+                const items =
+                    getKpiItems(value);
+
+                items.forEach(item => {
+                    const score =
+                        getKpiScore(
+                            field,
+                            item
+                        );
+
+                    student.totalCount += 1;
+
+                    if (score < 0) {
+                        student.totalPenalty +=
+                            Math.abs(score);
+                    } else if (score > 0) {
+                        student.totalBonus +=
+                            score;
+                    }
+
+                    let itemText = "";
+
+                    if (
+                        item !== null &&
+                        typeof item === "object"
+                    ) {
+                        itemText =
+                            String(
+                                item.label ??
+                                item.name ??
+                                item.value ??
+                                item.key ??
+                                item.id ??
+                                ""
+                            ).trim();
+                    } else {
+                        itemText =
+                            String(item).trim();
+                    }
+
+                    student.details.push({
+                        date: recordDate,
+                        moduleId,
+                        fieldName:
+                            field.name,
+                        itemText,
+                        score
+                    });
+                });
+            });
+        };
+
+        // ========================================================
+        // 7. KHOẢNG THỜI GIAN THÁNG HIỆN TẠI
+        // ========================================================
+
+        const now = new Date();
+
+        const firstDay =
+            new Date(
+                now.getFullYear(),
+                now.getMonth(),
+                1
+            );
+
+        const lastDay =
+            new Date(
+                now.getFullYear(),
+                now.getMonth() + 1,
+                0
+            );
+
+        const pad = n =>
+            String(n).padStart(2, "0");
+
+        const startDateStr =
+            `${firstDay.getFullYear()}-${pad(
+                firstDay.getMonth() + 1
+            )}-01`;
+
+        const endDateStr =
+            `${lastDay.getFullYear()}-${pad(
+                lastDay.getMonth() + 1
+            )}-${pad(
+                lastDay.getDate()
+            )}`;
+
+        const monthLabel =
+            `${pad(
+                now.getMonth() + 1
+            )}/${now.getFullYear()}`;
+
+        // ========================================================
+        // 8. ĐỌC RECORDS THÁNG
+        // ========================================================
+
+        const allStudentIds = [
+            ...new Set(
+                students
+                    .flatMap(s => [
+                        s.code,
+                        s.uid
+                    ])
+                    .map(x =>
+                        String(
+                            x || ""
+                        ).trim()
+                    )
+                    .filter(Boolean)
+            )
+        ];
+
+        const chunks = [];
+
+        for (
+            let i = 0;
+            i < allStudentIds.length;
+            i += 30
+        ) {
+            chunks.push(
+                allStudentIds.slice(
+                    i,
+                    i + 30
+                )
+            );
+        }
+
+        for (const module of studentModules) {
+            const recordsRef = db
+                .collection("organizations")
+                .doc(orgId)
+                .collection("academicYears")
+                .doc(academicYearId)
+                .collection("modulesData")
+                .doc(module.id)
+                .collection("records");
+
+            for (const ids of chunks) {
+                if (!ids.length) continue;
+
+                const snap =
+                    await recordsRef
+                        .where(
+                            "entityId",
+                            "in",
+                            ids
+                        )
+                        .where(
+                            "date",
+                            ">=",
+                            startDateStr
+                        )
+                        .where(
+                            "date",
+                            "<=",
+                            endDateStr
+                        )
+                        .get();
+
+                snap.forEach(recDoc => {
+                    processRecord(
+                        recDoc,
+                        module.id
+                    );
+                });
+            }
+        }
+
+        // ========================================================
+        // 9. TÍNH ĐIỂM + XẾP LOẠI
+        // ========================================================
+
+        const resultList =
+            Object.values(studentMap)
+                .map(student => {
+                    student.monthlyScore =
+                        basePoint -
+                        student.totalPenalty +
+                        student.totalBonus;
+
+                    if (
+                        student.totalCount >=
+                            chuadatCount ||
+                        student.totalPenalty >=
+                            chuadatScore
+                    ) {
+                        student.rank =
+                            "🔴 Chưa đạt";
+                    } else if (
+                        student.totalCount >=
+                            datCount ||
+                        student.totalPenalty >=
+                            datScore
+                    ) {
+                        student.rank =
+                            "🟠 Đạt";
+                    } else if (
+                        student.totalCount >=
+                            khaCount ||
+                        student.totalPenalty >=
+                            khaScore
+                    ) {
+                        student.rank =
+                            "🔵 Khá";
+                    } else {
+                        student.rank =
+                            "🟢 Tốt";
+                    }
+
+                    student.details.sort(
+                        (a, b) =>
+                            String(a.date)
+                                .localeCompare(
+                                    String(b.date)
+                                )
+                    );
+
+                    return student;
+                });
+
+        // Xếp hạng trong lớp theo điểm tháng giảm dần.
+        const rankingList =
+            [...resultList].sort(
+                (a, b) =>
+                    Number(b.monthlyScore) -
+                    Number(a.monthlyScore)
+            );
+
+        rankingList.forEach(
+            (student, index) => {
+                student.rankNo =
+                    index + 1;
+            }
+        );
+
+        // ========================================================
+        // 10. TẠO HTML WORD
+        // ========================================================
+
+        const esc = value =>
+            String(value ?? "")
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#39;");
+
+        const numberText = value =>
+            Number.isInteger(
+                Number(value)
+            )
+                ? String(value)
+                : Number(value).toFixed(2);
+
+        let summaryRows = "";
+
+        resultList.forEach(student => {
+            summaryRows += `
+                <tr>
+                    <td>${esc(student.rankNo)}</td>
+                    <td>${esc(student.code || "--")}</td>
+                    <td>${esc(student.name)}</td>
+                    <td>${esc(student.className)}</td>
+                    <td>${esc(student.totalCount)}</td>
+                    <td>${esc(numberText(student.totalPenalty))}</td>
+                    <td>${esc(numberText(student.totalBonus))}</td>
+                    <td><b>${esc(numberText(student.monthlyScore))}</b></td>
+                    <td>${esc(student.rank)}</td>
+                </tr>
+            `;
+        });
+
+        let detailSections = "";
+
+        resultList.forEach(student => {
+            let detailRows = "";
+
+            if (student.details.length === 0) {
+                detailRows = `
+                    <tr>
+                        <td colspan="5"
+                            style="text-align:center;">
+                            Không có lượt KPI được ghi nhận trong tháng.
+                        </td>
+                    </tr>
+                `;
+            } else {
+                student.details.forEach(
+                    (detail, index) => {
+                        detailRows += `
+                            <tr>
+                                <td>${index + 1}</td>
+                                <td>${esc(detail.date)}</td>
+                                <td>${esc(detail.fieldName)}</td>
+                                <td>${esc(detail.itemText)}</td>
+                                <td>${esc(numberText(detail.score))}</td>
+                            </tr>
+                        `;
+                    }
+                );
+            }
+
+            detailSections += `
+                <div class="student-detail">
+                    <h2>
+                        ${esc(student.name)}
+                        - Mã: ${esc(student.code || "--")}
+                    </h2>
+
+                    <table class="info-table">
+                        <tr>
+                            <td><b>Lớp</b></td>
+                            <td>${esc(student.className)}</td>
+                            <td><b>Xếp hạng</b></td>
+                            <td>${esc(student.rankNo)}</td>
+                        </tr>
+                        <tr>
+                            <td><b>Tổng lượt</b></td>
+                            <td>${esc(student.totalCount)}</td>
+                            <td><b>Xếp loại</b></td>
+                            <td>${esc(student.rank)}</td>
+                        </tr>
+                        <tr>
+                            <td><b>Điểm trừ</b></td>
+                            <td>-${esc(numberText(student.totalPenalty))}</td>
+                            <td><b>Điểm cộng</b></td>
+                            <td>+${esc(numberText(student.totalBonus))}</td>
+                        </tr>
+                        <tr>
+                            <td><b>Điểm tháng</b></td>
+                            <td colspan="3">
+                                <b>${esc(
+                                    numberText(
+                                        student.monthlyScore
+                                    )
+                                )}</b>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <h3>Chi tiết các lượt KPI trong tháng</h3>
+
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>STT</th>
+                                <th>Ngày</th>
+                                <th>Nội dung KPI</th>
+                                <th>Giá trị ghi nhận</th>
+                                <th>Điểm</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${detailRows}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        });
+
+        const titleClass =
+            homeroomClasses.join(", ");
+
+        const wordHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Báo cáo lớp chủ nhiệm tháng ${esc(monthLabel)}</title>
+<style>
+    @page {
+        size: A4;
+        margin: 1.5cm;
+    }
+
+    body {
+        font-family: Arial, "Times New Roman", sans-serif;
+        font-size: 11pt;
+        color: #000;
+        line-height: 1.4;
+    }
+
+    h1 {
+        text-align: center;
+        font-size: 18pt;
+        margin-bottom: 6px;
+    }
+
+    h2 {
+        font-size: 14pt;
+        margin-top: 18px;
+        margin-bottom: 8px;
+        border-bottom: 1px solid #999;
+        padding-bottom: 4px;
+    }
+
+    h3 {
+        font-size: 12pt;
+        margin-top: 12px;
+    }
+
+    p {
+        margin: 4px 0;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 8px 0 16px 0;
+    }
+
+    th,
+    td {
+        border: 1px solid #444;
+        padding: 5px 6px;
+        vertical-align: middle;
+    }
+
+    th {
+        text-align: center;
+        font-weight: bold;
+        background: #e9ecef;
+    }
+
+    .title-info {
+        text-align: center;
+        margin-bottom: 18px;
+    }
+
+    .info-table {
+        width: 70%;
+    }
+
+    .info-table td {
+        border: 1px solid #777;
+    }
+
+    .student-detail {
+        page-break-before: always;
+    }
+
+    .student-detail:first-child {
+        page-break-before: auto;
+    }
+
+    .note {
+        font-size: 9pt;
+        color: #555;
+        margin-top: 10px;
+    }
+</style>
+</head>
+
+<body>
+
+<h1>BÁO CÁO TỔNG HỢP KPI LỚP CHỦ NHIỆM</h1>
+
+<div class="title-info">
+    <p><b>Lớp:</b> ${esc(titleClass)}</p>
+    <p><b>Tháng:</b> ${esc(monthLabel)}</p>
+    <p>
+        <b>Công thức điểm tháng:</b>
+        BasePoint (${esc(basePoint)})
+        - Điểm trừ
+        + Điểm cộng
+    </p>
+</div>
+
+<h2>I. BẢNG TỔNG HỢP CẢ LỚP</h2>
+
+<table>
+    <thead>
+        <tr>
+            <th>Hạng</th>
+            <th>Mã HS</th>
+            <th>Họ và tên</th>
+            <th>Lớp</th>
+            <th>Tổng lượt</th>
+            <th>Điểm trừ</th>
+            <th>Điểm cộng</th>
+            <th>Điểm tháng</th>
+            <th>Xếp loại</th>
+        </tr>
+    </thead>
+    <tbody>
+        ${summaryRows}
+    </tbody>
+</table>
+
+<h2>II. CHI TIẾT TỪNG HỌC SINH</h2>
+
+${detailSections}
+
+<p class="note">
+    Báo cáo được tạo tự động từ dữ liệu KPI tháng ${esc(monthLabel)}.
+    Mã học sinh được ưu tiên theo trường Code; UID chỉ được dùng để
+    đối chiếu dữ liệu cũ.
+</p>
+
+</body>
+</html>
+        `;
+
+        // ========================================================
+        // 11. TẢI FILE WORD
+        // ========================================================
+
+        const blob = new Blob(
+            [
+                "\ufeff",
+                wordHtml
+            ],
+            {
+                type:
+                    "application/msword;charset=utf-8"
+            }
+        );
+
+        const fileName =
+            `Bao_cao_KPI_${titleClass.replace(
+                /[\\/:*?"<>|,\s]+/g,
+                "_"
+            )}_Thang_${monthLabel.replace(
+                "/",
+                "-"
+            )}.doc`;
+
+        const url =
+            URL.createObjectURL(blob);
+
+        const link =
+            document.createElement("a");
+
+        link.href = url;
+        link.download = fileName;
+
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+        setTimeout(
+            () => URL.revokeObjectURL(url),
+            2000
+        );
+
+        if (typeof showToast === "function") {
+            showToast(
+                "Đã xuất báo cáo Word lớp chủ nhiệm.",
+                "success"
+            );
+        } else {
+            alert(
+                "Đã xuất báo cáo Word lớp chủ nhiệm."
+            );
+        }
+
+    } catch (error) {
+        console.error(
+            "Lỗi xuất báo cáo lớp chủ nhiệm:",
+            error
+        );
+
+        if (typeof showToast === "function") {
+            showToast(
+                "Không thể xuất báo cáo: " +
+                (error.message || ""),
+                "error"
+            );
+        } else {
+            alert(
+                "Không thể xuất báo cáo: " +
+                (error.message || "")
+            );
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = oldHtml;
+        }
+    }
+}
+
+
 	async function searchEmployeeIndividualAuditSheet(forceRefresh = false) {
 	const keywordInput = document.getElementById("emp-lookup-entity-keyword");
 	if (!keywordInput) return;
@@ -12843,214 +17906,1228 @@ function printEmployeeIndividualAuditSheet() {
 
 	
 	//	THẺ 5
-	async function loadDepartmentData(forceRefresh = false) {
-		const tableBody = document.getElementById("emp-dept-body-rows");
-		const headerRow = document.getElementById("emp-dept-header-row");
+async function loadDepartmentData(forceRefresh = false) {
+	const tableBody = document.getElementById("emp-dept-body-rows");
+	const headerRow = document.getElementById("emp-dept-header-row");
 
-		if (!tableBody) return;
+	if (!tableBody) return;
 
-		const orgId = window.currentOrgIdGlobal;
-		if (!orgId) {
-			tableBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: red;">Chưa xác định được thông tin đơn vị (OrgId).</td></tr>';
-			return;
-		}
+	const orgId = window.currentOrgIdGlobal;
 
-		let academicYearId = "";
-		const yearsArr = window.currentAcademicYearsGlobal;
-		if (Array.isArray(yearsArr) && yearsArr.length > 0) {
-			const lastYearItem = yearsArr[yearsArr.length - 1];
-			academicYearId = String(typeof lastYearItem === 'object' && lastYearItem !== null ? (lastYearItem.id || lastYearItem.name || lastYearItem.year) : lastYearItem).trim();
-		} else if (window.currentAcademicYearIdGlobal) {
-			academicYearId = String(window.currentAcademicYearIdGlobal).trim();
-		}
+	if (!orgId) {
+		tableBody.innerHTML =
+			'<tr><td colspan="10" style="text-align: center; color: red;">Chưa xác định được thông tin đơn vị (OrgId).</td></tr>';
+		return;
+	}
 
-		if (!academicYearId) {
-			tableBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: red;">Chưa xác định được năm học hiện tại.</td></tr>';
-			return;
-		}
+	// =========================================================
+	// 1. XÁC ĐỊNH NĂM HỌC
+	// =========================================================
+	let academicYearId = "";
+	const yearsArr = window.currentAcademicYearsGlobal;
 
-		const authUser = firebase.auth().currentUser;
-		if (!authUser) {
-			tableBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: red;">Chưa đăng nhập hệ thống.</td></tr>';
-			return;
-		}
+	if (Array.isArray(yearsArr) && yearsArr.length > 0) {
+		const lastYearItem = yearsArr[yearsArr.length - 1];
 
-		tableBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: #6c757d;">Đang tải dữ liệu tổ chuyên môn...</td></tr>';
+		academicYearId = String(
+			typeof lastYearItem === "object" && lastYearItem !== null
+				? (
+					lastYearItem.id ||
+					lastYearItem.name ||
+					lastYearItem.year ||
+					""
+				)
+				: lastYearItem
+		).trim();
+	} else if (window.currentAcademicYearIdGlobal) {
+		academicYearId = String(
+			window.currentAcademicYearIdGlobal
+		).trim();
+	}
 
-		try {
-			const db = firebase.firestore();
+	if (!academicYearId) {
+		tableBody.innerHTML =
+			'<tr><td colspan="10" style="text-align: center; color: red;">Chưa xác định được năm học hiện tại.</td></tr>';
+		return;
+	}
 
-			// 1. Tải toàn bộ danh sách users nếu chưa có cache
-			if (!window.cachedUsersMap || Object.keys(window.cachedUsersMap).length === 0 || forceRefresh) {
-				const usersSnap = await db.collection("organizations").doc(orgId).collection("users").get();
-				window.cachedUsersMap = {};
-				usersSnap.forEach(uDoc => {
-					const uData = uDoc.data();
-					window.cachedUsersMap[uDoc.id] = {
-						uid: uData.uid || uDoc.id,
-						fullName: uData.fullName || uDoc.id,
-						category: uData.category || "", // Tổ chuyên môn (VD: "Hóa")
-						email: (uData.email || "").toLowerCase().trim(),
-						role: uData.role || ""
-					};
-				});
-			}
+	// =========================================================
+	// 2. XÁC ĐỊNH TÀI KHOẢN ĐANG ĐĂNG NHẬP
+	// =========================================================
+	const authUser = firebase.auth().currentUser;
 
-			// 2. Tìm thông tin (Tổ chuyên môn / category) của giáo viên đang đăng nhập
-			const currentEmail = (window.currentUserEmailGlobal || authUser.email || "").toLowerCase().trim();
-			let myCategory = "";
+	if (!authUser) {
+		tableBody.innerHTML =
+			'<tr><td colspan="10" style="text-align: center; color: red;">Chưa đăng nhập hệ thống.</td></tr>';
+		return;
+	}
 
-			for (const [uId, uInfo] of Object.entries(window.cachedUsersMap)) {
-				if (uInfo.email === currentEmail || uId === authUser.uid) {
-					myCategory = uInfo.category;
-					break;
-				}
-			}
+	const currentUid = String(authUser.uid || "").trim();
 
-			// Dự phòng nếu chưa tìm thấy qua email, lấy từ biến toàn cục
-			if (!myCategory && window.currentTeacherDepartments && window.currentTeacherDepartments.length > 0) {
-				myCategory = window.currentTeacherDepartments[0];
-			}
+	const currentEmail = String(
+		window.currentUserEmailGlobal ||
+		authUser.email ||
+		""
+	).trim().toLowerCase();
 
-			if (!myCategory) {
-				tableBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: #6c757d; font-style: italic;">Không xác định được tổ chuyên môn (category) của bạn.</td></tr>';
-				return;
-			}
+	tableBody.innerHTML =
+		'<tr><td colspan="10" style="text-align: center; color: #6c757d;">Đang tải dữ liệu tổ chuyên môn...</td></tr>';
 
-			// 3. Lọc toàn bộ giáo viên/nhân sự trong cachedUsersMap có `category` trùng khớp
-			let departmentColleagues = [];
-			for (const [uId, uInfo] of Object.entries(window.cachedUsersMap)) {
-				if (uInfo.category && uInfo.category.toLowerCase() === myCategory.toLowerCase()) {
-					departmentColleagues.push({
-						id: uInfo.uid || uId, // Sử dụng trường uid (MemberId) làm ID chính
-						name: uInfo.fullName,
-						department: uInfo.category
-					});
-				}
-			}
+	try {
+		const db = firebase.firestore();
 
-			if (departmentColleagues.length === 0) {
-				tableBody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: #6c757d; font-style: italic;">Không tìm thấy thành viên nào thuộc tổ chuyên môn (${myCategory}).</td></tr>`;
-				return;
-			}
+		// =====================================================
+		// 3. TẢI CACHE USERS
+		//    CODE là mã định danh chính.
+		//    UID chỉ dùng để tương thích dữ liệu cũ.
+		// =====================================================
+		let cachedUsers = window.cachedUsersMap || {};
+		const cachedUserList = Object.values(cachedUsers);
 
-			// 4. Lấy danh sách module đánh giá dành cho Giáo viên/Nhân sự (targetType == "TEACHER" hoặc "EMPLOYEE")
-			const modulesSnap = await db.collection("organizations")
+		const cacheNeedsCodeRefresh =
+			cachedUserList.length === 0 ||
+			cachedUserList.some(user =>
+				user.code === undefined
+			);
+
+		if (
+			!window.cachedUsersMap ||
+			Object.keys(window.cachedUsersMap).length === 0 ||
+			forceRefresh ||
+			cacheNeedsCodeRefresh
+		) {
+			const usersSnap = await db
+				.collection("organizations")
 				.doc(orgId)
-				.collection("modules")
-				.where("targetType", "in", ["TEACHER", "EMPLOYEE"])
+				.collection("users")
 				.get();
 
-			let kpiFieldsMap = {};
-			modulesSnap.forEach(modDoc => {
-				const modData = modDoc.data();
-				const fieldsArr = Array.isArray(modData.fields) ? modData.fields : [];
-				fieldsArr.forEach(fObj => {
-					if (fObj && fObj.isKpi && fObj.key) {
-						kpiFieldsMap[fObj.key] = {
-							id: fObj.key,
-							name: fObj.label || fObj.key,
-							scoreWeight: Number(fObj.scoreWeight || -1)
-						};
-					}
-				});
-			});
+			window.cachedUsersMap = {};
 
-			const kpiFieldsList = Object.values(kpiFieldsMap);
+			usersSnap.forEach(uDoc => {
+				const uData = uDoc.data() || {};
 
-			// 5. Dựng tiêu đề bảng động cho Thẻ 5
-			let headerHtml = `
-				<th style="width: 100px;">Mã ID</th>
-				<th style="width: 180px;">Họ và Tên</th>
-				<th style="width: 120px;">Tổ chuyên môn</th>
-			`;
-			kpiFieldsList.forEach(field => {
-				headerHtml += `<th style="text-align: center; min-width: 90px;">${field.name}</th>`;
-			});
-			headerHtml += `
-				<th style="width: 120px; text-align: center;">Tổng số lỗi</th>
-			`;
-			if (headerRow) headerRow.innerHTML = headerHtml;
+				window.cachedUsersMap[uDoc.id] = {
+					uid: String(
+						uData.uid ||
+						uDoc.id ||
+						""
+					).trim(),
 
-			// 6. Tổng hợp dữ liệu vi phạm từ modulesData cho tất cả thành viên trong tổ
-			let statsMap = {};
-			departmentColleagues.forEach(c => {
-				statsMap[c.id] = {
-					id: c.id,
-					name: c.name,
-					department: c.department,
-					totalErrors: 0,
-					kpiCounts: {}
+					code: String(
+						uData.code ||
+						uData.memberId ||
+						""
+					).trim(),
+
+					fullName:
+						uData.fullName ||
+						uData.displayName ||
+						uData.name ||
+						uDoc.id,
+
+					category: String(
+						uData.category ||
+						""
+					).trim(),
+
+					email: String(
+						uData.email ||
+						""
+					).trim().toLowerCase(),
+
+					role: uData.role || ""
 				};
 			});
+		}
 
-			for (const modDoc of modulesSnap.docs) {
-				const recordsSnap = await db.collection("organizations")
-					.doc(orgId)
-					.collection("academicYears")
-					.doc(academicYearId)
-					.collection("modulesData")
-					.doc(modDoc.id)
-					.collection("records")
-					.get();
+		cachedUsers = window.cachedUsersMap || {};
 
-				recordsSnap.forEach(recDoc => {
-					const data = recDoc.data();
-					const entityId = data.entityId || recDoc.id;
+		// =====================================================
+		// 4. TÌM USER ĐANG ĐĂNG NHẬP
+		// =====================================================
+		let currentUserInfo = null;
 
-					if (statsMap[entityId]) {
-						kpiFieldsList.forEach(kpiField => {
-							const fKey = kpiField.id;
-							let val = data[fKey];
-							if (val === undefined && data.changes && data.changes[fKey] !== undefined) {
-								val = data.changes[fKey];
-							}
+		for (const [uId, uInfo] of Object.entries(cachedUsers)) {
+			const cachedUid = String(
+				uInfo.uid ||
+				uId ||
+				""
+			).trim();
 
-							if (val !== undefined && val !== null && val !== "") {
-								const countInc = Array.isArray(val) ? val.length : 1;
-								statsMap[entityId].totalErrors += countInc;
-								statsMap[entityId].kpiCounts[fKey] = (statsMap[entityId].kpiCounts[fKey] || 0) + countInc;
+			const cachedEmail = String(
+				uInfo.email ||
+				""
+			).trim().toLowerCase();
+
+			if (
+				(currentUid && cachedUid === currentUid) ||
+				(currentEmail && cachedEmail === currentEmail)
+			) {
+				currentUserInfo = {
+					...uInfo,
+					_mapId: uId
+				};
+				break;
+			}
+		}
+
+		// -----------------------------------------------------
+		// 4.1. Fallback Firestore theo UID
+		// -----------------------------------------------------
+		if (!currentUserInfo && currentUid) {
+			const uidSnap = await db
+				.collection("organizations")
+				.doc(orgId)
+				.collection("users")
+				.where("uid", "==", currentUid)
+				.limit(1)
+				.get();
+
+			if (!uidSnap.empty) {
+				const uDoc = uidSnap.docs[0];
+				const uData = uDoc.data() || {};
+
+				currentUserInfo = {
+					uid: String(
+						uData.uid ||
+						uDoc.id ||
+						currentUid
+					).trim(),
+
+					code: String(
+						uData.code ||
+						uData.memberId ||
+						""
+					).trim(),
+
+					fullName:
+						uData.fullName ||
+						uData.displayName ||
+						uData.name ||
+						uData.email ||
+						currentEmail,
+
+					category: String(
+						uData.category ||
+						""
+					).trim(),
+
+					email: String(
+						uData.email ||
+						currentEmail ||
+						""
+					).trim().toLowerCase(),
+
+					role: uData.role || "",
+					_mapId: uDoc.id
+				};
+			}
+		}
+
+		// -----------------------------------------------------
+		// 4.2. Fallback Firestore theo email
+		// -----------------------------------------------------
+		if (!currentUserInfo && currentEmail) {
+			const emailSnap = await db
+				.collection("organizations")
+				.doc(orgId)
+				.collection("users")
+				.where("email", "==", currentEmail)
+				.limit(1)
+				.get();
+
+			if (!emailSnap.empty) {
+				const uDoc = emailSnap.docs[0];
+				const uData = uDoc.data() || {};
+
+				currentUserInfo = {
+					uid: String(
+						uData.uid ||
+						uDoc.id ||
+						currentUid
+					).trim(),
+
+					code: String(
+						uData.code ||
+						uData.memberId ||
+						""
+					).trim(),
+
+					fullName:
+						uData.fullName ||
+						uData.displayName ||
+						uData.name ||
+						uData.email ||
+						currentEmail,
+
+					category: String(
+						uData.category ||
+						""
+					).trim(),
+
+					email: String(
+						uData.email ||
+						currentEmail ||
+						""
+					).trim().toLowerCase(),
+
+					role: uData.role || "",
+					_mapId: uDoc.id
+				};
+			}
+		}
+
+		if (currentUserInfo) {
+			window.cachedUsersMap[
+				currentUserInfo._mapId ||
+				currentUserInfo.uid
+			] = {
+				uid: currentUserInfo.uid,
+				code: currentUserInfo.code || "",
+				fullName: currentUserInfo.fullName,
+				category: currentUserInfo.category,
+				email: currentUserInfo.email,
+				role: currentUserInfo.role
+			};
+		}
+
+		// =====================================================
+		// 5. XÁC ĐỊNH CATEGORY / TỔ CHUYÊN MÔN
+		// =====================================================
+		let myCategory = String(
+			currentUserInfo?.category ||
+			""
+		).trim();
+
+		if (
+			!myCategory &&
+			Array.isArray(window.currentTeacherDepartments) &&
+			window.currentTeacherDepartments.length > 0
+		) {
+			myCategory = String(
+				window.currentTeacherDepartments[0] ||
+				""
+			).trim();
+		}
+
+		if (!currentUserInfo && !myCategory) {
+			tableBody.innerHTML =
+				'<tr><td colspan="10" style="text-align: center; color: red;">Không tìm thấy thông tin tài khoản của bạn trong danh sách người dùng.</td></tr>';
+			return;
+		}
+
+		if (!myCategory) {
+			myCategory = "Chưa xác định";
+		}
+
+		// =====================================================
+		// 6. LẤY THÀNH VIÊN TRONG TỔ
+		// =====================================================
+		const normalizedMyCategory = myCategory.toLowerCase().trim();
+		const departmentColleagues = [];
+
+		for (const [uId, uInfo] of Object.entries(
+			window.cachedUsersMap || {}
+		)) {
+			const userUid = String(
+				uInfo.uid ||
+				uId ||
+				""
+			).trim();
+
+			const userCode = String(
+				uInfo.code ||
+				""
+			).trim();
+
+			const userEmail = String(
+				uInfo.email ||
+				""
+			).trim().toLowerCase();
+
+			const userCategory = String(
+				uInfo.category ||
+				""
+			).trim();
+
+			const isCurrentUser =
+				(currentUid && userUid === currentUid) ||
+				(currentEmail && userEmail === currentEmail);
+
+			const isSameDepartment =
+				normalizedMyCategory !== "chưa xác định" &&
+				userCategory.toLowerCase().trim() ===
+				normalizedMyCategory;
+
+			if (isSameDepartment || isCurrentUser) {
+				departmentColleagues.push({
+					id: userCode || userUid || uId,
+					code: userCode,
+					uid: userUid,
+					email: userEmail,
+					name:
+						uInfo.fullName ||
+						uInfo.email ||
+						userCode ||
+						userUid ||
+						uId,
+					department:
+						userCategory ||
+						myCategory,
+					isCurrentUser
+				});
+			}
+		}
+
+		// Đảm bảo user hiện tại luôn có trong danh sách.
+		if (currentUserInfo) {
+			const currentCode = String(
+				currentUserInfo.code ||
+				currentUserInfo.memberId ||
+				""
+			).trim();
+
+			const alreadyExists = departmentColleagues.some(item => {
+				const itemCode = String(
+					item.code ||
+					""
+				).trim();
+
+				const itemUid = String(
+					item.uid ||
+					item.id ||
+					""
+				).trim();
+
+				return (
+					(currentCode && itemCode === currentCode) ||
+					(!currentCode && currentUid && itemUid === currentUid)
+				);
+			});
+
+			if (!alreadyExists) {
+				departmentColleagues.unshift({
+					id: currentCode || currentUserInfo.uid || currentUid,
+					code: currentCode,
+					uid: currentUserInfo.uid || currentUid,
+					email: currentUserInfo.email || currentEmail,
+					name:
+						currentUserInfo.fullName ||
+						currentUserInfo.email ||
+						currentCode ||
+						currentUid,
+					department:
+						currentUserInfo.category ||
+						myCategory ||
+						"Chưa xác định",
+					isCurrentUser: true
+				});
+			}
+		}
+
+		// Loại bỏ trùng: CODE trước, UID là fallback.
+		const uniqueMap = {};
+
+		departmentColleagues.forEach(item => {
+			const key =
+				String(item.code || "").trim() ||
+				`uid:${String(item.uid || "").trim()}`;
+
+			if (key && !uniqueMap[key]) {
+				uniqueMap[key] = item;
+			}
+		});
+
+		const uniqueDepartmentColleagues =
+			Object.values(uniqueMap);
+
+		// =====================================================
+		// 7. LẤY CÁC MODULE DÀNH CHO GIÁO VIÊN / NHÂN SỰ
+		// =====================================================
+		const modulesSnap = await db
+			.collection("organizations")
+			.doc(orgId)
+			.collection("modules")
+			.where(
+				"targetType",
+				"in",
+				["TEACHER", "EMPLOYEE"]
+			)
+			.get();
+
+		// =====================================================
+		// 8. LẤY TOÀN BỘ KPI FIELD
+		//    Giữ cả kpiOptions để tính điểm âm/dương giống
+		//    phần Tổng hợp tháng của Admin.
+		// =====================================================
+		const kpiFieldsMap = {};
+
+		modulesSnap.forEach(modDoc => {
+			const modData = modDoc.data() || {};
+
+			const fieldsArr =
+				Array.isArray(modData.fields)
+					? modData.fields
+					: [];
+
+			fieldsArr.forEach(fObj => {
+				if (
+					!fObj ||
+					!fObj.isKpi ||
+					!fObj.key
+				) {
+					return;
+				}
+
+				const options =
+					fObj.kpiOptions ||
+					fObj.options ||
+					{};
+
+				kpiFieldsMap[fObj.key] = {
+					id: fObj.key,
+					name:
+						fObj.label ||
+						fObj.name ||
+						fObj.key,
+					scoreWeight: Number(
+						fObj.scoreWeight ?? -1
+					),
+					kpiWeekly:
+						fObj.kpiWeekly,
+					kpiMonthly:
+						fObj.kpiMonthly,
+					kpiOptions: options,
+					options
+				};
+			});
+		});
+
+		const kpiFieldsList =
+			Object.values(kpiFieldsMap);
+
+		// =====================================================
+		// 9. LẤY KPI CONFIG NHÓM TEACHER
+		// =====================================================
+		let kpiRules = {};
+
+		try {
+			const kpiConfigRef = db
+				.collection("organizations")
+				.doc(orgId)
+				.collection("academicYears")
+				.doc(academicYearId)
+				.collection("KPIconfig")
+				.doc("teacher");
+
+			const kpiConfigSnap =
+				await kpiConfigRef.get();
+
+			if (kpiConfigSnap.exists) {
+				kpiRules = kpiConfigSnap.data() || {};
+			}
+		} catch (configError) {
+			console.warn(
+				"Không đọc được KPIconfig/teacher:",
+				configError
+			);
+		}
+
+		const basePointRaw = Number(
+			kpiRules.BasePoint ??
+			kpiRules.basePoint ??
+			90
+		);
+
+		const basePoint =
+			Number.isFinite(basePointRaw)
+				? basePointRaw
+				: 90;
+
+		// =====================================================
+		// 10. XÁC ĐỊNH KHOẢNG THỜI GIAN THÁNG HIỆN TẠI
+		//     Cấu trúc theo Tổng hợp tháng Admin.
+		// =====================================================
+		const now = new Date();
+
+		const monthStart = new Date(
+			now.getFullYear(),
+			now.getMonth(),
+			1,
+			0,
+			0,
+			0,
+			0
+		);
+
+		const nextMonthStart = new Date(
+			now.getFullYear(),
+			now.getMonth() + 1,
+			1,
+			0,
+			0,
+			0,
+			0
+		);
+
+		const getRecordDate = data => {
+			const candidates = [
+				data.time,
+				data.timestamp,
+				data.createdAt,
+				data.updatedAt,
+				data.date,
+				data.recordDate,
+				data.createdDate
+			];
+
+			for (const value of candidates) {
+				if (!value) continue;
+
+				try {
+					if (
+						value &&
+						typeof value.toDate === "function"
+					) {
+						const d = value.toDate();
+						if (!Number.isNaN(d.getTime())) {
+							return d;
+						}
+					}
+
+					if (value instanceof Date) {
+						if (!Number.isNaN(value.getTime())) {
+							return value;
+						}
+					}
+
+					const d = new Date(value);
+					if (!Number.isNaN(d.getTime())) {
+						return d;
+					}
+				} catch (_) {}
+			}
+
+			return null;
+		};
+
+		const isInCurrentMonth = data => {
+			// Nếu record không có trường ngày,
+			// giữ lại để tương thích dữ liệu cũ.
+			const recordDate = getRecordDate(data);
+
+			if (!recordDate) {
+				return true;
+			}
+
+			return (
+				recordDate >= monthStart &&
+				recordDate < nextMonthStart
+			);
+		};
+
+		// =====================================================
+		// 11. HÀM TÌM USER THEO ENTITY ID
+		//     CODE là chính; UID chỉ fallback record cũ.
+		// =====================================================
+		const colleagueByCode = {};
+		const colleagueByUid = {};
+
+		uniqueDepartmentColleagues.forEach(colleague => {
+			const code = String(
+				colleague.code || ""
+			).trim();
+
+			const uid = String(
+				colleague.uid ||
+				""
+			).trim();
+
+			if (code) {
+				colleagueByCode[code] = colleague;
+			}
+
+			if (uid) {
+				colleagueByUid[uid] = colleague;
+			}
+		});
+
+		const resolveColleague = entityId => {
+			const key = String(
+				entityId || ""
+			).trim();
+
+			if (!key) return null;
+
+			return (
+				colleagueByCode[key] ||
+				colleagueByUid[key] ||
+				null
+			);
+		};
+
+		// =====================================================
+		// 12. KHỞI TẠO STATS
+		// =====================================================
+		const statsMap = {};
+
+		uniqueDepartmentColleagues.forEach(c => {
+			const primaryKey =
+				String(c.code || "").trim() ||
+				String(c.uid || "").trim();
+
+			if (!primaryKey) return;
+
+			statsMap[primaryKey] = {
+				id: primaryKey,
+				code: c.code || "",
+				uid: c.uid || "",
+				name: c.name,
+				department: c.department,
+
+				totalErrors: 0,
+				totalPenalty: 0,
+				totalBonus: 0,
+				negativeCount: 0,
+				positiveCount: 0,
+
+				kpiCounts: {},
+				negativeWeeks: new Set()
+			};
+		});
+
+		// =====================================================
+		// 13. HÀM CHUẨN HÓA GIÁ TRỊ KPI
+		//     Mỗi item thực sự có nội dung = 1 lượt KPI.
+		//     Item rỗng/null không được tính.
+		// =====================================================
+		const isMeaningfulKpiItem = item => {
+			if (item === undefined || item === null) {
+				return false;
+			}
+
+			if (typeof item === "string") {
+				return item.trim() !== "";
+			}
+
+			if (typeof item === "number") {
+				return !Number.isNaN(item);
+			}
+
+			if (typeof item === "boolean") {
+				return true;
+			}
+
+			if (typeof item === "object") {
+				return Object.values(item).some(value => {
+					if (
+						value === undefined ||
+						value === null
+					) {
+						return false;
+					}
+
+					if (
+						typeof value === "string"
+					) {
+						return value.trim() !== "";
+					}
+
+					return true;
+				});
+			}
+
+			return true;
+		};
+
+		const getKpiItems = value => {
+			if (Array.isArray(value)) {
+				return value.filter(
+					isMeaningfulKpiItem
+				);
+			}
+
+			return isMeaningfulKpiItem(value)
+				? [value]
+				: [];
+		};
+
+		// =====================================================
+		// 14. LẤY SCORE WEIGHT CỦA TỪNG ITEM KPI
+		// =====================================================
+		const getOptionKey = item => {
+			if (
+				item &&
+				typeof item === "object"
+			) {
+				return String(
+					item.value ??
+					item.label ??
+					item.name ??
+					item.option ??
+					item.key ??
+					""
+				).trim();
+			}
+
+			return String(
+				item ?? ""
+			).trim();
+		};
+
+		const getScoreWeight = (
+			kpiField,
+			item
+		) => {
+			const defaultWeight = Number(
+				kpiField.scoreWeight
+			);
+
+			const optionKey = getOptionKey(item);
+
+			const options =
+				kpiField.kpiOptions ||
+				kpiField.options ||
+				{};
+
+			let optionConfig = null;
+
+			if (
+				optionKey &&
+				options &&
+				typeof options === "object"
+			) {
+				optionConfig =
+					options[optionKey];
+
+				if (
+					optionConfig === undefined
+				) {
+					const lowerKey =
+						optionKey.toLowerCase();
+
+					const matchedKey =
+						Object.keys(options).find(
+							key =>
+								String(key)
+									.toLowerCase() ===
+								lowerKey
+						);
+
+					if (matchedKey) {
+						optionConfig =
+							options[matchedKey];
+					}
+				}
+			}
+
+			if (
+				optionConfig !== null &&
+				optionConfig !== undefined
+			) {
+				if (
+					typeof optionConfig === "number"
+				) {
+					return Number(
+						optionConfig
+					);
+				}
+
+				if (
+					typeof optionConfig === "object"
+				) {
+					const optionWeight = Number(
+						optionConfig.scoreWeight ??
+						optionConfig.weight ??
+						optionConfig.points ??
+						optionConfig.point
+					);
+
+					if (
+						Number.isFinite(
+							optionWeight
+						)
+					) {
+						return optionWeight;
+					}
+				}
+			}
+
+			return Number.isFinite(
+				defaultWeight
+			)
+				? defaultWeight
+				: -1;
+		};
+
+		const getWeekKey = data => {
+			const date = getRecordDate(data);
+
+			if (!date) return "";
+
+			const firstDay = new Date(
+				date.getFullYear(),
+				date.getMonth(),
+				1
+			);
+
+			const diffDays = Math.floor(
+				(date - firstDay) /
+				86400000
+			);
+
+			return `W${Math.floor(
+				diffDays / 7
+			) + 1}`;
+		};
+
+		// =====================================================
+		// 15. ĐỌC RECORDS CỦA TỪNG MODULE
+		// =====================================================
+		for (const modDoc of modulesSnap.docs) {
+			const recordsSnap = await db
+				.collection("organizations")
+				.doc(orgId)
+				.collection("academicYears")
+				.doc(academicYearId)
+				.collection("modulesData")
+				.doc(modDoc.id)
+				.collection("records")
+				.get();
+
+			recordsSnap.forEach(recDoc => {
+				const data =
+					recDoc.data() || {};
+
+				if (!isInCurrentMonth(data)) {
+					return;
+				}
+
+				const entityId = String(
+					data.entityId ||
+					recDoc.id ||
+					""
+				).trim();
+
+				const colleague =
+					resolveColleague(entityId);
+
+				if (!colleague) {
+					return;
+				}
+
+				const statsKey =
+					String(
+						colleague.code ||
+						colleague.uid ||
+						""
+					).trim();
+
+				const stats =
+					statsMap[statsKey];
+
+				if (!stats) {
+					return;
+				}
+
+				kpiFieldsList.forEach(
+					kpiField => {
+						const fKey =
+							kpiField.id;
+
+						let val =
+							data[fKey];
+
+						if (
+							val === undefined &&
+							data.changes &&
+							data.changes[fKey] !==
+								undefined
+						) {
+							val =
+								data.changes[fKey];
+						}
+
+						const items =
+							getKpiItems(val);
+
+						if (
+							items.length === 0
+						) {
+							return;
+						}
+
+						// Mỗi item KPI có nội dung
+						// được tính là 1 lượt.
+						stats.totalErrors +=
+							items.length;
+
+						stats.kpiCounts[fKey] =
+							(
+								stats.kpiCounts[fKey] ||
+								0
+							) + items.length;
+
+						items.forEach(item => {
+							const score =
+								getScoreWeight(
+									kpiField,
+									item
+								);
+
+							if (
+								score < 0
+							) {
+								stats.totalPenalty +=
+									Math.abs(score);
+
+								stats.negativeCount++;
+
+								const weekKey =
+									getWeekKey(data);
+
+								if (weekKey) {
+									stats.negativeWeeks.add(
+										weekKey
+									);
+								}
+							} else if (
+								score > 0
+							) {
+								stats.totalBonus +=
+									score;
+
+								stats.positiveCount++;
 							}
 						});
 					}
-				});
-			}
+				);
+			});
+		}
 
-			const processedList = Object.values(statsMap);
+		// =====================================================
+		// 16. TÍNH ĐIỂM THÁNG
+		//     BasePoint - điểm KPI âm + điểm KPI dương
+		// =====================================================
+		const processedList =
+			Object.values(statsMap).map(item => {
+				item.negativeWeeks =
+					item.negativeWeeks instanceof Set
+						? item.negativeWeeks.size
+						: Number(
+							item.negativeWeeks || 0
+						);
 
-			// 7. Render ra bảng HTML Thẻ 5
-			if (processedList.length === 0) {
-				tableBody.innerHTML = `<tr><td colspan="${3 + kpiFieldsList.length + 1}" style="text-align: center; color: #6c757d; font-style: italic;">Chưa có dữ liệu thi đua nào trong tổ chuyên môn.</td></tr>`;
-				return;
-			}
+				item.totalPoints =
+					basePoint -
+					Number(
+						item.totalPenalty || 0
+					) +
+					Number(
+						item.totalBonus || 0
+					);
 
-			let html = "";
-			processedList.forEach(item => {
+				return item;
+			});
+
+		// Sắp xếp theo tên để bảng ổn định.
+		processedList.sort(
+			(a, b) =>
+				String(a.name || "")
+					.localeCompare(
+						String(b.name || ""),
+						"vi"
+					)
+		);
+
+		// =====================================================
+		// 17. DỰNG HEADER
+		// =====================================================
+		let headerHtml = `
+			<th style="width: 100px;">Mã định danh</th>
+			<th style="width: 180px;">Họ và Tên</th>
+			<th style="width: 120px;">Tổ chuyên môn</th>
+		`;
+
+		kpiFieldsList.forEach(field => {
+			headerHtml += `
+				<th style="text-align: center; min-width: 90px;">
+					${field.name}
+				</th>
+			`;
+		});
+
+		headerHtml += `
+			<th style="width: 100px; text-align: center;">
+				Tổng lỗi
+			</th>
+			<th style="width: 100px; text-align: center;">
+				Điểm trừ
+			</th>
+			<th style="width: 100px; text-align: center;">
+				Điểm cộng
+			</th>
+			<th style="width: 120px; text-align: center;">
+				Tổng điểm tháng
+			</th>
+		`;
+
+		if (headerRow) {
+			headerRow.innerHTML =
+				headerHtml;
+		}
+
+		// =====================================================
+		// 18. RENDER BẢNG
+		// =====================================================
+		if (processedList.length === 0) {
+			tableBody.innerHTML =
+				`<tr>
+					<td colspan="${3 + kpiFieldsList.length + 4}"
+						style="text-align: center; color: #6c757d; font-style: italic;">
+						Chưa có thành viên trong tổ chuyên môn.
+					</td>
+				</tr>`;
+
+			return;
+		}
+
+		let html = "";
+
+		processedList.forEach(item => {
+			const totalErrors =
+				Number(
+					item.totalErrors || 0
+				);
+
+			const totalPenalty =
+				Number(
+					item.totalPenalty || 0
+				);
+
+			const totalBonus =
+				Number(
+					item.totalBonus || 0
+				);
+
+			const totalPoints =
+				Number(
+					item.totalPoints || 0
+				);
+
+			html += `
+				<tr style="border-bottom: 1px solid #dee2e6;">
+
+					<td style="font-family: monospace; font-weight: bold;">
+						${item.code || item.uid || item.id}
+					</td>
+
+					<td>
+						${item.name || ""}
+					</td>
+
+					<td>
+						<span style="
+							background: #e9ecef;
+							padding: 2px 6px;
+							border-radius: 4px;
+							font-size: 0.9em;
+						">
+							${item.department || ""}
+						</span>
+					</td>
+			`;
+
+			kpiFieldsList.forEach(field => {
+				const countVal =
+					Number(
+						item.kpiCounts[field.id] ||
+						0
+					);
+
 				html += `
-					<tr style="border-bottom: 1px solid #dee2e6;">
-						<td style="font-family: monospace; font-weight: bold;">${item.id}</td>
-						<td>${item.name}</td>
-						<td><span style="background: #e9ecef; padding: 2px 6px; border-radius: 4px; font-size: 0.9em;">${item.department}</span></td>
-				`;
-
-				kpiFieldsList.forEach(field => {
-					const countVal = item.kpiCounts[field.id] || 0;
-					html += `<td style="text-align: center;">${countVal > 0 ? `<span style="color: #dc3545; font-weight: bold;">${countVal}</span>` : '<span style="color: #ccc;">0</span>'}</td>`;
-				});
-
-				html += `
-						<td style="text-align: center; font-weight: bold; color: ${item.totalErrors > 0 ? '#dc3545' : '#198754'};">${item.totalErrors} lỗi</td>
-					</tr>
+					<td style="text-align: center;">
+						${
+							countVal > 0
+								? `<span style="color: #dc3545; font-weight: bold;">
+									${countVal}
+								   </span>`
+								: `<span style="color: #ccc;">
+									0
+								   </span>`
+						}
+					</td>
 				`;
 			});
 
-			tableBody.innerHTML = html;
+			html += `
+					<td style="
+						text-align: center;
+						font-weight: bold;
+						color: ${
+							totalErrors > 0
+								? "#dc3545"
+								: "#198754"
+						};
+					">
+						${totalErrors}
+					</td>
 
-		} catch (error) {
-			console.error("Lỗi tải dữ liệu tổ chuyên môn:", error);
-			tableBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: red;">Lỗi tải dữ liệu tổ chuyên môn.</td></tr>';
-		}
+					<td style="
+						text-align: center;
+						font-weight: bold;
+						color: ${
+							totalPenalty > 0
+								? "#dc3545"
+								: "#198754"
+						};
+					">
+						${totalPenalty}
+					</td>
+
+					<td style="
+						text-align: center;
+						font-weight: bold;
+						color: ${
+							totalBonus > 0
+								? "#0d6efd"
+								: "#6c757d"
+						};
+					">
+						${totalBonus}
+					</td>
+
+					<td style="
+						text-align: center;
+						font-weight: bold;
+						font-size: 1.05em;
+						color: ${
+							totalPoints < basePoint
+								? "#dc3545"
+								: "#198754"
+						};
+					">
+						${totalPoints}
+					</td>
+
+				</tr>
+			`;
+		});
+
+		tableBody.innerHTML = html;
+
+	} catch (error) {
+		console.error(
+			"Lỗi tải dữ liệu tổ chuyên môn:",
+			error
+		);
+
+		tableBody.innerHTML =
+			'<tr><td colspan="10" style="text-align: center; color: red;">Lỗi tải dữ liệu tổ chuyên môn.</td></tr>';
 	}
+}
+
 	
 	//	GỌI HỖ TRỢ
 	
@@ -13698,229 +19775,2240 @@ async function loadPotentialAssistantsForHelp(orgId, academicYearId, moduleId, c
 	}
 
 	// 3. QUÉT DỌN TỰ ĐỘNG HẾT HẠN (30 phút)
-	async function checkAndExpireSupporters() {
-		const orgId = window.currentOrgIdGlobal;
-		if (!orgId) return;
+	async function checkAndExpireSupporters(academicIdOverride = "") {
+    const orgId = window.currentOrgIdGlobal;
+    if (!orgId) return;
 
-		let academicYearId = currentAcademicYear || "";
-		const yearsArr = window.currentAcademicYearsGlobal;
-		if (!academicYearId && Array.isArray(yearsArr) && yearsArr.length > 0) {
-			const lastYearItem = yearsArr[yearsArr.length - 1];
-			academicYearId = String(typeof lastYearItem === 'object' && lastYearItem !== null ? (lastYearItem.id || lastYearItem.name || lastYearItem.year) : lastYearItem).trim();
-		}
+    // ============================================================
+    // 1. XÁC ĐỊNH NĂM HỌC
+    //
+    // Nếu caller truyền academicId thì ưu tiên tuyệt đối.
+    // Điều này giúp saveSingle / saveAll kiểm tra đúng năm học
+    // mà người dùng đang thao tác.
+    // ============================================================
 
-		if (!academicYearId) return;
+    let academicYearId = String(academicIdOverride || "").trim();
 
-		try {
-			const db = firebase.firestore();
-			const academicYearRef = db.collection("organizations")
-				.doc(orgId)
-				.collection("academicYears")
-				.doc(academicYearId);
+    if (!academicYearId) {
+        academicYearId = String(currentAcademicYear || "").trim();
+    }
 
-			const now = Date.now();
-			const expiredSnap = await academicYearRef.collection("supporters")
-				.where("expiresAt", "<", now)
-				.get();
+    if (!academicYearId) {
+        const yearsArr = window.currentAcademicYearsGlobal;
 
-			if (expiredSnap.empty) return;
+        if (Array.isArray(yearsArr) && yearsArr.length > 0) {
+            const lastYearItem = yearsArr[yearsArr.length - 1];
 
-			const batch = db.batch();
+            academicYearId = String(
+                typeof lastYearItem === "object" && lastYearItem !== null
+                    ? (
+                        lastYearItem.id ||
+                        lastYearItem.name ||
+                        lastYearItem.year ||
+                        ""
+                    )
+                    : lastYearItem
+            ).trim();
+        }
+    }
 
-			for (const doc of expiredSnap.docs) {
-				const data = doc.data();
-				const assistantEmail = data.assistantEmail;
-				const moduleId = data.moduleId;
+    if (!academicYearId) {
+        console.warn(
+            "[Support] Không xác định được năm học, bỏ qua kiểm tra hết hạn."
+        );
+        return;
+    }
 
-				if (assistantEmail && moduleId) {
-					// 🌟 TRA CỨU MEMBERID (CHỮ THƯỜNG) CHO TỪNG EMAIL HẾT HẠN
-					let assistantMemberId = "";
-					try {
-						const emailDocSnap = await db.collection("emails").doc(assistantEmail).get();
-						if (emailDocSnap.exists) {
-							const emailData = emailDocSnap.data();
-							const rawMemberId = emailData.code || emailData.uid || "";
-							if (rawMemberId) {
-								assistantMemberId = String(rawMemberId).toLowerCase().trim();
-							}
-						}
-					} catch (e) {
-						console.warn("Không đọc được collection emails:", e);
-					}
+    try {
+        const db = firebase.firestore();
 
-					if (!assistantMemberId) {
-						assistantMemberId = assistantEmail;
-					}
+        const academicYearRef = db
+            .collection("organizations")
+            .doc(orgId)
+            .collection("academicYears")
+            .doc(academicYearId);
 
-					const assistantDocRef = academicYearRef.collection("assignments").doc(assistantMemberId);
-					const assistantDoc = await assistantDocRef.get();
-					if (assistantDoc.exists) {
-						const asstData = assistantDoc.data();
-						let mods = Array.isArray(asstData.modules) ? asstData.modules : [];
-						mods = mods.filter(m => m !== moduleId);
+        // ========================================================
+        // 2. TÌM CÁC SUPPORTER ĐÃ HẾT HẠN
+        // ========================================================
 
-						// 🌟 NẾU KHÔNG CÒN MODULE NÀO -> XÓA HẲN DOCUMENT ASSIGNMENT
-						if (mods.length === 0) {
-							batch.delete(assistantDocRef);
-						} else {
-							batch.set(assistantDocRef, {
-								modules: mods,
-								isAssistant: false,
-								updatedAt: typeof getVietnamTimestamp === 'function' ? getVietnamTimestamp() : new Date().toISOString()
-							}, { merge: true });
-						}
-					}
-				}
+        const now = Date.now();
 
-				batch.delete(doc.ref);
-			}
+        const expiredSnap = await academicYearRef
+            .collection("supporters")
+            .where("expiresAt", "<", now)
+            .get();
 
-			await batch.commit();
-			console.log(`Đã tự động thu hồi và dọn dẹp ${expiredSnap.size} biên bản trợ giúp quá hạn.`);
+        if (expiredSnap.empty) {
+            return;
+        }
 
-		} catch (error) {
-			console.error("Lỗi khi quét dọn biên bản hết hạn:", error);
-		}
-	}	
+        // ========================================================
+        // 3. CHUẨN BỊ BATCH
+        // ========================================================
+
+        const batch = db.batch();
+
+        for (const doc of expiredSnap.docs) {
+            const data = doc.data() || {};
+
+            const assistantEmail =
+                String(data.assistantEmail || "")
+                    .trim()
+                    .toLowerCase();
+
+            const moduleId =
+                String(data.moduleId || "").trim();
+
+            // ====================================================
+            // 4. XÁC ĐỊNH MEMBER ID CỦA NGƯỜI TRỢ GIÚP
+            //
+            // Ưu tiên code, sau đó mới UID.
+            // ====================================================
+
+            if (assistantEmail && moduleId) {
+
+                let assistantMemberId = "";
+
+                try {
+                    const emailDocSnap = await db
+                        .collection("emails")
+                        .doc(assistantEmail)
+                        .get();
+
+                    if (emailDocSnap.exists) {
+                        const emailData = emailDocSnap.data() || {};
+
+                        const rawMemberId =
+                            emailData.code ||
+                            emailData.uid ||
+                            "";
+
+                        if (rawMemberId) {
+                            assistantMemberId =
+                                String(rawMemberId)
+                                    .toLowerCase()
+                                    .trim();
+                        }
+                    }
+                } catch (e) {
+                    console.warn(
+                        "Không đọc được collection emails:",
+                        e
+                    );
+                }
+
+                // Fallback về email nếu không tìm được code/UID.
+                if (!assistantMemberId) {
+                    assistantMemberId = assistantEmail;
+                }
+
+                // =================================================
+                // 5. ĐỌC ASSIGNMENT CỦA NGƯỜI TRỢ GIÚP
+                // =================================================
+
+                const assistantDocRef = academicYearRef
+                    .collection("assignments")
+                    .doc(assistantMemberId);
+
+                const assistantDoc =
+                    await assistantDocRef.get();
+
+                if (assistantDoc.exists) {
+                    const asstData =
+                        assistantDoc.data() || {};
+
+                    let mods =
+                        Array.isArray(asstData.modules)
+                            ? asstData.modules
+                            : [];
+
+                    // Chỉ loại module đã hết hạn.
+                    mods = mods.filter(
+                        m => m !== moduleId
+                    );
+
+                    // =================================================
+                    // 6. NẾU KHÔNG CÒN MODULE
+                    //    → XÓA ASSIGNMENT
+                    // =================================================
+
+                    if (mods.length === 0) {
+
+                        batch.delete(assistantDocRef);
+
+                    } else {
+
+                        batch.set(
+                            assistantDocRef,
+                            {
+                                modules: mods,
+                                isAssistant: false,
+                                updatedAt:
+                                    typeof getVietnamTimestamp === "function"
+                                        ? getVietnamTimestamp()
+                                        : new Date().toISOString()
+                            },
+                            { merge: true }
+                        );
+                    }
+                }
+            }
+
+            // ========================================================
+            // 7. XÓA BIÊN BẢN SUPPORT ĐÃ HẾT HẠN
+            // ========================================================
+
+            batch.delete(doc.ref);
+        }
+
+        // ========================================================
+        // 8. COMMIT
+        // ========================================================
+
+        await batch.commit();
+
+        console.log(
+            `[Support] Đã tự động thu hồi và dọn dẹp ` +
+            `${expiredSnap.size} biên bản trợ giúp quá hạn ` +
+            `của năm học ${academicYearId}.`
+        );
+
+    } catch (error) {
+
+        console.error(
+            "[Support] Lỗi khi quét dọn biên bản hết hạn:",
+            error
+        );
+    }
+}
+	
 	
 	// 	EMPLOYEE PANEL - THẺ 2
+	async function loadPersonalStatusData(forceRefresh = false) {
+    const listContainer = document.getElementById("emp-personal-status-list");
+    const moduleCountEl = document.getElementById("emp-personal-module-count");
+    const errorCountEl = document.getElementById("emp-personal-error-count");
+    const statusEl = document.getElementById("emp-personal-status");
+
+    const nameEl = document.getElementById("emp-personal-user-name");
+    const codeEl = document.getElementById("emp-personal-user-code");
+    const roleEl = document.getElementById("emp-personal-user-role");
+    const categoryEl = document.getElementById("emp-personal-user-category");
+    const periodSelect = document.getElementById("emp-personal-period-select");
+
+    if (!listContainer) return;
+
+    const orgId = window.currentOrgIdGlobal;
+    const authUser = firebase.auth().currentUser;
+
+    if (!orgId || !authUser) {
+        listContainer.innerHTML = `
+            <div style="
+                text-align:center;
+                color:#dc3545;
+                padding:20px;
+            ">
+                Không xác định được tài khoản hoặc đơn vị đang đăng nhập.
+            </div>
+        `;
+        return;
+    }
+
+    const db = firebase.firestore();
+
+    listContainer.innerHTML = `
+        <div style="
+            text-align:center;
+            color:#6c757d;
+            padding:20px;
+        ">
+            <i class="fa-solid fa-spinner fa-spin"></i>
+            Đang tải trạng thái cá nhân...
+        </div>
+    `;
+
+    try {
+
+        // =====================================================
+        // 1. XÁC ĐỊNH NĂM HỌC
+        // =====================================================
+
+        let academicYearId = "";
+
+        const yearsArr = window.currentAcademicYearsGlobal;
+
+        if (Array.isArray(yearsArr) && yearsArr.length > 0) {
+
+            const lastYearItem =
+                yearsArr[yearsArr.length - 1];
+
+            academicYearId = String(
+                typeof lastYearItem === "object" &&
+                lastYearItem !== null
+                    ? (
+                        lastYearItem.id ||
+                        lastYearItem.name ||
+                        lastYearItem.year ||
+                        ""
+                    )
+                    : lastYearItem
+            ).trim();
+        }
+
+        if (!academicYearId) {
+            academicYearId = String(
+                window.currentAcademicYearIdGlobal || ""
+            ).trim();
+        }
+
+        if (!academicYearId) {
+            throw new Error(
+                "Chưa xác định được năm học hiện tại."
+            );
+        }
+
+
+        // =====================================================
+        // 2. XÁC ĐỊNH USER ĐANG ĐĂNG NHẬP
+        // =====================================================
+
+        const currentUid = String(
+            authUser.uid || ""
+        ).trim();
+
+        const currentEmail = String(
+            window.currentUserEmailGlobal ||
+            authUser.email ||
+            ""
+        ).trim().toLowerCase();
+
+
+        let currentUserInfo = null;
+
+
+        // -----------------------------------------------------
+        // Tìm trong cache trước
+        // -----------------------------------------------------
+
+        for (
+            const [uId, uInfo]
+            of Object.entries(window.cachedUsersMap || {})
+        ) {
+
+            const cachedUid = String(
+                uInfo.uid ||
+                uInfo.id ||
+                uId ||
+                ""
+            ).trim();
+
+            const cachedEmail = String(
+                uInfo.email ||
+                ""
+            ).trim().toLowerCase();
+
+
+            if (
+                (currentUid && cachedUid === currentUid) ||
+                (currentEmail && cachedEmail === currentEmail)
+            ) {
+
+                currentUserInfo = {
+                    ...uInfo,
+                    _mapId: uId
+                };
+
+                break;
+            }
+        }
+
+
+        // -----------------------------------------------------
+        // Nếu cache chưa có thì đọc trực tiếp Firestore
+        // -----------------------------------------------------
+
+        if (!currentUserInfo) {
+
+            let userSnap = null;
+
+
+            if (currentUid) {
+
+                userSnap = await db
+                    .collection("organizations")
+                    .doc(orgId)
+                    .collection("users")
+                    .where("uid", "==", currentUid)
+                    .limit(1)
+                    .get();
+            }
+
+
+            if (
+                (!userSnap || userSnap.empty) &&
+                currentEmail
+            ) {
+
+                userSnap = await db
+                    .collection("organizations")
+                    .doc(orgId)
+                    .collection("users")
+                    .where("email", "==", currentEmail)
+                    .limit(1)
+                    .get();
+            }
+
+
+            if (
+                userSnap &&
+                !userSnap.empty
+            ) {
+
+                const uDoc = userSnap.docs[0];
+                const uData = uDoc.data() || {};
+
+
+                currentUserInfo = {
+
+                    uid: String(
+                        uData.uid ||
+                        uData.id ||
+                        uDoc.id ||
+                        currentUid
+                    ).trim(),
+
+                    code:
+                        uData.code ||
+                        uData.memberId ||
+                        "",
+
+                    fullName:
+                        uData.fullName ||
+                        uData.displayName ||
+                        uData.name ||
+                        uData.email ||
+                        currentEmail,
+
+                    category:
+                        String(
+                            uData.category ||
+                            ""
+                        ).trim(),
+
+                    email:
+                        String(
+                            uData.email ||
+                            currentEmail ||
+                            ""
+                        ).trim().toLowerCase(),
+
+                    role:
+                        String(
+                            uData.role ||
+                            ""
+                        ).trim(),
+
+                    _mapId: uDoc.id
+                };
+            }
+        }
+
+
+        if (!currentUserInfo) {
+            throw new Error(
+                "Không tìm thấy thông tin tài khoản trong danh sách users."
+            );
+        }
+
+
+        // =====================================================
+        // 3. THÔNG TIN CÁ NHÂN
+        // =====================================================
+
+        const myCode = String(
+            currentUserInfo.code ||
+            currentUserInfo.memberId ||
+            ""
+        ).trim();
+
+
+        const myRole = String(
+            currentUserInfo.role ||
+            ""
+        ).trim().toUpperCase();
+
+
+        const myCategory = String(
+            currentUserInfo.category ||
+            ""
+        ).trim();
+
+
+        const myName =
+            currentUserInfo.fullName ||
+            currentUserInfo.displayName ||
+            currentUserInfo.name ||
+            currentEmail ||
+            currentUid;
+
+
+        if (nameEl) {
+            nameEl.textContent = myName;
+        }
+
+        if (codeEl) {
+            codeEl.textContent =
+                myCode || "--";
+        }
+
+        if (roleEl) {
+            roleEl.textContent =
+                myRole || "--";
+        }
+
+        if (categoryEl) {
+            categoryEl.textContent =
+                myCategory || "--";
+        }
+
+
+        // =====================================================
+        // 4. XÁC ĐỊNH KHOẢNG THỜI GIAN
+        // =====================================================
+
+        const period =
+            periodSelect?.value === "month"
+                ? "month"
+                : "week";
+
+
+        const now = new Date();
+
+        let startDate;
+        let endDate;
+
+
+        if (period === "month") {
+
+            startDate = new Date(
+                now.getFullYear(),
+                now.getMonth(),
+                1
+            );
+
+            endDate = new Date(
+                now.getFullYear(),
+                now.getMonth() + 1,
+                0
+            );
+
+        } else {
+
+            // Tuần bắt đầu từ thứ Hai
+
+            const day = now.getDay();
+
+            const diffToMonday =
+                day === 0
+                    ? 6
+                    : day - 1;
+
+
+            startDate = new Date(
+                now.getFullYear(),
+                now.getMonth(),
+                now.getDate() - diffToMonday
+            );
+
+
+            endDate = new Date(
+                startDate.getFullYear(),
+                startDate.getMonth(),
+                startDate.getDate() + 6
+            );
+        }
+
+
+        const toDateString = date => {
+
+            const y =
+                date.getFullYear();
+
+            const m =
+                String(
+                    date.getMonth() + 1
+                ).padStart(2, "0");
+
+            const d =
+                String(
+                    date.getDate()
+                ).padStart(2, "0");
+
+
+            return `${y}-${m}-${d}`;
+        };
+
+
+        const startDateStr =
+            toDateString(startDate);
+
+        const endDateStr =
+            toDateString(endDate);
+
+
+        // =====================================================
+        // 5. CÁC GIÁ TRỊ ĐỂ ĐỐI CHIẾU entityId
+        // =====================================================
+
+        const selfIds = new Set();
+
+
+        [
+            currentUid,
+            currentUserInfo.uid,
+            myCode,
+            currentUserInfo.memberId,
+            currentUserInfo.id
+        ].forEach(value => {
+
+            const v =
+                String(value || "").trim();
+
+            if (v) {
+                selfIds.add(v);
+            }
+        });
+
+
+        const selfIdsLower = new Set(
+            Array.from(selfIds).map(
+                value =>
+                    value.toLowerCase()
+            )
+        );
+
+
+        // =====================================================
+        // 6. LẤY MODULE THEO ROLE
+        // =====================================================
+
+        const modulesSnap = await db
+            .collection("organizations")
+            .doc(orgId)
+            .collection("modules")
+            .get();
+
+
+        const normalizeTarget = value => {
+
+            if (Array.isArray(value)) {
+
+                return value
+                    .map(v =>
+                        String(v || "")
+                            .trim()
+                            .toUpperCase()
+                    )
+                    .filter(Boolean);
+            }
+
+
+            const valueStr =
+                String(value || "").trim();
+
+
+            if (!valueStr) {
+                return [];
+            }
+
+
+            return valueStr
+                .split(",")
+                .map(v =>
+                    v.trim().toUpperCase()
+                )
+                .filter(Boolean);
+        };
+
+
+        const roleAliases = new Set([
+            myRole
+        ]);
+
+
+        // TEACHER <-> EMPLOYEE
+
+        if (myRole === "TEACHER") {
+            roleAliases.add("EMPLOYEE");
+        }
+
+        if (myRole === "EMPLOYEE") {
+            roleAliases.add("TEACHER");
+        }
+
+
+        const relevantModules = [];
+
+
+        modulesSnap.forEach(modDoc => {
+
+            const modData =
+                modDoc.data() || {};
+
+
+            const targetValues =
+                normalizeTarget(
+                    modData.targetType
+                );
+
+
+            // Module không có targetType
+            // thì không đưa vào theo dõi cá nhân.
+
+            if (targetValues.length === 0) {
+                return;
+            }
+
+
+            const roleMatched =
+                targetValues.some(
+                    target =>
+                        roleAliases.has(target)
+                );
+
+
+            if (!roleMatched) {
+                return;
+            }
+
+
+            relevantModules.push({
+                id: modDoc.id,
+                ...modData
+            });
+        });
+
+
+        if (moduleCountEl) {
+            moduleCountEl.textContent =
+                relevantModules.length;
+        }
+
+
+        // =====================================================
+        // 7. ĐỌC RECORDS CỦA CÁC MODULE LIÊN QUAN
+        // =====================================================
+
+        const personalModules = [];
+
+        let totalErrors = 0;
+
+
+        for (
+            const module
+            of relevantModules
+        ) {
+
+            const fields =
+                Array.isArray(module.fields)
+                    ? module.fields
+                    : [];
+
+
+            const kpiFields =
+                fields.filter(
+                    field =>
+                        field &&
+                        field.key &&
+                        (
+                            field.isKpi === true ||
+                            field.isKpi === "true"
+                        )
+                );
+
+
+            let recordsSnap;
+
+
+            // -------------------------------------------------
+            // Lọc records theo khoảng ngày
+            // -------------------------------------------------
+
+            try {
+
+                recordsSnap = await db
+                    .collection("organizations")
+                    .doc(orgId)
+                    .collection("academicYears")
+                    .doc(academicYearId)
+                    .collection("modulesData")
+                    .doc(module.id)
+                    .collection("records")
+                    .where(
+                        "date",
+                        ">=",
+                        startDateStr
+                    )
+                    .where(
+                        "date",
+                        "<=",
+                        endDateStr
+                    )
+                    .get();
+
+            } catch (queryError) {
+
+                console.warn(
+                    `Không thể lọc records theo date cho module ${module.id}. Đọc toàn bộ records để lọc tại client.`,
+                    queryError
+                );
+
+
+                recordsSnap = await db
+                    .collection("organizations")
+                    .doc(orgId)
+                    .collection("academicYears")
+                    .doc(academicYearId)
+                    .collection("modulesData")
+                    .doc(module.id)
+                    .collection("records")
+                    .get();
+            }
+
+
+            let moduleErrorCount = 0;
+
+            let matchedRecordCount = 0;
+
+            const kpiCounts = {};
+
+            const logEntries = [];
+
+
+            // =================================================
+            // DUYỆT RECORD
+            // =================================================
+
+            recordsSnap.forEach(recordDoc => {
+
+                const data =
+                    recordDoc.data() || {};
+
+
+                // -------------------------------------------------
+                // Nếu query fallback thì tự lọc ngày
+                // -------------------------------------------------
+
+                if (
+                    data.date &&
+                    (
+                        String(data.date) < startDateStr ||
+                        String(data.date) > endDateStr
+                    )
+                ) {
+                    return;
+                }
+
+
+                // -------------------------------------------------
+                // XÁC ĐỊNH ĐỐI TƯỢNG
+                // -------------------------------------------------
+
+                const entityId = String(
+                    data.entityId ||
+                    data.entityID ||
+                    data.memberId ||
+                    data.code ||
+                    ""
+                ).trim();
+
+
+                if (!entityId) {
+                    return;
+                }
+
+
+                // -------------------------------------------------
+                // Chỉ lấy record của chính người đăng nhập
+                // -------------------------------------------------
+
+                if (
+                    !selfIds.has(entityId) &&
+                    !selfIdsLower.has(
+                        entityId.toLowerCase()
+                    )
+                ) {
+                    return;
+                }
+
+
+                matchedRecordCount++;
+
+
+                // =================================================
+                // XÁC ĐỊNH CÁC LỖI TRONG RECORD
+                // =================================================
+
+                let recordErrorCount = 0;
+
+                const recordErrors = [];
+
+
+                if (kpiFields.length > 0) {
+
+                    kpiFields.forEach(field => {
+
+                        const key =
+                            field.key;
+
+
+                        let value =
+                            data[key];
+
+
+                        // Hỗ trợ trường hợp dữ liệu nằm trong changes
+
+                        if (
+                            value === undefined &&
+                            data.changes &&
+                            data.changes[key] !== undefined
+                        ) {
+
+                            value =
+                                data.changes[key];
+                        }
+
+
+                        if (
+                            value !== undefined &&
+                            value !== null &&
+                            value !== "" &&
+                            value !== false
+                        ) {
+
+                            let countInc = 1;
+
+
+                            if (Array.isArray(value)) {
+
+                                countInc =
+                                    value.length || 1;
+
+                            } else if (
+                                typeof value === "number"
+                            ) {
+
+                                countInc =
+                                    value > 0
+                                        ? value
+                                        : 0;
+                            }
+
+
+                            if (countInc > 0) {
+
+                                recordErrorCount +=
+                                    countInc;
+
+
+                                kpiCounts[key] =
+                                    (
+                                        kpiCounts[key] ||
+                                        0
+                                    ) + countInc;
+
+
+                                recordErrors.push({
+
+                                    key: key,
+
+                                    label:
+                                        field.label ||
+                                        key,
+
+                                    count:
+                                        countInc
+                                });
+                            }
+                        }
+                    });
+
+                } else {
+
+                    // Module không có KPI field:
+                    // record của chính người dùng
+                    // được xem là một log.
+
+                    recordErrorCount = 1;
+                }
+
+
+                moduleErrorCount +=
+                    recordErrorCount;
+
+
+                // =================================================
+                // THÔNG TIN NGƯỜI GHI NHẬN
+                // =================================================
+                //
+                // Dữ liệu thực tế của bạn:
+                //
+                // CLGD2_duGioThanhTra: [
+                //     {
+                //         by: "Ghi bởi Vũ Hùng",
+                //         email: "hung1984@hanoiedu.vn",
+                //         time: "15:33",
+                //         value: "..."
+                //     }
+                // ]
+                //
+                // Vì vậy KHÔNG lấy:
+                // data.updaterName
+                // data.updatedByName
+                // data.createdByName
+                //
+                // mà lấy trực tiếp từ object lỗi.
+                // =================================================
+
+                let recorderName =
+                    "Chưa xác định";
+
+                let recorderEmail =
+                    "";
+
+                let recordedTime =
+                    "";
+
+
+                for (
+                    const field
+                    of kpiFields
+                ) {
+
+                    const fieldValue =
+                        data[field.key];
+
+
+                    if (
+                        !Array.isArray(fieldValue)
+                    ) {
+                        continue;
+                    }
+
+
+                    const logItem =
+                        fieldValue.find(
+                            item =>
+                                item &&
+                                typeof item === "object" &&
+                                (
+                                    item.by ||
+                                    item.email ||
+                                    item.time
+                                )
+                        );
+
+
+                    if (!logItem) {
+                        continue;
+                    }
+
+
+                    recorderName =
+                        String(
+                            logItem.by || ""
+                        ).trim() ||
+                        "Chưa xác định";
+
+
+                    recorderEmail =
+                        String(
+                            logItem.email || ""
+                        ).trim();
+
+
+                    recordedTime =
+                        String(
+                            logItem.time || ""
+                        ).trim();
+
+
+                    // Theo cấu trúc dữ liệu hiện tại:
+                    // tại một thời điểm chỉ có một
+                    // người ghi lỗi.
+
+                    break;
+                }
+
+
+                // -------------------------------------------------
+                // Chỉ hiển thị nhật ký nếu record có lỗi
+                // -------------------------------------------------
+
+                if (recordErrorCount > 0) {
+
+                    logEntries.push({
+
+                        recordId:
+                            recordDoc.id,
+
+                        date:
+                            data.date ||
+                            "",
+
+                        recorderName:
+                            recorderName,
+
+                        recorderEmail:
+                            recorderEmail,
+
+                        recordedTime:
+                            recordedTime ||
+                            "Chưa xác định",
+
+                        errorCount:
+                            recordErrorCount,
+
+                        errors:
+                            recordErrors,
+
+                        rawData:
+                            data
+                    });
+                }
+
+            });
+
+
+            // =================================================
+            // LƯU MODULE NẾU CÓ RECORD CỦA USER
+            // =================================================
+
+            if (
+                matchedRecordCount > 0 ||
+                moduleErrorCount > 0
+            ) {
+
+                totalErrors +=
+                    moduleErrorCount;
+
+
+                personalModules.push({
+
+                    id:
+                        module.id,
+
+                    title:
+                        module.title ||
+                        module.name ||
+                        module.id,
+
+                    description:
+                        module.description ||
+                        "",
+
+                    targetType:
+                        module.targetType,
+
+                    recordCount:
+                        matchedRecordCount,
+
+                    errorCount:
+                        moduleErrorCount,
+
+                    kpiCounts:
+                        kpiCounts,
+
+                    logEntries:
+                        logEntries.sort(
+                            (a, b) => {
+
+                                // Nếu có date thì ưu tiên date.
+                                // Nếu cùng date thì so sánh time.
+
+                                const dateA =
+                                    String(
+                                        a.date || ""
+                                    );
+
+                                const dateB =
+                                    String(
+                                        b.date || ""
+                                    );
+
+
+                                if (
+                                    dateA !== dateB
+                                ) {
+
+                                    return dateB.localeCompare(
+                                        dateA
+                                    );
+                                }
+
+
+                                return String(
+                                    b.recordedTime || ""
+                                ).localeCompare(
+                                    String(
+                                        a.recordedTime || ""
+                                    )
+                                );
+                            }
+                        )
+                });
+            }
+        }
+
+
+        // =====================================================
+        // 8. CẬP NHẬT TỔNG QUAN
+        // =====================================================
+
+        if (moduleCountEl) {
+
+            moduleCountEl.textContent =
+                personalModules.length;
+        }
+
+
+        if (errorCountEl) {
+
+            errorCountEl.textContent =
+                totalErrors;
+        }
+
+
+        if (statusEl) {
+
+            if (totalErrors > 0) {
+
+                statusEl.textContent =
+                    "Có phát sinh lỗi";
+
+                statusEl.style.color =
+                    "#dc3545";
+
+            } else {
+
+                statusEl.textContent =
+                    "Không có lỗi";
+
+                statusEl.style.color =
+                    "#198754";
+            }
+        }
+
+
+        // =====================================================
+        // 9. KHÔNG CÓ DỮ LIỆU
+        // =====================================================
+
+        if (
+            personalModules.length === 0
+        ) {
+
+            listContainer.innerHTML = `
+                <div style="
+                    text-align:center;
+                    padding:30px 15px;
+                    border:1px dashed #ced4da;
+                    border-radius:6px;
+                    color:#6c757d;
+                ">
+
+                    <div style="
+                        font-size:2em;
+                        margin-bottom:8px;
+                        color:#198754;
+                    ">
+                        <i class="fa-solid fa-circle-check"></i>
+                    </div>
+
+                    <strong>
+                        Không có bản ghi trong
+                        ${
+                            period === "month"
+                                ? "tháng này"
+                                : "tuần này"
+                        }.
+                    </strong>
+
+                    <div style="
+                        margin-top:5px;
+                        font-size:0.9em;
+                    ">
+                        Các module được hiển thị đã được
+                        lọc theo vai trò của bạn.
+                    </div>
+
+                </div>
+            `;
+
+            return;
+        }
+
+
+        // =====================================================
+        // 10. RENDER CÁC THẺ MODULE
+        // =====================================================
+
+        let html = "";
+
+
+        personalModules.forEach(module => {
+
+            const hasErrors =
+                module.errorCount > 0;
+
+
+            const borderColor =
+                hasErrors
+                    ? "#f5c2c7"
+                    : "#a3cfbb";
+
+
+            const backgroundColor =
+                hasErrors
+                    ? "#fff5f5"
+                    : "#f6fff9";
+
+
+            const statusText =
+                hasErrors
+                    ? "Có lỗi"
+                    : "Không có lỗi";
+
+
+            const statusColor =
+                hasErrors
+                    ? "#dc3545"
+                    : "#198754";
+
+
+            // =================================================
+            // KPI
+            // =================================================
+
+            let kpiHtml = "";
+
+
+            const kpiEntries =
+                Object.entries(
+                    module.kpiCounts
+                );
+
+
+            if (
+                kpiEntries.length > 0
+            ) {
+
+                kpiHtml = `
+                    <div style="
+                        display:flex;
+                        gap:8px;
+                        flex-wrap:wrap;
+                        margin-top:10px;
+                    ">
+                        ${
+                            kpiEntries
+                                .map(
+                                    ([key, count]) => {
+
+                                        const field =
+                                            (
+                                                relevantModules
+                                                    .find(
+                                                        m =>
+                                                            m.id ===
+                                                            module.id
+                                                    )
+                                                    ?.fields ||
+                                                []
+                                            ).find(
+                                                f =>
+                                                    f &&
+                                                    f.key ===
+                                                    key
+                                            );
+
+
+                                        const label =
+                                            field?.label ||
+                                            key;
+
+
+                                        return `
+                                            <span style="
+                                                background:#fff;
+                                                border:1px solid #dee2e6;
+                                                border-radius:4px;
+                                                padding:4px 8px;
+                                                font-size:0.85em;
+                                            ">
+                                                ${label}:
+                                                <strong
+                                                    style="
+                                                        color:#dc3545;
+                                                    "
+                                                >
+                                                    ${count}
+                                                </strong>
+                                            </span>
+                                        `;
+                                    }
+                                )
+                                .join("")
+                        }
+                    </div>
+                `;
+            }
+
+
+            // =================================================
+            // NHẬT KÝ GHI LỖI
+            // =================================================
+
+            let logsHtml = "";
+
+
+            if (
+                module.logEntries &&
+                module.logEntries.length > 0
+            ) {
+
+                logsHtml = `
+                    <div style="
+                        margin-top:12px;
+                        border-top:1px solid #dee2e6;
+                        padding-top:10px;
+                    ">
+
+                        <div style="
+                            font-weight:bold;
+                            color:#495057;
+                            margin-bottom:8px;
+                        ">
+                            <i class="fa-solid fa-clock-rotate-left"></i>
+                            Nhật ký ghi lỗi
+                        </div>
+
+
+                        ${
+                            module.logEntries
+                                .map(log => {
+
+                                    const errorText =
+                                        log.errors &&
+                                        log.errors.length > 0
+
+                                            ? log.errors
+                                                .map(
+                                                    error =>
+                                                        `${error.label}${
+                                                            error.count > 1
+                                                                ? ` (${error.count})`
+                                                                : ""
+                                                        }`
+                                                )
+                                                .join(", ")
+
+                                            : `${log.errorCount} lỗi`;
+
+
+                                    return `
+                                        <div style="
+                                            background:#fff;
+                                            border:1px solid #e9ecef;
+                                            border-radius:5px;
+                                            padding:9px 10px;
+                                            margin-bottom:7px;
+                                        ">
+
+                                            <div style="
+                                                display:flex;
+                                                justify-content:space-between;
+                                                gap:10px;
+                                                flex-wrap:wrap;
+                                            ">
+
+                                                <div style="
+                                                    color:#495057;
+                                                    font-size:0.88em;
+                                                ">
+
+                                                    <i class="fa-solid fa-user-pen"></i>
+
+                                                    <strong>
+                                                        Người ghi nhận:
+                                                    </strong>
+
+                                                    ${log.recorderName}
+
+                                                    ${
+                                                        log.recorderEmail
+                                                            ? `
+                                                                <span style="
+                                                                    color:#6c757d;
+                                                                ">
+                                                                    (${log.recorderEmail})
+                                                                </span>
+                                                            `
+                                                            : ""
+                                                    }
+
+                                                </div>
+
+
+                                                <div style="
+                                                    color:#6c757d;
+                                                    font-size:0.85em;
+                                                    white-space:nowrap;
+                                                ">
+
+                                                    <i class="fa-regular fa-clock"></i>
+
+                                                    <strong>
+                                                        Thời gian:
+                                                    </strong>
+
+                                                    ${log.recordedTime}
+
+                                                </div>
+
+                                            </div>
+
+
+                                            <div style="
+                                                margin-top:6px;
+                                                color:#dc3545;
+                                                font-size:0.88em;
+                                            ">
+
+                                                <strong>
+                                                    Lỗi:
+                                                </strong>
+
+                                                ${errorText}
+
+                                            </div>
+
+                                        </div>
+                                    `;
+                                })
+                                .join("")
+                        }
+
+                    </div>
+                `;
+            }
+
+
+            // =================================================
+            // THẺ MODULE
+            // =================================================
+
+            html += `
+                <div style="
+                    border:1px solid ${borderColor};
+                    background:${backgroundColor};
+                    border-radius:6px;
+                    padding:12px 15px;
+                ">
+
+                    <div style="
+                        display:flex;
+                        justify-content:space-between;
+                        align-items:flex-start;
+                        gap:10px;
+                        flex-wrap:wrap;
+                    ">
+
+                        <div style="
+                            flex:1;
+                            min-width:220px;
+                        ">
+
+                            <div style="
+                                font-weight:bold;
+                                color:#084298;
+                                font-size:1.05em;
+                            ">
+
+                                <i class="fa-solid fa-list-check"></i>
+
+                                ${module.title}
+
+                            </div>
+
+
+                            ${
+                                module.description
+                                    ? `
+                                        <div style="
+                                            margin-top:4px;
+                                            color:#6c757d;
+                                            font-size:0.85em;
+                                        ">
+                                            ${module.description}
+                                        </div>
+                                    `
+                                    : ""
+                            }
+
+                        </div>
+
+
+                        <div style="
+                            text-align:right;
+                            white-space:nowrap;
+                        ">
+
+                            <span style="
+                                display:inline-block;
+                                padding:4px 9px;
+                                border-radius:12px;
+                                background:${statusColor};
+                                color:#fff;
+                                font-size:0.82em;
+                                font-weight:bold;
+                            ">
+                                ${statusText}
+                            </span>
+
+                        </div>
+
+                    </div>
+
+
+                    <div style="
+                        display:flex;
+                        gap:15px;
+                        flex-wrap:wrap;
+                        margin-top:10px;
+                        font-size:0.9em;
+                    ">
+
+                        <span>
+
+                            <i class="fa-solid fa-file-lines"></i>
+
+                            Bản ghi:
+
+                            <strong>
+                                ${module.recordCount}
+                            </strong>
+
+                        </span>
+
+
+                        <span>
+
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+
+                            Số lỗi:
+
+                            <strong style="
+                                color:${
+                                    hasErrors
+                                        ? "#dc3545"
+                                        : "#198754"
+                                };
+                            ">
+                                ${module.errorCount}
+                            </strong>
+
+                        </span>
+
+                    </div>
+
+
+                    ${kpiHtml}
+
+                    ${logsHtml}
+
+                </div>
+            `;
+        });
+
+
+        // =====================================================
+        // 11. HIỂN THỊ
+        // =====================================================
+
+        listContainer.innerHTML =
+            html;
+
+
+    } catch (error) {
+
+        console.error(
+            "Lỗi loadPersonalStatusData:",
+            error
+        );
+
+
+        if (moduleCountEl) {
+            moduleCountEl.textContent = "0";
+        }
+
+
+        if (errorCountEl) {
+            errorCountEl.textContent = "0";
+        }
+
+
+        if (statusEl) {
+
+            statusEl.textContent =
+                "Lỗi tải dữ liệu";
+
+            statusEl.style.color =
+                "#dc3545";
+        }
+
+
+        listContainer.innerHTML = `
+            <div style="
+                text-align:center;
+                padding:20px;
+                color:#dc3545;
+                border:1px solid #f5c2c7;
+                background:#fff5f5;
+                border-radius:6px;
+            ">
+
+                <i class="fa-solid fa-circle-exclamation"></i>
+
+                Không thể tải trạng thái cá nhân.
+
+                <div style="
+                    margin-top:5px;
+                    font-size:0.85em;
+                ">
+                    ${error.message || "Lỗi không xác định."}
+                </div>
+
+            </div>
+        `;
+    }
+}
+
 	async function loadMyAuditLogsTimeline() {
-		const container = document.getElementById('my-audit-logs-timeline');
-		const dateInput = document.getElementById('emp-my-audit-date-select');
+
+		const container =
+			document.getElementById("my-audit-logs-timeline");
+
+		const dateInput =
+			document.getElementById("emp-my-audit-date-select");
+
 		if (!container) return;
 
-		const orgId = window.currentOrgIdGlobal;
-		
-		// Lấy năm học đang chọn từ select trên giao diện
-		const academicSelect = document.getElementById("emp-academic-year-select");
-		let academicId = academicSelect ? academicSelect.value : "";
-		if (!academicId && Array.isArray(window.currentAcademicYearsGlobal) && window.currentAcademicYearsGlobal.length > 0) {
-			academicId = window.currentAcademicYearsGlobal[window.currentAcademicYearsGlobal.length - 1];
+
+		// ============================================================
+		// 1. LẤY CONTEXT HIỆN TẠI
+		// ============================================================
+
+		const orgId =
+			window.currentOrgIdGlobal;
+
+		const academicSelect =
+			document.getElementById("emp-academic-year-select");
+
+		let academicId =
+			academicSelect
+				? academicSelect.value
+				: "";
+
+		if (
+			!academicId &&
+			Array.isArray(window.currentAcademicYearsGlobal) &&
+			window.currentAcademicYearsGlobal.length > 0
+		) {
+			academicId =
+				window.currentAcademicYearsGlobal[
+					window.currentAcademicYearsGlobal.length - 1
+				];
 		}
 
-		// Lấy moduleId chuẩn từ biến toàn cục hoặc select
-		const moduleSelectEl = document.getElementById("emp-module-select");
-		const moduleId = window.currentModuleIdGlobal || (moduleSelectEl ? moduleSelectEl.value : "");
 
-		// Lấy email người đang đăng nhập
-		const myEmail = (window.currentUserEmailGlobal || firebase.auth().currentUser?.email || "").toLowerCase().trim();
+		// Module hiện tại
+		const moduleSelectEl =
+			document.getElementById("emp-module-select");
 
-		if (!orgId || !academicId || !moduleId) {
-			container.innerHTML = '<p style="color:red; text-align: center; padding: 15px;">Vui lòng chọn đầy đủ Tổ chức, Năm học và Nhiệm vụ trước khi xem nhật ký cá nhân.</p>';
+		const moduleId =
+			window.currentModuleIdGlobal ||
+			(
+				moduleSelectEl
+					? moduleSelectEl.value
+					: ""
+			);
+
+
+		// Email người đăng nhập
+		const myEmail =
+			(
+				window.currentUserEmailGlobal ||
+				firebase.auth().currentUser?.email ||
+				""
+			)
+			.toLowerCase()
+			.trim();
+
+
+		// ============================================================
+		// 2. KIỂM TRA CONTEXT
+		// ============================================================
+
+		if (
+			!orgId ||
+			!academicId ||
+			!moduleId
+		) {
+
+			container.innerHTML =
+				'<p style="color:red; text-align:center; padding:15px;">' +
+				'Vui lòng chọn đầy đủ Tổ chức, Năm học và Nhiệm vụ trước khi xem nhật ký cá nhân.' +
+				'</p>';
+
 			return;
 		}
+
 
 		if (!myEmail) {
-			container.innerHTML = '<p style="color:red; text-align: center; padding: 15px;">Không xác định được thông tin tài khoản đăng nhập của bạn.</p>';
+
+			container.innerHTML =
+				'<p style="color:red; text-align:center; padding:15px;">' +
+				'Không xác định được thông tin tài khoản đăng nhập của bạn.' +
+				'</p>';
+
 			return;
 		}
 
-		// Mặc định lấy ngày hôm nay nếu chưa chọn ngày trên ô input
-		if (dateInput && !dateInput.value) {
-			dateInput.value = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+
+		// ============================================================
+		// 3. XÁC ĐỊNH NGÀY CẦN XEM
+		// ============================================================
+
+		if (
+			dateInput &&
+			!dateInput.value
+		) {
+			dateInput.value =
+				new Date().toLocaleDateString("en-CA");
 		}
 
-		const selectedDateStr = dateInput ? dateInput.value : new Date().toLocaleDateString('en-CA');
+
+		const selectedDateStr =
+			dateInput
+				? dateInput.value
+				: new Date().toLocaleDateString("en-CA");
+
+
+		// Kiểm tra format YYYY-MM-DD
+		const dateParts =
+			selectedDateStr.split("-").map(Number);
+
+		if (
+			dateParts.length !== 3 ||
+			dateParts.some(Number.isNaN)
+		) {
+
+			container.innerHTML =
+				'<p style="color:red; text-align:center; padding:15px;">' +
+				'Ngày được chọn không hợp lệ.' +
+				'</p>';
+
+			return;
+		}
+
 
 		try {
-			container.innerHTML = `<p style="color:#0d6efd; text-align: center; padding: 15px;">⏳ Đang tải lịch sử thao tác cá nhân ngày <b>${selectedDateStr}</b>...</p>`;
 
-			const db = firebase.firestore();
-			
-			// Truy vấn vào collection auditLogs của module hiện tại
-			const snapshot = await db.collection("organizations")
-				.doc(orgId)
-				.collection("academicYears")
-				.doc(academicId)
-				.collection("modulesData")
-				.doc(moduleId)
-				.collection("auditLogs")
-				.get();
+			container.innerHTML =
+				`<p style="color:#0d6efd; text-align:center; padding:15px;">
+					⏳ Đang tải lịch sử thao tác cá nhân ngày
+					<b>${selectedDateStr}</b>...
+				</p>`;
+
+
+			const db =
+				firebase.firestore();
+
+
+			// ========================================================
+			// 4. TẠO KHOẢNG THỜI GIAN CỦA NGÀY
+			// ========================================================
+
+			const [
+				year,
+				month,
+				day
+			] = dateParts;
+
+
+			const startOfDay =
+				new Date(
+					year,
+					month - 1,
+					day,
+					0,
+					0,
+					0,
+					0
+				);
+
+
+			const startOfNextDay =
+				new Date(
+					year,
+					month - 1,
+					day + 1,
+					0,
+					0,
+					0,
+					0
+				);
+
+
+			const startTimestamp =
+				firebase.firestore.Timestamp.fromDate(
+					startOfDay
+				);
+
+			const endTimestamp =
+				firebase.firestore.Timestamp.fromDate(
+					startOfNextDay
+				);
+
+
+			// ========================================================
+			// 5. CHỈ ĐỌC:
+			//    - ĐÚNG MODULE
+			//    - ĐÚNG NGÀY
+			//    - ĐÚNG NGƯỜI ĐĂNG NHẬP
+			// ========================================================
+
+			const snapshot =
+				await db
+					.collection("organizations")
+					.doc(orgId)
+					.collection("academicYears")
+					.doc(academicId)
+					.collection("modulesData")
+					.doc(moduleId)
+					.collection("auditLogs")
+					.where(
+						"updaterEmail",
+						"==",
+						myEmail
+					)
+					.where(
+						"timestamp",
+						">=",
+						startTimestamp
+					)
+					.where(
+						"timestamp",
+						"<",
+						endTimestamp
+					)
+					.get();
+
+
+			// ========================================================
+			// 6. LẤY LOG
+			// ========================================================
 
 			const myLogs = [];
 
 			snapshot.forEach(doc => {
-				const log = doc.data();
-				
-				// Kiểm tra khớp email cá nhân
-				const logEmail = (log.updaterEmail || "").toLowerCase().trim();
-				if (logEmail !== myEmail) return; // Bỏ qua nếu không phải log của mình
 
-				// Xử lý chuyển đổi Firestore Timestamp sang dạng YYYY-MM-DD
-				let logDateStr = '';
-				if (log.timestamp) {
-					const logDate = typeof log.timestamp.toDate === 'function' ? log.timestamp.toDate() : new Date(log.timestamp);
-					const y = logDate.getFullYear();
-					const m = String(logDate.getMonth() + 1).padStart(2, '0');
-					const d = String(logDate.getDate()).padStart(2, '0');
-					logDateStr = `${y}-${m}-${d}`;
-				}
+				const log =
+					doc.data();
 
-				// Lọc đúng log của ngày được chọn
-				if (logDateStr === selectedDateStr) {
-					myLogs.push(log);
-				}
+				myLogs.push({
+					...log,
+
+					// Giữ document ID nếu sau này cần thao tác
+					_docId: doc.id
+				});
 			});
 
-			container.innerHTML = '';
+
+			// ========================================================
+			// 7. KHÔNG CÓ LOG
+			// ========================================================
+
+			container.innerHTML = "";
 
 			if (myLogs.length === 0) {
-				container.innerHTML = `<p style="color:#6c757d; font-style:italic; text-align: center; padding: 15px;">Bạn chưa thực hiện thao tác nhập liệu nào trong ngày <b>${selectedDateStr}</b>.</p>`;
+
+				container.innerHTML =
+					`<p style="color:#6c757d;
+							   font-style:italic;
+							   text-align:center;
+							   padding:15px;">
+						Bạn chưa thực hiện thao tác nhập liệu nào
+						trong ngày <b>${selectedDateStr}</b>.
+					</p>`;
+
 				return;
 			}
 
-			// Sắp xếp log theo thời gian mới nhất lên đầu
+
+			// ========================================================
+			// 8. SẮP XẾP MỚI NHẤT → CŨ NHẤT
+			// ========================================================
+
 			myLogs.sort((a, b) => {
-				const timeA = a.timestamp && typeof a.timestamp.toDate === 'function' ? a.timestamp.toDate().getTime() : new Date(a.timestamp || 0).getTime();
-				const timeB = b.timestamp && typeof b.timestamp.toDate === 'function' ? b.timestamp.toDate().getTime() : new Date(b.timestamp || 0).getTime();
+
+				const timeA =
+					a.timestamp &&
+					typeof a.timestamp.toDate === "function"
+						? a.timestamp.toDate().getTime()
+						: new Date(
+							a.timestamp || 0
+						).getTime();
+
+
+				const timeB =
+					b.timestamp &&
+					typeof b.timestamp.toDate === "function"
+						? b.timestamp.toDate().getTime()
+						: new Date(
+							b.timestamp || 0
+						).getTime();
+
+
 				return timeB - timeA;
 			});
 
-			const cardDiv = document.createElement('div');
-			cardDiv.style.cssText = "background: white; border: 1px solid #dee2e6; border-radius: 6px; padding: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);";
+
+			// ========================================================
+			// 9. TẠO CARD
+			// ========================================================
+
+			const cardDiv =
+				document.createElement("div");
+
+
+			cardDiv.style.cssText =
+				"background:white;" +
+				"border:1px solid #dee2e6;" +
+				"border-radius:6px;" +
+				"padding:12px;" +
+				"box-shadow:0 1px 3px rgba(0,0,0,0.05);";
+
 
 			let logsHtml = `
-				<div style="border-bottom: 1px solid #eee; padding-bottom: 6px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
-					<b style="color: #084298; font-size: 1.05em;"><i class="fa-solid fa-user-pen"></i> Lịch sử thao tác của bạn</b>
-					<span style="background: #e7f1ff; color: #0d6efd; padding: 2px 8px; border-radius: 10px; font-weight: bold; font-size: 0.85em;">${myLogs.length} lượt thao tác</span>
+				<div style="
+					border-bottom:1px solid #eee;
+					padding-bottom:6px;
+					margin-bottom:8px;
+					display:flex;
+					justify-content:space-between;
+					align-items:center;
+				">
+					<b style="
+						color:#084298;
+						font-size:1.05em;
+					">
+						<i class="fa-solid fa-user-pen"></i>
+						Lịch sử thao tác của bạn
+					</b>
+
+					<span style="
+						background:#e7f1ff;
+						color:#0d6efd;
+						padding:2px 8px;
+						border-radius:10px;
+						font-weight:bold;
+						font-size:0.85em;
+					">
+						${myLogs.length} lượt thao tác
+					</span>
 				</div>
-				<ul style="margin: 0; padding-left: 18px; font-size: 0.9em; color: #333;">
+
+				<ul style="
+					margin:0;
+					padding-left:18px;
+					font-size:0.9em;
+					color:#333;
+				">
 			`;
 
+
+			// ========================================================
+			// 10. RENDER LOG
+			// ========================================================
+
 			myLogs.forEach(log => {
-				const logDateObj = log.timestamp && typeof log.timestamp.toDate === 'function' ? log.timestamp.toDate() : new Date(log.timestamp || Date.now());
-				const timeStr = logDateObj.toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'});
-				
-				const actionTitle = log.action || "Cập nhật dữ liệu";
-				const entityId = log.entityId || "Không rõ";
 
-				// Lấy thông tin tên học sinh/nhân sự tương ứng từ danh sách hiện có
-				const entityInfo = (typeof currentEmployeeEntities !== 'undefined' ? currentEmployeeEntities : []).find(e => e.id === entityId || e.entityId === entityId) || {};
-				const entityName = entityInfo.name || entityInfo.fullName || entityId;
+				const logDateObj =
+					log.timestamp &&
+					typeof log.timestamp.toDate === "function"
+						? log.timestamp.toDate()
+						: new Date(
+							log.timestamp || Date.now()
+						);
 
-				// Hiển thị chi tiết thay đổi
+
+				const timeStr =
+					logDateObj.toLocaleTimeString(
+						"vi-VN",
+						{
+							hour: "2-digit",
+							minute: "2-digit"
+						}
+					);
+
+
+				const actionTitle =
+					log.action ||
+					"Cập nhật dữ liệu";
+
+
+				const entityId =
+					log.entityId ||
+					"Không rõ";
+
+
+				// ====================================================
+				// TÌM NHÂN SỰ TỪ GLOBAL STATE
+				// ====================================================
+
+				const entities =
+					Array.isArray(
+						window.currentEmployeeEntitiesGlobal
+					)
+						? window.currentEmployeeEntitiesGlobal
+						: [];
+
+
+				const entityInfo =
+					entities.find(e =>
+						e.code === entityId ||
+						e.id === entityId ||
+						e.entityId === entityId
+					) || {};
+
+
+				const entityName =
+					entityInfo.fullName ||
+					entityInfo.name ||
+					entityId;
+
+
+				// ====================================================
+				// CHI TIẾT THAY ĐỔI
+				// ====================================================
+
 				let changeDetailsStr = "";
-				if (log.changes && typeof log.changes === 'object') {
-					const changedFields = Object.keys(log.changes);
-					changeDetailsStr = changedFields.map(f => `<b>${f}</b>: "${log.changes[f]}"`).join("; ");
+
+
+				if (
+					log.changes &&
+					typeof log.changes === "object"
+				) {
+
+					const changedFields =
+						Object.keys(log.changes);
+
+
+					changeDetailsStr =
+						changedFields
+							.map(
+								field =>
+									`<b>${field}</b>: "${log.changes[field]}"`
+							)
+							.join("; ");
 				}
 
+
+				// ====================================================
+				// HTML LOG
+				// ====================================================
+
 				logsHtml += `
-					<li style="margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px dashed #f1f1f1;">
-						<span style="color: #198754; font-weight: bold;">[${actionTitle}]</span> 
-						Lúc <b>${timeStr}</b> cho học sinh/nhân sự: <b style="color: #0d6efd;">${entityName} (Mã: ${entityId})</b>
-						${changeDetailsStr ? `<br><span style="color: #666; font-size: 0.95em; padding-left: 15px;">👉 Nội dung: ${changeDetailsStr}</span>` : ''}
+					<li style="
+						margin-bottom:8px;
+						padding-bottom:6px;
+						border-bottom:1px dashed #f1f1f1;
+					">
+
+						<span style="
+							color:#198754;
+							font-weight:bold;
+						">
+							[${actionTitle}]
+						</span>
+
+						Lúc
+						<b>${timeStr}</b>
+
+						cho học sinh/nhân sự:
+
+						<b style="
+							color:#0d6efd;
+						">
+							${entityName}
+							(Mã: ${entityId})
+						</b>
+
+						${
+							changeDetailsStr
+								? `
+									<br>
+									<span style="
+										color:#666;
+										font-size:0.95em;
+										padding-left:15px;
+									">
+										👉 Nội dung:
+										${changeDetailsStr}
+									</span>
+								`
+								: ""
+						}
+
 					</li>
 				`;
 			});
 
-			logsHtml += '</ul>';
-			cardDiv.innerHTML = logsHtml;
-			container.appendChild(cardDiv);
+
+			// ========================================================
+			// 11. HOÀN THIỆN CARD
+			// ========================================================
+
+			logsHtml += "</ul>";
+
+			cardDiv.innerHTML =
+				logsHtml;
+
+			container.appendChild(
+				cardDiv
+			);
+
 
 		} catch (error) {
-			console.error("Lỗi nạp nhật ký cá nhân:", error);
-			container.innerHTML = `<p style="color:red; text-align: center; padding: 15px;">Lỗi tải nhật ký cá nhân: ${error.message}</p>`;
+
+			console.error(
+				"Lỗi nạp nhật ký cá nhân:",
+				error
+			);
+
+
+			container.innerHTML =
+				`<p style="
+					color:red;
+					text-align:center;
+					padding:15px;
+				">
+					Lỗi tải nhật ký cá nhân:
+					${error.message}
+				</p>`;
 		}
 	}
 	//	EMPLOYEE PANEL - THẺ 3
