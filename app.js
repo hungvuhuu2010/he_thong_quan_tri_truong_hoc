@@ -136,6 +136,7 @@ console.log("Bắt đầu phân quyền cho user:");
   });
 });
 
+
 // ==========================================
 // 2. XỬ LÝ ĐĂNG NHẬP & PHÂN QUYỀN
 // ==========================================
@@ -2405,7 +2406,8 @@ async function handleCreateSchoolAdmin(event) {
 		} catch (error) {
 			console.error("❌ Lỗi tải phân công:", error);
 		}
-	}async function onAssignMemberRadioChange(memberId, radioElement) {
+	}
+	async function onAssignMemberRadioChange(memberId, radioElement) {
 		card2SelectedMemberId = memberId;
 
 		// Highlight giao diện radio item
@@ -5368,63 +5370,278 @@ async function handleCreateSchoolAdmin(event) {
 	
 	//	3.1. Khởi tạo danh sách nhân sự
 	//===========================
-	async function loadCard3StaffMembers(forceRefresh = false) {
-		const radioContainer = document.getElementById("card3-members-radio-container");
-		const categorySelect = document.getElementById("select-card3-group-category");
-		if (!radioContainer) return;
+async function loadCard3StaffMembers(forceRefresh = false) {
+    const container = document.getElementById("card3-members-checkbox-container");
+    const summary = document.getElementById("card3-selected-summary");
 
-		// 1. Khởi tạo mảng cache riêng cho Thẻ 3 trên window
-		window.card3CachedMembers = window.card3CachedMembers || [];
+    if (!container) return;
 
-		// 2. Nếu đã có cache và không ép làm mới -> dùng luôn dữ liệu trong RAM
-		if (!forceRefresh && window.card3CachedMembers.length > 0) {
-			populateCard3Categories(window.card3CachedMembers, categorySelect);
-			renderCard3StaffRadio(window.card3CachedMembers);
-			return;
-		}
+    try {
+        container.innerHTML = `
+            <div style="padding: 10px; text-align: center; color: #6c757d;">
+                <i>Đang tải danh sách nhân sự...</i>
+            </div>
+        `;
 
-		radioContainer.innerHTML = '<div style="padding: 10px; text-align: center; color: #6c757d;">Đang tải danh sách giáo viên...</div>';
+        // --------------------------------------------------------
+        // 1. Dùng chung cache nhân sự của Thẻ 2
+        // --------------------------------------------------------
+        window.card2CachedMembers = window.card2CachedMembers || [];
 
-		try {
-			// 3. Lấy orgId đồng bộ chuẩn như Thẻ 2
-			const orgId = window.currentOrgIdGlobal;
-			if (!orgId) {
-				radioContainer.innerHTML = '<div style="padding: 10px; text-align: center; color: red;">Không tìm thấy thông tin tổ chức!</div>';
-				return;
-			}
+        // Nếu chưa có cache hoặc người dùng yêu cầu làm mới,
+        // gọi đúng hàm nạp dữ liệu của Thẻ 2.
+        if (
+            forceRefresh ||
+            !Array.isArray(window.card2CachedMembers) ||
+            window.card2CachedMembers.length === 0
+        ) {
+            if (typeof loadCard2MembersData === "function") {
+                await loadCard2MembersData(forceRefresh);
+            }
+        }
 
-			const db = firebase.firestore();
-			const snapshot = await db.collection("organizations").doc(orgId).collection("users").get();
+        const members = Array.isArray(window.card2CachedMembers)
+            ? window.card2CachedMembers
+            : [];
 
-			window.card3CachedMembers = [];
-			snapshot.forEach(doc => {
-				const data = doc.data();
-				const role = (data.role || "").toUpperCase();
-				
-				// 4. Lọc chỉ lấy giáo viên (TEACHER) và chuẩn hóa ID giống Thẻ 2
-				if (role === "TEACHER") {
-					window.card3CachedMembers.push({ 
-						id: data.code || data.id || doc.id, // Dùng Mã định danh làm id chính cho đồng bộ
-						docId: doc.id,                      // ID ngẫu nhiên của Firestore
-						...data 
-					});
-				}
-			});
+        // --------------------------------------------------------
+        // 2. Lọc nhân sự phù hợp cho Thẻ 3
+        //    Giữ logic giống Thẻ 2:
+        //    - Không lấy ADMIN
+        //    - Không lấy STUDENT / HỌC SINH
+        // --------------------------------------------------------
+        const staffMembers = members
+            .filter(member => {
+                const role = String(member.role || "").trim().toUpperCase();
+                const category = String(member.category || "").trim().toUpperCase();
 
-			populateCard3Categories(window.card3CachedMembers, categorySelect);
+                if (role === "ADMIN") return false;
+                if (role === "STUDENT") return false;
+                if (category === "HỌC SINH") return false;
 
-			if (window.card3CachedMembers.length === 0) {
-				radioContainer.innerHTML = '<div style="padding: 10px; text-align: center; color: #6c757d; font-style: italic;">Không tìm thấy nhân sự giáo viên nào trong hệ thống.</div>';
-				return;
-			}
+                return true;
+            })
+            .map(member => {
+                const code = String(
+                    member.code ||
+                    member.memberId ||
+                    member.id ||
+                    member.docId ||
+                    ""
+                ).trim();
 
-			renderCard3StaffRadio(window.card3CachedMembers);
+                const uid = String(
+                    member.uid ||
+                    member.docId ||
+                    member.id ||
+                    ""
+                ).trim();
 
-		} catch (error) {
-			console.error("Lỗi tải nhân sự cho Thẻ 3:", error);
-			radioContainer.innerHTML = '<div style="padding: 10px; text-align: center; color: red;">Lỗi tải dữ liệu từ máy chủ.</div>';
-		}
-	}
+                return {
+                    ...member,
+                    id: code || uid,
+                    code: code,
+                    uid: uid,
+                    docId: member.docId || member.id || ""
+                };
+            })
+            .filter(member => member.id);
+
+        // --------------------------------------------------------
+        // 3. Không có nhân sự
+        // --------------------------------------------------------
+        if (staffMembers.length === 0) {
+            container.innerHTML = `
+                <div style="padding: 12px; text-align: center; color: #6c757d; font-style: italic;">
+                    Không tìm thấy nhân sự phù hợp.
+                </div>
+            `;
+
+            if (summary) {
+                summary.textContent = "Đã chọn: 0 nhân sự";
+            }
+
+            return;
+        }
+
+        // --------------------------------------------------------
+        // 4. Lưu cache dùng riêng cho Thẻ 3 nhưng lấy nguồn từ
+        //    cache chung của Thẻ 2.
+        // --------------------------------------------------------
+        window.card3CachedMembers = staffMembers;
+
+        // --------------------------------------------------------
+        // 5. Render checkbox nhân sự
+        // --------------------------------------------------------
+        renderCard3StaffCheckboxes(staffMembers);
+
+        // Cập nhật số lượng đã chọn sau khi render
+        if (typeof updateCard3SelectedMembersSummary === "function") {
+            updateCard3SelectedMembersSummary();
+        } else if (summary) {
+            summary.textContent = "Đã chọn: 0 nhân sự";
+        }
+
+    } catch (error) {
+        console.error("Lỗi tải nhân sự cho Thẻ 3:", error);
+
+        container.innerHTML = `
+            <div style="padding: 12px; text-align: center; color: #dc3545;">
+                Không thể tải danh sách nhân sự.
+            </div>
+        `;
+
+        if (summary) {
+            summary.textContent = "Đã chọn: 0 nhân sự";
+        }
+    }
+}
+
+// ============================================================
+// 3.2. RENDER CHECKBOX NHÂN SỰ
+// ============================================================
+function renderCard3StaffCheckboxes(membersToRender = null) {
+    const container = document.getElementById("card3-members-checkbox-container");
+    if (!container) return;
+
+    const members = Array.isArray(membersToRender)
+        ? membersToRender
+        : (Array.isArray(window.card3CachedMembers)
+            ? window.card3CachedMembers
+            : []);
+
+    if (members.length === 0) {
+        container.innerHTML = `
+            <div style="padding: 10px; text-align: center; color: #6c757d;">
+                Không có nhân sự để hiển thị.
+            </div>
+        `;
+        return;
+    }
+
+    const html = members
+        .slice()
+        .sort((a, b) =>
+            String(a.fullName || a.displayName || a.name || "")
+                .localeCompare(
+                    String(b.fullName || b.displayName || b.name || ""),
+                    "vi"
+                )
+        )
+        .map(member => {
+            const code = String(
+                member.code ||
+                member.memberId ||
+                member.id ||
+                member.docId ||
+                ""
+            ).trim();
+
+            const uid = String(
+                member.uid ||
+                member.docId ||
+                ""
+            ).trim();
+
+            const fullName = String(
+                member.fullName ||
+                member.displayName ||
+                member.name ||
+                "Chưa có tên"
+            ).trim();
+
+            const email = String(member.email || "").trim();
+            const category = String(
+                member.category ||
+                member.homeroom ||
+                member.department ||
+                ""
+            ).trim();
+
+            return `
+                <label
+                    class="card3-member-item"
+                    data-member-code="${escapeHtmlCard3(code)}"
+                    data-member-name="${escapeHtmlCard3(fullName)}"
+                    data-member-email="${escapeHtmlCard3(email)}"
+                    style="
+                        display: flex;
+                        align-items: flex-start;
+                        gap: 8px;
+                        padding: 8px;
+                        margin-bottom: 4px;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        border-bottom: 1px solid #f1f1f1;
+                    "
+                    onmouseover="this.style.background='#f8f9fa'"
+                    onmouseout="this.style.background='transparent'"
+                >
+                    <input
+                        type="checkbox"
+                        name="chk_assign_member"
+                        value="${escapeHtmlCard3(code)}"
+                        data-member-code="${escapeHtmlCard3(code)}"
+                        data-member-uid="${escapeHtmlCard3(uid)}"
+                        data-member-email="${escapeHtmlCard3(email)}"
+                        data-member-name="${escapeHtmlCard3(fullName)}"
+                        onchange="updateCard3SelectedMembersSummary()"
+                        style="margin-top: 3px;"
+                    >
+
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="font-weight: 600; color: #212529;">
+                            ${escapeHtmlCard3(fullName)}
+                        </div>
+
+                        <div style="font-size: 0.85em; color: #6c757d; margin-top: 2px;">
+                            <span>Mã: <b>${escapeHtmlCard3(code || "—")}</b></span>
+                            ${email
+                                ? `<span style="margin-left: 12px;">Email: ${escapeHtmlCard3(email)}</span>`
+                                : ""}
+                            ${category
+                                ? `<span style="margin-left: 12px;">Tổ/Lớp: ${escapeHtmlCard3(category)}</span>`
+                                : ""}
+                        </div>
+                    </div>
+                </label>
+            `;
+        })
+        .join("");
+
+    container.innerHTML = html;
+}
+
+// ============================================================
+// 3.3. HÀM ESCAPE HTML AN TOÀN
+// ============================================================
+function escapeHtmlCard3(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+// ============================================================
+// 3.4. CẬP NHẬT SỐ LƯỢNG NHÂN SỰ ĐÃ CHỌN
+// ============================================================
+function updateCard3SelectedMembersSummary() {
+    const summary = document.getElementById("card3-selected-summary");
+    const container = document.getElementById("card3-members-checkbox-container");
+
+    if (!container) return;
+
+    const checked = container.querySelectorAll(
+        'input[name="chk_assign_member"]:checked'
+    );
+
+    if (summary) {
+        summary.textContent = `Đã chọn: ${checked.length} nhân sự`;
+    }
+}
+
 
 	// Hàm phụ trợ đổ dữ liệu tổ chuyên môn vào ô select của Thẻ 3
 	function populateCard3Categories(teacherList, categorySelect) {
@@ -5543,20 +5760,54 @@ async function handleCreateSchoolAdmin(event) {
 	  renderCard3StaffRadio(filtered);
 	}
 
-	// Tìm kiếm nhân sự thời gian thực theo tên hoặc email
-	function filterCard3MembersByKeyword() {
-	  const searchInput = document.getElementById("card3-member-search");
-	  const keyword = searchInput ? searchInput.value.toLowerCase().trim() : "";
+// ============================================================
+// 3.5. TÌM NHÂN SỰ THEO HỌ TÊN / EMAIL / MÃ ĐỊNH DANH
+// ============================================================
+function filterCard3MembersByKeyword() {
+    const input = document.getElementById("card3-member-search");
+    const container = document.getElementById("card3-members-checkbox-container");
 
-	  const container = document.getElementById("card3-members-radio-container");
-	  if (!container) return;
+    if (!input || !container) return;
 
-	  const items = container.querySelectorAll(".card3-staff-item");
-	  items.forEach(item => {
-		const text = item.textContent.toLowerCase();
-		item.style.display = text.includes(keyword) ? "flex" : "none";
-	  });
-	}
+    const keyword = String(input.value || "")
+        .trim()
+        .toLowerCase();
+
+    const items = container.querySelectorAll(".card3-member-item");
+
+    items.forEach(item => {
+        const name = String(item.dataset.memberName || "").toLowerCase();
+        const email = String(item.dataset.memberEmail || "").toLowerCase();
+        const code = String(item.dataset.memberCode || "").toLowerCase();
+
+        const matched =
+            !keyword ||
+            name.includes(keyword) ||
+            email.includes(keyword) ||
+            code.includes(keyword);
+
+        item.style.display = matched ? "flex" : "none";
+    });
+}
+
+// ============================================================
+// 3.6. CHỌN TẤT CẢ / BỎ CHỌN TẤT CẢ NHÂN SỰ
+// ============================================================
+function selectAllCard3Members(selectAll = true) {
+    const container = document.getElementById("card3-members-checkbox-container");
+    if (!container) return;
+
+    const checkboxes = container.querySelectorAll(
+        'input[name="chk_assign_member"]'
+    );
+
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = !!selectAll;
+    });
+
+    updateCard3SelectedMembersSummary();
+}
+
 	//  CẬP NHẬT DANH SÁCH BÀI TOÁN
 	// Hàm render danh sách checkbox bài toán cho Phần 3.3 (Dùng chung cachedModulesList)
 	async function renderAssignModulesCheckboxes(selectedModuleIds = [], forceRefresh = false) {
@@ -5605,112 +5856,535 @@ async function handleCreateSchoolAdmin(event) {
 	//===========================
 	//	LƯU PHÂN CÔNG NHIỆM VỤ
 	//===========================
-	document.getElementById("form-assign-permission").addEventListener("submit", async function(event) {
-		event.preventDefault();
+document.getElementById("form-assign-permission").addEventListener("submit", async function(event) {
+    event.preventDefault();
 
-		const selectedRadio = document.querySelector("input[name='selected_staff_radio']:checked");
-		if (!selectedRadio) {
-			alert("Vui lòng chọn một nhân sự/giáo viên cần phân công!");
-			return;
-		}
+    // =========================================================
+    // 1. LẤY NHIỀU NHÂN SỰ ĐƯỢC CHỌN
+    //    Logic mới: 1 Module -> nhiều nhân sự
+    // =========================================================
+    const selectedStaffCheckboxes = document.querySelectorAll(
+        "#card3-members-checkbox-container input[type='checkbox']:checked"
+    );
 
-		const staffUid = selectedRadio.value;
-		const staffName = selectedRadio.getAttribute("data-name");
-		const staffEmail = selectedRadio.getAttribute("data-email");
-		const staffRole = selectedRadio.getAttribute("data-role");
+    if (!selectedStaffCheckboxes.length) {
+        alert("Vui lòng chọn ít nhất một nhân sự/giáo viên cần phân công!");
+        return;
+    }
 
-		if (!staffEmail) {
-			alert("Nhân sự này chưa có email, không thể lưu phân công theo hệ thống chuẩn!");
-			return;
-		}
+    // =========================================================
+    // 2. LẤY CÁC MODULE ĐƯỢC CHỌN
+    // =========================================================
+    const selectedModules = [];
 
-		const teacherEmail = String(staffEmail).toLowerCase().trim();
+    const moduleCheckboxes = document.querySelectorAll(
+        "#assign-modules-checkboxes input[name='chk_assign_module']:checked"
+    );
 
-		// Thu thập danh sách các bài toán module được tích chọn
-		const selectedModules = [];
-		const moduleCheckboxes = document.querySelectorAll("#assign-modules-checkboxes input[name='chk_assign_module']:checked");
-		moduleCheckboxes.forEach(chk => {
-			selectedModules.push(chk.value);
-		});
+    moduleCheckboxes.forEach(chk => {
+        const moduleId = String(chk.value || "").trim();
+        if (moduleId && !selectedModules.includes(moduleId)) {
+            selectedModules.push(moduleId);
+        }
+    });
 
-		if (selectedModules.length === 0) {
-			alert("Vui lòng tích chọn ít nhất một Bài toán Module cấp quyền!");
-			return;
-		}
+    if (!selectedModules.length) {
+        alert("Vui lòng tích chọn ít nhất một Bài toán Module cấp quyền!");
+        return;
+    }
 
-		const msgElem = document.getElementById("assign-msg");
-		if (msgElem) {
-			msgElem.style.color = "blue";
-			msgElem.textContent = "Đang lưu phân công nhiệm vụ...";
-		}
+    // =========================================================
+    // 3. CHUẨN HÓA THÔNG TIN NHÂN SỰ
+    // =========================================================
+    const selectedStaff = [];
 
-		try {
-			const user = firebase.auth().currentUser;
-			if (!user) {
-				alert("Vui lòng đăng nhập lại!");
-				return;
-			}
+    selectedStaffCheckboxes.forEach(chk => {
+        const memberId = String(
+            chk.getAttribute("data-member-code") ||
+            chk.getAttribute("data-code") ||
+            chk.getAttribute("data-member-id") ||
+            chk.value ||
+            ""
+        ).trim();
 
-			// 🌟 SỬA ĐOẠN NÀY: Đồng bộ cách lấy orgId giống hàm saveTeachingAssignments đang chạy đúng
-			const orgId = window.currentOrgIdGlobal || (typeof getCurrentAdminOrgId === 'function' ? await getCurrentAdminOrgId(user.uid) : null);
-			if (!orgId) {
-				alert("Không tìm thấy thông tin đơn vị (OrgId)! Vui lòng kiểm tra lại phiên đăng nhập.");
-				if (msgElem) msgElem.textContent = "Lỗi: Không tìm thấy thông tin đơn vị.";
-				return;
-			}
+        const fullName = String(
+            chk.getAttribute("data-member-name") ||
+            chk.getAttribute("data-name") ||
+            ""
+        ).trim();
 
-			// Lấy ID năm học chuẩn
-			let academicYearId = currentAcademicYear || "";
-			const yearsArr = window.currentAcademicYearIdGlobal || window.currentAcademicYearsGlobal;
-			if (!academicYearId && Array.isArray(yearsArr) && yearsArr.length > 0) {
-				const lastYearItem = yearsArr[yearsArr.length - 1];
-				academicYearId = String(typeof lastYearItem === 'object' && lastYearItem !== null ? (lastYearItem.id || lastYearItem.name || lastYearItem.year) : lastYearItem).trim();
-			}
+        const email = String(
+            chk.getAttribute("data-member-email") ||
+            chk.getAttribute("data-email") ||
+            ""
+        ).trim().toLowerCase();
 
-			if (!academicYearId) {
-				alert("Không xác định được năm học hiện tại.");
-				return;
-			}
+        const role = String(
+            chk.getAttribute("data-role") ||
+            ""
+        ).trim();
 
-			const db = firebase.firestore();
-			
-			// Lưu phân công vào assignments
-			await db.collection("organizations")
-					.doc(orgId)
-					.collection("academicYears")
-					.doc(academicYearId)
-					.collection("assignments")
-					.doc(teacherEmail)
-					.set({
-						email: teacherEmail,
-						memberId: staffUid,
-						fullName: staffName,
-						role: staffRole,
-						modules: selectedModules,
-						updatedAt: (typeof getVietnamTimestamp === 'function' ? getVietnamTimestamp() : new Date().toISOString())
-					}, { merge: true });
+        const uid = String(
+            chk.getAttribute("data-member-uid") ||
+            chk.getAttribute("data-uid") ||
+            chk.getAttribute("data-user-uid") ||
+            ""
+        ).trim();
 
-			if (msgElem) {
-				msgElem.style.color = "green";
-				msgElem.textContent = `Phân công module cho [${staffName}] thành công!`;
-			}
+        if (!memberId && !email) return;
 
-			if (typeof loadAssignedUsersListByModule === 'function') {
-				loadAssignedUsersListByModule();
-			}
+        selectedStaff.push({
+            memberId,
+            fullName,
+            email,
+            role,
+            uid
+        });
+    });
 
-		} catch (error) {
-			console.error("Lỗi lưu phân công:", error);
-			if (msgElem) {
-				msgElem.style.color = "red";
-				if (error.code === 'permission-denied' || error.message.includes("Missing or insufficient permissions")) {
-					msgElem.textContent = "Lỗi phân quyền: Tài khoản của bạn không đủ quyền Admin để thực hiện thao tác này.";
-				} else {
-					msgElem.textContent = "Lỗi: " + error.message;
-				}
-			}
-		}
-	});
+    if (!selectedStaff.length) {
+        alert("Không lấy được thông tin nhân sự đã chọn. Vui lòng kiểm tra lại danh sách nhân sự.");
+        return;
+    }
+
+    // Kiểm tra email vì cấu trúc assignments hiện tại dùng email làm document ID.
+    const staffWithoutEmail = selectedStaff.filter(item => !item.email);
+
+    if (staffWithoutEmail.length) {
+        const names = staffWithoutEmail
+            .map(item => item.fullName || item.memberId || "Nhân sự không xác định")
+            .join(", ");
+
+        alert(
+            "Các nhân sự sau chưa có email nên không thể lưu theo cấu trúc phân công hiện tại:\n\n" +
+            names
+        );
+        return;
+    }
+
+    const msgElem = document.getElementById("assign-msg");
+
+    if (msgElem) {
+        msgElem.style.color = "blue";
+        msgElem.textContent =
+            `Đang lưu ${selectedModules.length} module cho ${selectedStaff.length} nhân sự...`;
+    }
+
+    try {
+        // =====================================================
+        // 4. KIỂM TRA ĐĂNG NHẬP
+        // =====================================================
+        const user = firebase.auth().currentUser;
+
+        if (!user) {
+            alert("Vui lòng đăng nhập lại!");
+            return;
+        }
+
+        // =====================================================
+        // 5. LẤY ORG ID
+        // =====================================================
+        const orgId =
+            window.currentOrgIdGlobal ||
+            (
+                typeof getCurrentAdminOrgId === "function"
+                    ? await getCurrentAdminOrgId(user.uid)
+                    : null
+            );
+
+        if (!orgId) {
+            alert("Không tìm thấy thông tin đơn vị (OrgId)! Vui lòng kiểm tra lại phiên đăng nhập.");
+
+            if (msgElem) {
+                msgElem.style.color = "red";
+                msgElem.textContent = "Lỗi: Không tìm thấy thông tin đơn vị.";
+            }
+
+            return;
+        }
+
+        // =====================================================
+        // 6. LẤY NĂM HỌC
+        // =====================================================
+        let academicYearId =
+            window.currentAcademicYear ||
+            window.currentAcademicYearIdGlobal ||
+            "";
+
+        if (typeof academicYearId === "object" && academicYearId !== null) {
+            academicYearId =
+                academicYearId.id ||
+                academicYearId.name ||
+                academicYearId.year ||
+                "";
+        }
+
+        if (!academicYearId) {
+            const yearsArr = window.currentAcademicYearsGlobal;
+
+            if (Array.isArray(yearsArr) && yearsArr.length > 0) {
+                const lastYearItem = yearsArr[yearsArr.length - 1];
+
+                academicYearId =
+                    typeof lastYearItem === "object" && lastYearItem !== null
+                        ? (
+                            lastYearItem.id ||
+                            lastYearItem.name ||
+                            lastYearItem.year ||
+                            ""
+                        )
+                        : lastYearItem;
+            }
+        }
+
+        academicYearId = String(academicYearId || "").trim();
+
+        if (!academicYearId) {
+            alert("Không xác định được năm học hiện tại!");
+            return;
+        }
+
+        // =====================================================
+        // 7. GHI PHÂN CÔNG CHO TỪNG NHÂN SỰ
+        //
+        // Một người có thể nhận nhiều module.
+        // Nhiều người có thể cùng nhận một module.
+        //
+        // Giữ nguyên cấu trúc dữ liệu cũ:
+        // assignments/{email}
+        // {
+        //    email,
+        //    memberId,
+        //    fullName,
+        //    role,
+        //    modules: [...]
+        // }
+        // =====================================================
+        const db = firebase.firestore();
+
+        const assignmentsRef = db
+            .collection("organizations")
+            .doc(orgId)
+            .collection("academicYears")
+            .doc(academicYearId)
+            .collection("assignments");
+
+        let successCount = 0;
+        const failedStaff = [];
+
+        for (const staff of selectedStaff) {
+            try {
+                const teacherEmail = String(staff.email || "").trim().toLowerCase();
+
+                if (!teacherEmail) {
+                    failedStaff.push({
+                        name: staff.fullName || staff.memberId,
+                        error: "Thiếu email"
+                    });
+                    continue;
+                }
+
+                // Đọc phân công hiện tại của nhân sự.
+                // Mục tiêu: BỔ SUNG module mới, tuyệt đối không xóa module cũ.
+                const assignmentRef = assignmentsRef.doc(teacherEmail);
+                const existingSnap = await assignmentRef.get();
+
+                const existingData = existingSnap.exists
+                    ? (existingSnap.data() || {})
+                    : {};
+
+                const oldModules = Array.isArray(existingData.modules)
+                    ? existingData.modules.map(id => String(id || "").trim()).filter(Boolean)
+                    : [];
+
+                // Hợp nhất Module cũ + Module mới, đồng thời loại bỏ trùng.
+                const mergedModules = [
+                    ...new Set([
+                        ...oldModules,
+                        ...selectedModules
+                    ])
+                ];
+
+                await assignmentRef.set({
+                    email: teacherEmail,
+
+                    // Ưu tiên mã định danh làm memberId.
+                    // UID chỉ lưu dự phòng cho dữ liệu mới.
+                    memberId:
+                        staff.memberId ||
+                        existingData.memberId ||
+                        staff.uid ||
+                        existingData.uid ||
+                        "",
+
+                    uid:
+                        staff.uid ||
+                        existingData.uid ||
+                        "",
+
+                    fullName:
+                        staff.fullName ||
+                        existingData.fullName ||
+                        "",
+
+                    role:
+                        staff.role ||
+                        existingData.role ||
+                        "TEACHER",
+
+                    // QUAN TRỌNG:
+                    // Không thay thế danh sách Module cũ.
+                    // Chỉ bổ sung các Module mới được chọn.
+                    modules: mergedModules,
+
+                    updatedAt: (
+                        typeof getVietnamTimestamp === "function"
+                            ? getVietnamTimestamp()
+                            : new Date().toISOString()
+                    )
+                }, {
+                    merge: true
+                });
+
+                successCount++;
+
+            } catch (staffError) {
+                console.error(
+                    "Lỗi lưu phân công cho nhân sự:",
+                    staff,
+                    staffError
+                );
+
+                failedStaff.push({
+                    name: staff.fullName || staff.memberId || staff.email,
+                    error: staffError.message || "Lỗi không xác định"
+                });
+            }
+        }
+
+        // =====================================================
+        // 8. THÔNG BÁO KẾT QUẢ
+        // =====================================================
+        if (failedStaff.length === 0) {
+            if (msgElem) {
+                msgElem.style.color = "green";
+                msgElem.textContent =
+                    `Phân công thành công ${selectedModules.length} module cho ${successCount} nhân sự.`;
+            }
+        } else if (successCount > 0) {
+            const failedNames = failedStaff
+                .map(item => item.name)
+                .join(", ");
+
+            if (msgElem) {
+                msgElem.style.color = "#b26a00";
+                msgElem.textContent =
+                    `Đã lưu ${successCount} nhân sự, nhưng có ${failedStaff.length} nhân sự lỗi: ${failedNames}`;
+            }
+        } else {
+            if (msgElem) {
+                msgElem.style.color = "red";
+                msgElem.textContent =
+                    "Không lưu được phân công cho nhân sự nào.";
+            }
+        }
+
+        // =====================================================
+        // 9. CẬP NHẬT CACHE PHÂN CÔNG NẾU ĐANG CÓ
+        // =====================================================
+        if (typeof window.allAssignmentsCache === "object" &&
+            window.allAssignmentsCache !== null) {
+
+            for (const staff of selectedStaff) {
+                const teacherEmail = String(staff.email || "").trim().toLowerCase();
+
+                if (!teacherEmail) continue;
+
+                window.allAssignmentsCache[teacherEmail] = {
+                    ...(window.allAssignmentsCache[teacherEmail] || {}),
+                    email: teacherEmail,
+                    memberId: staff.memberId || staff.uid || "",
+                    uid: staff.uid || "",
+                    fullName: staff.fullName || "",
+                    role: staff.role || "TEACHER",
+                    modules: (() => {
+                        const cachedOldModules =
+                            Array.isArray(window.allAssignmentsCache[teacherEmail]?.modules)
+                                ? window.allAssignmentsCache[teacherEmail].modules
+                                : [];
+
+                        return [
+                            ...new Set([
+                                ...cachedOldModules,
+                                ...selectedModules
+                            ])
+                        ];
+                    })(),
+                    updatedAt: (
+                        typeof getVietnamTimestamp === "function"
+                            ? getVietnamTimestamp()
+                            : new Date().toISOString()
+                    )
+                };
+            }
+        }
+
+        // =====================================================
+        // 10. TẢI LẠI BẢNG RÀ SOÁT
+        // =====================================================
+        if (typeof loadAssignedUsersListByModule === "function") {
+            await loadAssignedUsersListByModule();
+        }
+
+    } catch (error) {
+        console.error("Lỗi lưu phân công:", error);
+
+        if (msgElem) {
+            msgElem.style.color = "red";
+
+            if (
+                error.code === "permission-denied" ||
+                String(error.message || "").includes("Missing or insufficient permissions")
+            ) {
+                msgElem.textContent =
+                    "Lỗi phân quyền: Tài khoản của bạn không đủ quyền Admin để thực hiện thao tác này.";
+            } else {
+                msgElem.textContent = "Lỗi: " + (error.message || error);
+            }
+        }
+    }
+});
+
+// ============================================================
+// LỌC BẢNG RÀ SOÁT PHÂN CÔNG THEO HỌ TÊN + TỔ/LỚP
+// Dùng cùng HTML:
+//   #assigned-users-search-name
+//   #assigned-users-search-category
+//   #assigned-users-filter-count
+// ============================================================
+function filterAssignedUsersTable() {
+    const nameInput = document.getElementById("assigned-users-search-name");
+    const categoryInput = document.getElementById("assigned-users-search-category");
+    const tableBody = document.getElementById("assigned-users-table-body");
+    const countElem = document.getElementById("assigned-users-filter-count");
+
+    if (!tableBody) return;
+
+    const nameKeyword = String(nameInput?.value || "")
+        .trim()
+        .toLowerCase();
+
+    const categoryKeyword = String(categoryInput?.value || "")
+        .trim()
+        .toLowerCase();
+
+    const rows = Array.from(tableBody.querySelectorAll("tr"));
+
+    let visibleCount = 0;
+    let totalDataRows = 0;
+
+    rows.forEach(row => {
+        const cells = row.querySelectorAll("td");
+
+        // Bỏ qua dòng thông báo "Đang tải...", "Không có dữ liệu..."...
+        if (cells.length < 3) {
+            return;
+        }
+
+        totalDataRows++;
+
+        const fullName = String(cells[0].textContent || "")
+            .trim()
+            .toLowerCase();
+
+        const category = String(cells[1].textContent || "")
+            .trim()
+            .toLowerCase();
+
+        const matchName =
+            !nameKeyword ||
+            fullName.includes(nameKeyword);
+
+        const matchCategory =
+            !categoryKeyword ||
+            category.includes(categoryKeyword);
+
+        const visible = matchName && matchCategory;
+
+        row.style.display = visible ? "" : "none";
+
+        if (visible) {
+            visibleCount++;
+        }
+    });
+
+    if (countElem) {
+        if (!nameKeyword && !categoryKeyword) {
+            countElem.textContent =
+                totalDataRows > 0
+                    ? `Tổng: ${totalDataRows} người`
+                    : "";
+        } else {
+            countElem.textContent =
+                `Hiển thị: ${visibleCount}/${totalDataRows} người`;
+        }
+    }
+}
+
+
+// ============================================================
+// HỖ TRỢ: XÓA BỘ LỌC TÌM KIẾM
+// Có thể gọi từ nút khác nếu cần.
+// ============================================================
+function clearAssignedUsersTableFilters() {
+    const nameInput = document.getElementById("assigned-users-search-name");
+    const categoryInput = document.getElementById("assigned-users-search-category");
+
+    if (nameInput) nameInput.value = "";
+    if (categoryInput) categoryInput.value = "";
+
+    filterAssignedUsersTable();
+}
+
+
+// ============================================================
+// QUAN TRỌNG:
+// Sau khi loadAssignedUsersListByModule() render lại tbody,
+// tự áp dụng lại bộ lọc hiện tại.
+// ============================================================
+function wrapLoadAssignedUsersListByModuleForFilter() {
+    if (typeof window === "undefined") return;
+
+    const originalLoad =
+        window.loadAssignedUsersListByModule;
+
+    if (typeof originalLoad !== "function") {
+        return;
+    }
+
+    // Tránh bọc hàm nhiều lần.
+    if (originalLoad.__assignedUsersFilterWrapped) {
+        return;
+    }
+
+    async function wrappedLoadAssignedUsersListByFilter(...args) {
+        const result = await originalLoad.apply(this, args);
+
+        // Cho DOM hoàn tất việc render tbody trước khi lọc.
+        setTimeout(() => {
+            filterAssignedUsersTable();
+        }, 0);
+
+        return result;
+    }
+
+    wrappedLoadAssignedUsersListByModule.__assignedUsersFilterWrapped = true;
+
+    window.loadAssignedUsersListByModule =
+        wrappedLoadAssignedUsersListByFilter;
+};
+
+
 	
 	let cachedAssignmentsList = [];
 
@@ -22142,3 +22816,96 @@ async function loadPotentialAssistantsForHelp(orgId, academicYearId, moduleId, c
 			container.innerHTML = `<p style="color:red; text-align: center; padding: 15px;">Lỗi tải nhật ký: ${error.message}</p>`;
 		}
 	}
+	
+// ============================================================
+// FULLSCREEN API
+// ============================================================
+
+async function toggleFullscreen() {
+    try {
+        // Đang ở fullscreen -> thoát
+        if (document.fullscreenElement) {
+            await document.exitFullscreen();
+            return;
+        }
+
+        // Chưa fullscreen -> bật fullscreen
+        const root = document.documentElement;
+
+        if (root.requestFullscreen) {
+            await root.requestFullscreen();
+        } else if (root.webkitRequestFullscreen) {
+            await root.webkitRequestFullscreen();
+        } else if (root.msRequestFullscreen) {
+            await root.msRequestFullscreen();
+        } else {
+            console.warn(
+                "Trình duyệt không hỗ trợ Fullscreen API."
+            );
+        }
+
+    } catch (error) {
+        console.error(
+            "Lỗi Fullscreen API:",
+            error
+        );
+    }
+}
+
+
+// ============================================================
+// CẬP NHẬT ICON NÚT FULLSCREEN
+// ============================================================
+
+function updateFullscreenButton() {
+    const btn =
+        document.getElementById("btn-full-screen");
+
+    if (!btn) return;
+
+    const icon =
+        btn.querySelector("i");
+
+    if (document.fullscreenElement) {
+
+        btn.title =
+            "Thoát toàn màn hình";
+
+        if (icon) {
+            icon.className =
+                "fa-solid fa-compress";
+        }
+
+    } else {
+
+        btn.title =
+            "Toàn màn hình";
+
+        if (icon) {
+            icon.className =
+                "fa-solid fa-expand";
+        }
+    }
+}
+
+
+// ============================================================
+// THEO DÕI TRẠNG THÁI FULLSCREEN
+// ============================================================
+
+document.addEventListener(
+    "fullscreenchange",
+    updateFullscreenButton
+);
+
+document.addEventListener(
+    "webkitfullscreenchange",
+    updateFullscreenButton
+);
+
+
+// Cập nhật trạng thái ban đầu
+document.addEventListener(
+    "DOMContentLoaded",
+    updateFullscreenButton
+);
