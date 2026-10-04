@@ -571,92 +571,133 @@
 				  </summary>
 
 				  <form id="form-assign-permission" style="margin-top: 10px;">
-					
-					<!-- BƯỚC 1: KHỐI CHỌN GIÁO VIÊN / HỌC SINH DẠNG LISTBOX TÌM KIẾM NHANH -->
-					  <div style="background: #f8f9fa; padding: 12px; border-radius: 6px; border: 1px solid #dee2e6; margin-bottom: 15px;">
-						<h4 style="margin-top: 0; color: #0d6efd;">
-						  <i class="fa-solid fa-user-check"></i> 1. Chọn Nhân sự / Giáo viên cần phân công:
-						</h4>
-						
-						<div style="display: flex; gap: 15px; flex-wrap: wrap;">
-						  
-						  <!-- CỘT 1: LỌC THEO TỔ CHUYÊN MÔN / ĐƠN VỊ -->
-						  <div style="width: 220px;">
-							<label><b>Lọc Tổ / Đơn vị:</b></label><br>
-							<select id="select-card3-group-category" onchange="filterCard3MembersByCategory()" style="padding: 6px; width: 100%; margin-top: 4px; border-radius: 4px; border: 1px solid #ccc;">
-							  <option value="">-- Tất cả Tổ/Đơn vị --</option>
-							</select>
-						  </div>
 
-						  <!-- CỘT 2: KHUNG CUỘN DANH SÁCH NHÂN SỰ TẠI THẺ 3 -->
-						  <div style="flex: 1; min-width: 280px;">
-							<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-							  <label><b>Danh sách Nhân sự (Click chọn 1 người):</b></label>
-							  <input type="text" id="card3-member-search" oninput="filterCard3MembersByKeyword()" placeholder="🔍 Tìm tên hoặc mã..." style="padding: 3px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85em; width: 160px;">
-							</div>
+					<!-- BƯỚC 1: CHỌN MODULE / NHIỆM VỤ TRƯỚC -->
+					<fieldset style="border: 1px solid #0d6efd; padding: 12px; border-radius: 6px; background: #f8f9fa; margin-bottom: 15px;">
+					  <legend style="color: #0d6efd; font-weight: bold;">
+						1. Chọn Bài toán Module / Nhiệm vụ cần phân công
+					  </legend>
 
-							<!-- KHUNG CUỘN RADIO LISTBOX CỦA THẺ 3 -->
-							<div id="card3-members-radio-container" style="max-height: 160px; overflow-y: auto; border: 1px solid #ccc; padding: 6px; border-radius: 4px; background: #fff;">
-							  <i style="color: #6c757d; font-size: 0.9em;">Đang tải danh sách nhân sự...</i>
-							</div>
-						  </div>
+					  <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap;">
+						<input type="text"
+							   id="assign-mod-search-input"
+							   oninput="filterAssignModulesCheckboxes()"
+							   placeholder="🔍 Tìm theo Mã hoặc Tên Bài toán Module..."
+							   style="flex: 1; min-width: 240px; padding: 7px 9px; border: 1px solid #ccc; border-radius: 4px;">
 
+						<button type="button"
+								onclick="selectAllAssignModules(true)"
+								style="padding: 6px 10px; cursor: pointer; background: #e7f1ff; color: #0d6efd; border: 1px solid #b6d4fe; border-radius: 4px; font-weight: bold;">
+						  <i class="fa-solid fa-check-double"></i> Chọn tất cả
+						</button>
+
+						<button type="button"
+								onclick="selectAllAssignModules(false)"
+								style="padding: 6px 10px; cursor: pointer; background: #fff; color: #6c757d; border: 1px solid #ccc; border-radius: 4px;">
+						  <i class="fa-solid fa-xmark"></i> Bỏ chọn
+						</button>
+					  </div>
+
+					  <div id="assign-modules-checkboxes"
+						   style="max-height: 220px; overflow-y: auto; background: #fff; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+						<p style="color: #6c757d; margin: 0;">
+						  <i>Đang tải danh sách bài toán...</i>
+						</p>
+					  </div>
+					</fieldset>
+
+					<!-- BƯỚC 2: CHỌN NHIỀU NHÂN SỰ -->
+					<fieldset style="border: 1px solid #198754; padding: 12px; border-radius: 6px; background: #f8f9fa; margin-bottom: 15px;">
+					  <legend style="color: #198754; font-weight: bold;">
+						2. Chọn Nhân sự được giao nhiệm vụ
+					  </legend>
+
+					  <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap;">
+						<input type="text"
+							   id="card3-member-search"
+							   oninput="filterCard3MembersByKeyword()"
+							   placeholder="🔍 Tìm theo Họ tên, Email hoặc Mã định danh..."
+							   style="flex: 1; min-width: 240px; padding: 7px 9px; border: 1px solid #ccc; border-radius: 4px;">
+
+						<button type="button"
+								onclick="selectAllCard3Members(true)"
+								style="padding: 6px 10px; cursor: pointer; background: #e8f5e9; color: #198754; border: 1px solid #a3cfbb; border-radius: 4px; font-weight: bold;">
+						  <i class="fa-solid fa-user-check"></i> Chọn tất cả
+						</button>
+
+						<button type="button"
+								onclick="selectAllCard3Members(false)"
+								style="padding: 6px 10px; cursor: pointer; background: #fff; color: #6c757d; border: 1px solid #ccc; border-radius: 4px;">
+						  <i class="fa-solid fa-user-xmark"></i> Bỏ chọn
+						</button>
+					  </div>
+
+					  <div id="card3-members-checkbox-container"
+						   style="max-height: 260px; overflow-y: auto; border: 1px solid #ccc; padding: 6px; border-radius: 4px; background: #fff;">
+						<div style="padding: 10px; text-align: center; color: #6c757d;">
+						  <i>Đang tải danh sách nhân sự...</i>
 						</div>
 					  </div>
 
-					<!-- BƯỚC 2: TÍCH CHỌN MODULE BÀI TOÁN -->
-					<fieldset style="border: 1px solid #198754; padding: 10px; border-radius: 6px; background: #fafafa; margin-bottom: 15px;">
-					  <legend style="color: #198754; font-weight: bold;">2. Tích chọn các Bài toán Module cấp quyền thực hiện:</legend>
-
-						  <!-- THANH TÌM KIẾM THỜI GIAN THỰC VÀ NÚT CHỌN NHANH -->
-						  <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap;">
-							<input type="text" 
-								   id="assign-mod-search-input" 
-								   oninput="filterAssignModulesCheckboxes()" 
-								   placeholder="🔍 Tìm theo Mã hoặc Tên Bài toán Module..." 
-								   style="flex: 1; min-width: 200px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85em;">
-							
-							<button type="button" 
-									onclick="selectAllAssignModules(true)" 
-									style="padding: 3px 8px; font-size: 0.8em; cursor: pointer; background: #e7f1ff; color: #0d6efd; border: 1px solid #b6d4fe; border-radius: 3px; font-weight: bold;">
-							  <i class="fa-solid fa-check-double"></i> Chọn tất cả
-							</button>
-
-							<button type="button" 
-									onclick="selectAllAssignModules(false)" 
-									style="padding: 3px 8px; font-size: 0.8em; cursor: pointer; background: #f8f9fa; color: #6c757d; border: 1px solid #ccc; border-radius: 3px;">
-							  <i class="fa-solid fa-xmark"></i> Bỏ chọn
-							</button>
-						  </div>
-
-						  <!-- KHUNG CUỘN DANH SÁCH CHECKBOX MODULE -->
-						  <div id="assign-modules-checkboxes" style="max-height: 160px; overflow-y: auto; background: #fff; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
-							<p style="color: #6c757d; margin: 0;"><i>Đang tải danh sách bài toán...</i></p>
-						  </div>				  
-					  
-					  
+					  <div id="card3-selected-summary"
+						   style="margin-top: 8px; color: #495057; font-size: 0.9em;">
+						Đã chọn: 0 nhân sự
+					  </div>
 					</fieldset>
 
-					<button type="submit" style="padding: 10px 20px; background: #0d6efd; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+					<button type="submit"
+							style="padding: 10px 20px; background: #0d6efd; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
 					  <i class="fa-solid fa-floppy-disk"></i> Lưu phân công nhiệm vụ
 					</button>
+
 				  </form>
 
 				  <p id="assign-msg" style="color: green; margin-top: 8px;"></p>
 
 				  <br><hr><br>
 
-				  <!-- BẢNG RÀ SOÁT ĐÃ PHÂN CÔNG (CÓ KHUNG BỌC BẢO VỆ CHỐNG TRÀN) -->
-				  <div style="background: #e7f1ff; padding: 10px; border-radius: 6px; margin-bottom: 10px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
-					<label style="font-weight: bold; color: #084298;"><i class="fa-solid fa-filter"></i> Lọc rà soát theo Module:</label>
-					<select id="select-assigned-filter-module" onchange="loadAssignedUsersListByModule()" style="padding: 6px; font-weight: bold; border-radius: 4px; border: 1px solid #0d6efd;"></select>
-					<button type="button" onclick="loadAssignedUsersListByModule()" style="padding: 6px 12px; cursor: pointer; border-radius: 4px; border: 1px solid #ccc; background: #fff;">
-					  <i class="fa-solid fa-rotate"></i> Làm mới
-					</button>
+				  <!-- BẢNG RÀ SOÁT PHÂN CÔNG -->
+				  <div style="background: #e7f1ff; padding: 10px; border-radius: 6px; margin-bottom: 10px;">
+					<div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+						<label style="font-weight: bold; color: #084298;">
+						  <i class="fa-solid fa-filter"></i> Lọc rà soát:
+						</label>
+
+						<select id="select-assigned-filter-module"
+								onchange="loadAssignedUsersListByModule()"
+								style="padding: 6px; font-weight: bold; border-radius: 4px; border: 1px solid #0d6efd;">
+						</select>
+
+						<input type="text"
+								id="assigned-users-search-name"
+								oninput="filterAssignedUsersTable()"
+								placeholder="🔍 Tìm theo tên..."
+								style="padding: 6px 9px; min-width: 180px; border: 1px solid #adb5bd; border-radius: 4px;">
+
+						<input type="text"
+								id="assigned-users-search-category"
+								oninput="filterAssignedUsersTable()"
+								placeholder="🔍 Tìm theo Tổ/Lớp..."
+								style="padding: 6px 9px; min-width: 160px; border: 1px solid #adb5bd; border-radius: 4px;">
+
+						<button type="button"
+								onclick="loadAssignedUsersListByModule()"
+								style="padding: 6px 12px; cursor: pointer; border-radius: 4px; border: 1px solid #ccc; background: #fff;">
+						  <i class="fa-solid fa-rotate"></i> Làm mới
+						</button>
+
+						<span id="assigned-users-filter-count"
+							  style="font-size: 0.9em; color: #495057; font-weight: 600;">
+						</span>
+					</div>
 				  </div>
 
 				  <div class="dynamic-table-scroll">
-					<table border="1" class="dynamic-table" cellpadding="8" cellspacing="0" style="width: 100%; min-width: 650px; border-collapse: collapse; table-layout: fixed; box-sizing: border-box;">
+					<table border="1"
+						   class="dynamic-table"
+						   cellpadding="8"
+						   cellspacing="0"
+						   style="width: 100%; min-width: 650px; border-collapse: collapse; table-layout: fixed; box-sizing: border-box;">
 					  <thead>
 						<tr style="background-color: #e9ecef;">
 						  <th style="width: 20%; text-align: left;">Họ và Tên</th>
@@ -665,7 +706,9 @@
 						</tr>
 					  </thead>
 					  <tbody id="assigned-users-table-body">
-						<tr><td colspan="3" style="text-align: center;">Đang tải...</td></tr>
+						<tr>
+						  <td colspan="3" style="text-align: center;">Đang tải...</td>
+						</tr>
 					  </tbody>
 					</table>
 				  </div>
@@ -1618,8 +1661,32 @@
 			id="btn-fab-help" 
 			onclick="openHelpModal()" 
 			title="Cần hỗ trợ nhập liệu"
-			style="position: fixed; bottom: 25px; right: 25px; width: 56px; height: 56px; border-radius: 50%; background: #dc3545; color: white; border: none; box-shadow: 0 4px 10px rgba(0,0,0,0.3); cursor: pointer; z-index: 9999; display: flex; align-items: center; justify-content: center; font-size: 1.4em;">
+			style="position: fixed; bottom: 15px; right: 15px; width: 32px; height: 32px; border-radius: 50%; background: #dc3545; color: white; border: none; box-shadow: 0 4px 10px rgba(0,0,0,0.3); cursor: pointer; z-index: 9999; display: flex; align-items: center; justify-content: center; font-size: 1em;">
 	  <i class="fa-solid fa-hand-holding-hand"></i>
+	</button>
+	<button type="button"
+			id="btn-full-screen"
+			onclick="toggleFullscreen()"
+			title="Toàn màn hình"
+			style="
+				position: fixed;
+				bottom: 50px;
+				right: 15px;
+				width: 36px;
+				height: 36px;
+				border-radius: 50%;
+				background: #198754;
+				color: white;
+				border: none;
+				box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+				cursor: pointer;
+				z-index: 9999;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				font-size: 1em;
+			">
+		<i class="fa-solid fa-expand"></i>
 	</button>
 
 	<!-- 2. MODAL TÌM KIẾM ĐỒNG ĐỘI HỖ TRỢ -->
