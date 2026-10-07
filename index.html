@@ -11,6 +11,14 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+  <!-- Thư viện Excel -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <!-- Thư viện ZIP -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+  <!-- JS của ứng dụng -->
+  <script type="module" src="./your-app.js"></script>
 </head>
 <body>
 
@@ -340,22 +348,8 @@
 							</div>
 							<span style="font-size: 0.8em; background: #e9ecef; color: #495057; padding: 1px 6px; border-radius: 3px;">Hóa</span>
 						  </label>
+						  						  
 						  
-						  <label class="assign-member-item" style="display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; margin-bottom: 3px; cursor: pointer; border-radius: 4px; transition: background 0.2s; background: transparent;" onmouseover="this.style.background='#f0f4f9'" onmouseout="if(!this.querySelector('input').checked) this.style.background='transparent'">
-							<div>
-							  <input type="radio" name="assign_member_radio" class="rb-assign-member" value="GV002" onchange="onAssignMemberRadioChange('GV002', this)" style="margin-right: 8px;">
-							  <b>[GV002]</b> Bùi Văn X
-							</div>
-							<span style="font-size: 0.8em; background: #e9ecef; color: #495057; padding: 1px 6px; border-radius: 3px;">Lý</span>
-						  </label>
-						  
-						  <label class="assign-member-item" style="display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; margin-bottom: 3px; cursor: pointer; border-radius: 4px; transition: background 0.2s; background: transparent;" onmouseover="this.style.background='#f0f4f9'" onmouseout="if(!this.querySelector('input').checked) this.style.background='transparent'">
-							<div>
-							  <input type="radio" name="assign_member_radio" class="rb-assign-member" value="GV003" onchange="onAssignMemberRadioChange('GV003', this)" style="margin-right: 8px;">
-							  <b>[GV003]</b> Lê Đình V
-							</div>
-							<span style="font-size: 0.8em; background: #e9ecef; color: #495057; padding: 1px 6px; border-radius: 3px;">Sinh</span>
-						  </label>
 						</div>
 					  </div>
 
@@ -1282,12 +1276,6 @@
 							   placeholder="Gõ Tên, mã HS/GV hoặc Lớp/Tổ (VD: 10A1)..."
 							   style="flex: 1; min-width: 250px; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 1em;">
 					  
-						<!-- Nút Lưu Tất Cả -->
-						<button type="button" 
-								onclick="saveAllEmployeeEntries()" 
-								style="padding: 10px 20px; background: #198754; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.95em; box-shadow: 0 2px 5px rgba(0,0,0,0.15);">
-							<i class="fa-solid fa-floppy-disk"></i> LƯU TẤT CẢ THAY ĐỔI
-						</button>
 
 						<!-- Nút Làm Mới -->
 						<button type="button" 
@@ -1581,25 +1569,129 @@
 				</div>
 
 			</div>
+			
+			<!-- ========================================================= -->
+			<!-- THẺ 3: NHẬT KÝ BIẾN ĐỘNG -->
+			<!-- ========================================================= -->
 
-			<!-- NỘI DUNG THẺ 3: NHẬT KÝ BIẾN ĐỘNG (Placeholder) -->
-			<div id="emp-tab-sec-3" style="display: none;">
-				<div style="padding: 20px; background: #fff; border: 1px solid #dee2e6; border-radius: 6px;">
-					<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
-						<h3 style="color: #084298; margin: 0;"><i class="fa-solid fa-shield-halved"></i> Nhật ký biến động nhiệm vụ</h3>
-						<div style="display: flex; align-items: center; gap: 8px;">
-							<label for="emp-audit-date-select" style="font-size: 0.9em; font-weight: bold; color: #555;">Chọn ngày:</label>
-							<input type="date" id="emp-audit-date-select" style="padding: 5px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.9em;" onchange="loadAuditLogsTimeline()">
-							<button type="button" onclick="loadAuditLogsTimeline()" style="padding: 5px 12px; background: #0d6efd; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">Xem</button>
-						</div>
-					</div>
-					
-					<!-- Khu vực chứa danh sách nhật ký được gom nhóm -->
-					<div id="audit-logs-timeline">
-						<p style="color: #6c757d; font-style: italic;">Vui lòng chọn ngày để xem lịch sử biến động...</p>
-					</div>
+			<div id="emp-tab-sec-3" class="audit-monitor-card" style="display:none">
+
+			<div class="audit-monitor-header">
+				<div style="min-width:0;">
+					<h3 class="audit-monitor-title">
+						<i class="fa-solid fa-clipboard-check"></i>
+						Theo dõi người nhập liệu
+					</h3>
+					<p class="audit-monitor-subtitle">
+						Theo dõi chi tiết lỗi/sự việc đã được ghi nhận.
+					</p>
 				</div>
 			</div>
+
+
+			<!-- =====================================================
+				 1. THỜI GIAN
+				 Theo đúng yêu cầu:
+				 Thời gian -> ngày bắt đầu -> ngày kết thúc
+				 ===================================================== -->
+			<div class="audit-monitor-time">
+
+				<div class="audit-monitor-time-item">
+					
+					<input type="date"
+						   id="audit-monitor-start-date"
+						   class="audit-monitor-date"
+						   title="Ngày bắt đầu">
+					
+					<i class="fa-solid fa-arrow-right"></i>
+					
+					<input type="date"
+						   id="audit-monitor-end-date"
+						   class="audit-monitor-date"
+						   title="Ngày kết thúc">
+				</div>
+
+			</div>
+
+
+			<!-- =====================================================
+				 2. HAI NÚT CHỌN BỘ LỌC
+				 ===================================================== -->
+			<div class="audit-monitor-filter-block">
+			  <div class="audit-monitor-filter-actions">
+				<button type="button" id="btn-audit-filter-updater"
+						class="audit-monitor-filter-btn"
+						onclick="openAuditMonitorFilterForm('updater')">
+				  <i class="fa-solid fa-user-pen"></i>
+				  <span>Người nhập liệu</span>
+				  <span id="audit-filter-updater-count" class="audit-monitor-filter-badge">0</span>
+				</button>
+
+				<button type="button" id="btn-audit-filter-module"
+						class="audit-monitor-filter-btn"
+						onclick="openAuditMonitorFilterForm('module')">
+				  <i class="fa-solid fa-list-check"></i>
+				  <span>Bài toán được phân công</span>
+				  <span id="audit-filter-module-count" class="audit-monitor-filter-badge">0</span>
+				</button>
+				
+				<!-- Xuất Excel -->
+
+				<button type="button" onclick="exportEmployeeAuditMonitorExcel()" style="padding: 6px 10px; background: #198754; color: white; border: none; border-radius: 4px; cursor: pointer;" title="Xuất dữ liệu ra file excel">
+							<i class="fa-solid fa-file-excel"></i> Xuất Excel
+						</button>
+			  </div>
+			</div>
+
+			<br>
+
+			<!-- =====================================================
+				 4. BẢNG SỐ LIỆU
+				 Phong cách dựa trên .dynamic-table của file mẫu.
+				 ===================================================== -->
+			<div class="audit-monitor-table-scroll">
+
+				<table class="audit-monitor-table">
+
+					<thead>
+						<tr>
+							<th class="audit-monitor-col-time">
+								Thời gian
+							</th>
+
+							<th class="audit-monitor-col-person">
+								Họ và tên
+							</th>
+
+							<th class="audit-monitor-col-code">
+								Mã định danh
+							</th>
+
+							<th class="audit-monitor-col-updater">
+								Người nhập liệu
+							</th>
+
+							<th class="audit-monitor-col-detail">
+								Chi tiết
+							</th>
+						</tr>
+					</thead>
+
+					<tbody id="audit-monitor-table-body">
+						<tr>
+							<td colspan="5"
+								style="padding:20px;text-align:center;color:#6c757d;">
+								Chưa có dữ liệu.
+							</td>
+						</tr>
+					</tbody>
+
+				</table>
+
+			</div>
+
+		</div>
+
 
 			<!-- NỘI DUNG THẺ 4: LỚP CHỦ NHIỆM (CHỈ ĐỌC) -->
 			<div id="emp-tab-sec-4" style="display: none;">
@@ -1718,8 +1810,33 @@
 			id="btn-fab-help" 
 			onclick="openHelpModal()" 
 			title="Cần hỗ trợ nhập liệu"
-			style="position: fixed; bottom: 15px; right: 15px; width: 32px; height: 32px; border-radius: 50%; background: #dc3545; color: white; border: none; box-shadow: 0 4px 10px rgba(0,0,0,0.3); cursor: pointer; z-index: 9999; display: flex; align-items: center; justify-content: center; font-size: 1em;">
+			style="position: fixed; bottom: 15px; right: 15px; width: 28px; height: 28px; border-radius: 50%; background: #dc3545; color: white; border: none; box-shadow: 0 4px 10px rgba(0,0,0,0.3); cursor: pointer; z-index: 9999; display: flex; align-items: center; justify-content: center; font-size: 1em;">
 	  <i class="fa-solid fa-hand-holding-hand"></i>
+	</button>
+	<button type="button"
+			id="btn-fab-save-all"
+			onclick="window.saveAllEmployeeEntries()"
+			title="Lưu tất cả"
+			aria-label="Lưu tất cả"
+			style="
+				position: fixed;
+				bottom: 15px;
+				right: 50px;
+				width: 42px;
+				height: 42px;
+				border-radius: 50%;
+				background: #198754;
+				color: white;
+				border: none;
+				box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+				cursor: pointer;
+				z-index: 9999;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				font-size: 2em;
+			">
+		<i class="fa-solid fa-floppy-disk"></i>
 	</button>
 	<button type="button"
 			id="btn-full-screen"
@@ -1729,8 +1846,8 @@
 				position: fixed;
 				bottom: 50px;
 				right: 15px;
-				width: 36px;
-				height: 36px;
+				width: 28px;
+				height: 28px;
 				border-radius: 50%;
 				background: #198754;
 				color: white;
@@ -1822,6 +1939,55 @@
 
 		  </div>
 		</div>
+		
+		<div id="audit-monitor-filter-modal" class="audit-monitor-filter-modal" style="display:none;">
+		  <div class="audit-monitor-filter-overlay"
+			   onclick="closeAuditMonitorFilterForm()"></div>
+
+		  <div class="audit-monitor-filter-dialog">
+			<div class="audit-monitor-filter-header">
+			  <div class="audit-monitor-filter-title">
+				<i id="audit-monitor-filter-title-icon" class="fa-solid fa-filter"></i>
+				<span id="audit-monitor-filter-title">Lọc danh sách</span>
+			  </div>
+			  <button type="button" class="audit-monitor-filter-close"
+					  onclick="closeAuditMonitorFilterForm()" aria-label="Đóng">
+				<i class="fa-solid fa-xmark"></i>
+			  </button>
+			</div>
+
+			<div class="audit-monitor-filter-body">
+			  <div class="audit-monitor-filter-search-wrap">
+				<i class="fa-solid fa-magnifying-glass"></i>
+				<input type="text" id="audit-monitor-filter-search"
+					   class="audit-monitor-filter-search"
+					   placeholder="Tìm kiếm..." autocomplete="off"
+					   oninput="filterAuditMonitorFilterList()">
+			  </div>
+
+			  <div class="audit-monitor-filter-toolbar">
+				<button type="button" onclick="selectAllAuditMonitorFilterItems(true)">Chọn tất cả</button>
+				<button type="button" onclick="selectAllAuditMonitorFilterItems(false)">Bỏ chọn</button>
+				<span id="audit-monitor-filter-selected-count"
+					  class="audit-monitor-filter-selected-count">Đã chọn: 0</span>
+			  </div>
+
+			  <div id="audit-monitor-filter-list" class="audit-monitor-filter-list">
+				<div class="audit-monitor-filter-empty">Chưa có dữ liệu.</div>
+			  </div>
+			</div>
+
+			<div class="audit-monitor-filter-footer">
+			  <button type="button" class="audit-monitor-filter-btn-cancel"
+					  onclick="closeAuditMonitorFilterForm()">Hủy</button>
+			  <button type="button" class="audit-monitor-filter-btn-apply"
+					  onclick="applyAuditMonitorFilterForm()">
+				<i class="fa-solid fa-check"></i> Áp dụng
+			  </button>
+			</div>
+		  </div>
+		</div>
+
 		
 			<!-- 🌟 MODAL SỬA THÔNG TIN THỰC THỂ (HỌC SINH / NHÂN SỰ) -->
 		<div id="edit-entity-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 9999;">

@@ -211,3 +211,640 @@ button:hover {
     vertical-align: middle;
     overflow-wrap: anywhere;
 }
+
+/* =========================================================
+   CARD THEO DÕI - MOBILE FIRST
+   ========================================================= */
+.audit-monitor-card {
+    width: 100%;
+    box-sizing: border-box;
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 10px;
+}
+
+.audit-monitor-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.audit-monitor-title {
+    margin: 0;
+    color: #084298;
+    font-size: 1rem;
+    line-height: 1.35;
+}
+
+.audit-monitor-subtitle {
+    margin: 3px 0 0;
+    color: #6c757d;
+    font-size: .78rem;
+}
+
+/* =========================================================
+   THỜI GIAN - MOBILE FIRST
+   ========================================================= */
+.audit-monitor-time {
+    width: 100%;
+    margin: 0 0 8px;
+}
+
+.audit-monitor-time-item {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.audit-monitor-time-label {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    white-space: nowrap;
+    margin: 0;
+    padding: 0;
+    line-height: 1.2;
+    font-size: .82rem;
+    font-weight: 600;
+    color: #343a40;
+}
+
+.audit-monitor-date {
+    display: block;
+    flex: 1 1 0;
+    width: 0;
+    min-width: 0;
+    max-width: none;
+    height: 38px;
+    padding: 5px 7px;
+    box-sizing: border-box;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    background: #fff;
+    color: #343a40;
+    font-size: .78rem;
+    line-height: 1.2;
+    outline: none;
+}
+
+.audit-monitor-date:focus {
+    border-color: #86b7fe;
+    box-shadow: 0 0 0 2px rgba(13, 110, 253, .12);
+}
+
+.audit-monitor-time-item > .fa-arrow-right {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 14px;
+    margin: 0;
+    color: #6c757d;
+    font-size: .75rem;
+}
+
+/* Nếu màn hình quá hẹp, vẫn giữ đúng 1 hàng */
+@media (max-width: 360px) {
+    .audit-monitor-time-item {
+        gap: 4px;
+    }
+
+    .audit-monitor-time-label {
+        font-size: .76rem;
+    }
+
+    .audit-monitor-date {
+        height: 36px;
+        padding-left: 5px;
+        padding-right: 5px;
+        font-size: .72rem;
+    }
+
+    .audit-monitor-time-item > .fa-arrow-right {
+        width: 11px;
+        font-size: .68rem;
+    }
+}
+
+/* =========================================================
+   HAI NÚT BỘ LỌC
+   ========================================================= */
+.audit-monitor-filter-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 7px;
+    margin-bottom: 9px;
+}
+
+.audit-monitor-filter-button {
+    min-width: 0;
+    min-height: 42px;
+    padding: 7px 9px;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    background: #f8f9fa;
+    color: #343a40;
+    cursor: pointer;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.audit-monitor-filter-button:active {
+    background: #e9ecef;
+}
+
+.audit-monitor-filter-button-icon {
+    flex: 0 0 auto;
+    width: 27px;
+    height: 27px;
+    border-radius: 50%;
+    background: #e7f1ff;
+    color: #0d6efd;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: .8rem;
+}
+
+.audit-monitor-filter-button-content {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.audit-monitor-filter-button-title {
+    display: block;
+    font-weight: 600;
+    font-size: .82rem;
+    line-height: 1.2;
+}
+
+.audit-monitor-filter-button-value {
+    display: block;
+    color: #6c757d;
+    font-size: .72rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+}
+
+/* =========================================================
+   THÔNG TIN KẾT QUẢ
+   ========================================================= */
+.audit-monitor-summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin: 7px 0 9px;
+}
+
+.audit-monitor-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 7px;
+    border-radius: 4px;
+    background: #e7f1ff;
+    color: #084298;
+    font-size: .74rem;
+}
+
+.audit-monitor-status {
+    color: #6c757d;
+    font-size: .74rem;
+}
+
+/* =========================================================
+   BẢNG - PHONG CÁCH GIỐNG MẪU DYNAMIC-TABLE
+   ========================================================= */
+.audit-monitor-table-scroll {
+    width: 100%;
+    max-height: 58vh;
+    min-height: 160px;
+    overflow-y: auto;
+    overflow-x: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    background: #fff;
+    -webkit-overflow-scrolling: touch;
+}
+
+.audit-monitor-table-wrap {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: auto;
+    box-sizing: border-box;
+}
+
+
+
+.audit-monitor-table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    table-layout: fixed;
+}
+
+
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background-color: #e9ecef;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: normal;
+    text-align: center;
+    vertical-align: middle;
+    padding: 6px;
+    border: 1px solid #dee2e6;
+    box-sizing: border-box;
+    font-size: .76rem;
+    font-weight: 600;
+}
+
+
+.audit-monitor-table td {
+    padding: 6px;
+    border: 1px solid #dee2e6;
+    box-sizing: border-box;
+    vertical-align: middle;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    font-size: .76rem;
+    line-height: 1.3;
+}
+/* 5 cột: vừa toàn bộ chiều ngang laptop */
+.audit-monitor-table th:nth-child(1),
+.audit-monitor-table td:nth-child(1) { width: 13%; }
+
+.audit-monitor-table th:nth-child(2),
+.audit-monitor-table td:nth-child(2) { width: 18%; }
+
+.audit-monitor-table th:nth-child(3),
+.audit-monitor-table td:nth-child(3) { width: 11%; }
+
+.audit-monitor-table th:nth-child(4),
+.audit-monitor-table td:nth-child(4) { width: 20%; }
+
+.audit-monitor-table th:nth-child(5),
+.audit-monitor-table td:nth-child(5) { width: 38%; }
+
+@media (max-width: 900px) {
+    .audit-monitor-table {
+        table-layout: auto;
+        min-width: 760px;
+    }
+
+    .audit-monitor-table th,
+    .audit-monitor-table td {
+        font-size: .75rem;
+        padding: 6px 7px;
+    }
+}
+
+
+.audit-monitor-table tbody tr:nth-child(even) {
+    background: #fafafa;
+}
+
+.audit-monitor-table tbody tr:hover {
+    background: #f1f7ff;
+}
+
+/* Chiều rộng tương đối từng cột */
+.audit-monitor-col-time {
+    min-width: 145px;
+    width: 145px;
+}
+
+.audit-monitor-col-person {
+    min-width: 160px;
+    width: 160px;
+}
+
+.audit-monitor-col-code {
+    min-width: 90px;
+    width: 90px;
+}
+
+.audit-monitor-col-updater {
+    min-width: 155px;
+    width: 155px;
+}
+
+.audit-monitor-col-detail {
+    min-width: 330px;
+    width: 330px;
+}
+
+/* =========================================================
+   MODAL CHỌN DANH SÁCH
+   Phong cách dựa trên form Trợ Giúp Nhập Liệu đã gửi:
+   khung trắng, tiêu đề, ô tìm kiếm, danh sách cuộn,
+   nút Hủy / Áp dụng.
+   ========================================================= */
+.audit-monitor-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0,0,0,.48);
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    box-sizing: border-box;
+}
+
+.audit-monitor-modal.open {
+    display: flex;
+}
+
+.audit-monitor-modal-box {
+    width: 100%;
+    max-width: 480px;
+    max-height: 88vh;
+    overflow: hidden;
+    box-sizing: border-box;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 5px 15px rgba(0,0,0,.3);
+    display: flex;
+    flex-direction: column;
+}
+
+.audit-monitor-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 14px 15px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.audit-monitor-modal-title {
+    margin: 0;
+    color: #0d6efd;
+    font-size: .98rem;
+}
+
+.audit-monitor-modal-close {
+    border: none;
+    background: none;
+    color: #6c757d;
+    font-size: 1.25rem;
+    cursor: pointer;
+    padding: 2px 5px;
+}
+
+.audit-monitor-modal-body {
+    padding: 12px 15px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.audit-monitor-modal-description {
+    margin: 0 0 9px;
+    color: #6c757d;
+    font-size: .8rem;
+    line-height: 1.4;
+}
+
+.audit-monitor-search {
+    width: 100%;
+    height: 38px;
+    box-sizing: border-box;
+    padding: 7px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 5px;
+    margin-bottom: 8px;
+    outline: none;
+    font-size: .82rem;
+}
+
+.audit-monitor-search:focus {
+    border-color: #86b7fe;
+    box-shadow: 0 0 0 .15rem rgba(13,110,253,.12);
+}
+
+.audit-monitor-select-actions {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.audit-monitor-small-button {
+    padding: 5px 8px;
+    border: 1px solid #ced4da;
+    background: #f8f9fa;
+    color: #495057;
+    border-radius: 4px;
+    font-size: .75rem;
+    cursor: pointer;
+}
+
+.audit-monitor-selected-count {
+    margin-left: auto;
+    align-self: center;
+    color: #6c757d;
+    font-size: .74rem;
+}
+
+.audit-monitor-option-list {
+    max-height: 42vh;
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 5px;
+    padding: 5px;
+    -webkit-overflow-scrolling: touch;
+}
+
+.audit-monitor-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 7px;
+    margin-bottom: 2px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.audit-monitor-option:hover {
+    background: #f8f9fa;
+}
+
+.audit-monitor-option input {
+    flex: 0 0 auto;
+    margin: 0;
+}
+
+.audit-monitor-option-text {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.audit-monitor-option-name {
+    display: block;
+    font-size: .82rem;
+    font-weight: 600;
+    color: #343a40;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.audit-monitor-option-meta {
+    display: block;
+    margin-top: 2px;
+    font-size: .7rem;
+    color: #6c757d;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.audit-monitor-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 7px;
+    padding: 10px 15px;
+    border-top: 1px solid #dee2e6;
+}
+
+.audit-monitor-button {
+    min-height: 37px;
+    padding: 7px 13px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: .8rem;
+}
+
+.audit-monitor-button-cancel {
+    border: 1px solid #ced4da;
+    background: #f8f9fa;
+    color: #343a40;
+}
+
+.audit-monitor-button-apply {
+    border: none;
+    background: #198754;
+    color: #fff;
+    font-weight: 600;
+}
+
+
+/* =========================================================
+   MOBILE
+   ========================================================= */
+@media (max-width: 575.98px) {
+    .audit-monitor-card {
+        padding: 9px;
+        border-radius: 6px;
+    }
+
+    .audit-monitor-header {
+        align-items: flex-start;
+    }
+
+    .audit-monitor-title {
+        font-size: .92rem;
+    }
+
+    .audit-monitor-subtitle {
+        font-size: .72rem;
+    }
+
+    .audit-monitor-time {
+        gap: 5px;
+    }
+
+    .audit-monitor-date {
+		height: 36px;
+        font-size: .78rem;
+        padding: 5px;
+    }
+
+    .audit-monitor-arrow {
+        height: 36px;
+        font-size: .72rem;
+    }
+
+    .audit-monitor-filter-button {
+        min-height: 40px;
+        padding: 6px 7px;
+    }
+
+    .audit-monitor-filter-button-title {
+        font-size: .76rem;
+    }
+
+    .audit-monitor-filter-button-value {
+        font-size: .67rem;
+    }
+
+    .audit-monitor-modal {
+        padding: 0;
+        align-items: flex-end;
+    }
+
+    .audit-monitor-modal-box {
+        max-width: none;
+        max-height: 92vh;
+        border-radius: 10px 10px 0 0;
+    }
+
+    .audit-monitor-option-list {
+        max-height: 45vh;
+    }
+
+    .audit-monitor-table-scroll {
+        max-height: 62vh;
+    }
+}
+
+.audit-monitor-filter-block{width:100%;margin:0 0 8px;box-sizing:border-box}
+.audit-monitor-filter-actions{display:flex;gap:8px;width:100%}
+.audit-monitor-filter-btn{flex:1;min-width:0;min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:7px 9px;border:1px solid #ced4da;border-radius:7px;background:#fff;color:#343a40;font-size:.8rem;font-weight:600;cursor:pointer;box-sizing:border-box}
+.audit-monitor-filter-btn span:nth-child(2){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.audit-monitor-filter-badge{min-width:20px;height:20px;padding:0 5px;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;background:#e9ecef;color:#495057;font-size:.7rem}
+.audit-monitor-filter-modal{position:fixed;inset:0;z-index:100000}
+.audit-monitor-filter-overlay{position:absolute;inset:0;background:rgba(0,0,0,.42)}
+.audit-monitor-filter-dialog{position:absolute;left:50%;top:50%;width:min(94vw,520px);max-height:88vh;transform:translate(-50%,-50%);display:flex;flex-direction:column;overflow:hidden;background:#fff;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
+.audit-monitor-filter-header{min-height:48px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-bottom:1px solid #dee2e6}
+.audit-monitor-filter-title{min-width:0;display:flex;align-items:center;gap:7px;font-size:.9rem;font-weight:700}
+.audit-monitor-filter-title span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.audit-monitor-filter-close{width:32px;height:32px;border:0;border-radius:50%;background:transparent;color:#6c757d;cursor:pointer}
+.audit-monitor-filter-body{min-height:0;flex:1;padding:10px;overflow:hidden;display:flex;flex-direction:column;gap:8px}
+.audit-monitor-filter-search-wrap{position:relative}
+.audit-monitor-filter-search-wrap>i{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#868e96}
+.audit-monitor-filter-search{width:100%;height:38px;padding:6px 10px 6px 31px;border:1px solid #ced4da;border-radius:6px;box-sizing:border-box;outline:none}
+.audit-monitor-filter-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.audit-monitor-filter-toolbar button{min-height:30px;padding:4px 8px;border:1px solid #ced4da;border-radius:5px;background:#fff;font-size:.72rem;cursor:pointer}
+.audit-monitor-filter-selected-count{margin-left:auto;color:#6c757d;font-size:.72rem}
+.audit-monitor-filter-list{flex:1;min-height:120px;overflow-y:auto;border:1px solid #dee2e6;border-radius:6px}
+.audit-monitor-filter-item{display:flex;align-items:center;gap:8px;min-height:42px;padding:7px 9px;border-bottom:1px solid #f1f3f5;cursor:pointer;box-sizing:border-box}
+.audit-monitor-filter-item input{flex:0 0 auto;width:16px;height:16px;margin:0}
+.audit-monitor-filter-item-content{flex:1;min-width:0;overflow:hidden}
+.audit-monitor-filter-item-title,.audit-monitor-filter-item-subtitle{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.audit-monitor-filter-item-title{font-size:.8rem;font-weight:600}
+.audit-monitor-filter-item-subtitle{margin-top:2px;color:#6c757d;font-size:.7rem}
+.audit-monitor-filter-empty{padding:24px 12px;text-align:center;color:#868e96;font-size:.78rem}
+.audit-monitor-filter-footer{display:flex;justify-content:flex-end;gap:7px;padding:9px 10px;border-top:1px solid #dee2e6;background:#f8f9fa}
+.audit-monitor-filter-btn-cancel,.audit-monitor-filter-btn-apply{min-height:34px;padding:6px 13px;border-radius:5px;font-size:.78rem;font-weight:600;cursor:pointer}
+.audit-monitor-filter-btn-cancel{border:1px solid #ced4da;background:#fff;color:#495057}
+.audit-monitor-filter-btn-apply{border:1px solid #198754;background:#198754;color:#fff}
+body.audit-monitor-filter-modal-open{overflow:hidden}
+@media(max-width:420px){.audit-monitor-filter-actions{gap:6px}.audit-monitor-filter-btn{min-height:38px;padding:6px 7px;font-size:.74rem}.audit-monitor-filter-dialog{width:calc(100vw - 18px);max-height:90vh}.audit-monitor-filter-body{padding:8px}}

@@ -2072,6 +2072,7 @@ async function handleCreateSchoolAdmin(event) {
 		};
 
 		reader.readAsArrayBuffer(file);
+		syncAdminAssignmentsCacheFromEntities();		
 	}	
 
 		// Ví dụ hàm đọc danh mục Lớp/Tổ từ collection categories thay vì quét toàn bộ users
@@ -2111,46 +2112,263 @@ async function handleCreateSchoolAdmin(event) {
 		const tbody = document.getElementById("entity-table-body");
 		if (!tbody) return;
 
-		// 1. NẾU ĐÃ CÓ CACHE VÀ KHÔNG ÉP LÀM MỚI -> Dùng luôn dữ liệu trong RAM (Tiết kiệm băng thông)
-		if (!forceRefresh && window.isEntitiesCacheLoaded && Array.isArray(window.currentLoadedEntities) && window.currentLoadedEntities.length > 0) {
+		// ============================================================
+		// 1. DÙNG CACHE RAM KHI ĐÃ CÓ
+		//    [] cũng là một cache hợp lệ, không cần đọc lại Firestore.
+		// ============================================================
+		if (
+			!forceRefresh &&
+			window.isEntitiesCacheLoaded === true &&
+			Array.isArray(window.currentLoadedEntities)
+		) {
 			renderEntityTableRows(window.currentLoadedEntities);
 			return;
 		}
 
-		tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #6c757d;">Đang tải dữ liệu từ máy chủ...</td></tr>';
+		// ============================================================
+		// 2. HIỂN THỊ TRẠNG THÁI ĐANG TẢI
+		// ============================================================
+		tbody.innerHTML =
+			'<tr><td colspan="5" style="text-align: center; color: #6c757d;">Đang tải dữ liệu từ máy chủ...</td></tr>';
 
 		try {
-			// Lấy trực tiếp orgId từ biến toàn cục
 			const orgId = window.currentOrgIdGlobal;
+
 			if (!orgId) {
-				tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: red;">Không tìm thấy thông tin tổ chức!</td></tr>';
+				window.isEntitiesCacheLoaded = false;
+				window.currentLoadedEntities = [];
+
+				tbody.innerHTML =
+					'<tr><td colspan="5" style="text-align: center; color: red;">Không tìm thấy thông tin tổ chức!</td></tr>';
 				return;
 			}
 
 			const db = firebase.firestore();
-			// Truy vấn trực tiếp theo cấu trúc: organizations/{orgId}/users
-			const snapshot = await db.collection("organizations").doc(orgId).collection("users").get();
 
-			window.currentLoadedEntities = [];
+			// ========================================================
+			// 3. ĐỌC FIRESTORE CHỈ KHI CACHE KHÔNG CÓ
+			//    HOẶC forceRefresh = true
+			// ========================================================
+			const snapshot = await db
+				.collection("organizations")
+				.doc(orgId)
+				.collection("users")
+				.get();
+
+			const loadedEntities = [];
+
 			snapshot.forEach(doc => {
-				const data = doc.data();
-				const role = (data.role || "").toUpperCase();
-				
-				// Lọc các vai trò TEACHER hoặc STUDENT
-				if (role === "TEACHER" || role === "STUDENT") {
-					window.currentLoadedEntities.push({ id: doc.id, ...data });
+				const data = doc.data() || {};
+				const role = String(data.role || "").trim().toUpperCase();
+
+				// Thẻ 1 hiện chỉ quản lý TEACHER và STUDENT.
+				if (role !== "TEACHER" && role !== "STUDENT") {
+					return;
+				}
+
+				loadedEntities.push({
+					...data,
+
+					// Firebase document ID luôn giữ ở id/docId.
+					id: doc.id,
+					docId: doc.id,
+
+					// Mã nghiệp vụ dùng riêng ở code.
+					code: String(data.code || data.memberId || "").trim(),
+
+					// UID/Auth UID giữ riêng, không ghi đè code.
+					uid: String(data.uid || "").trim(),
+					authUid: String(data.authUid || "").trim(),
+
+					fullName:
+						data.fullName ||
+						data.displayName ||
+						data.name ||
+						"",
+
+					category: String(data.category || "").trim(),
+					email: String(data.email || "").trim().toLowerCase(),
+					role: role
+				});
+			});
+
+			// ========================================================
+			// 4. GHI CACHE THẺ 1
+			// ========================================================
+			window.currentLoadedEntities = loadedEntities;
+			window.isEntitiesCacheLoaded = true;
+
+			// ========================================================
+			// 5. ĐỒNG BỘ CACHE USERS CHUNG
+			// ========================================================
+			if (
+				!window.cachedUsersMap ||
+				typeof window.cachedUsersMap !== "object"
+			) {
+				window.cachedUsersMap = {};
+			}
+
+			loadedEntities.forEach(item => {
+				const cacheItem = {
+					...item,
+					id: item.docId,
+					docId: item.docId,
+					code: item.code,
+					uid: item.uid,
+					authUid: item.authUid,
+					fullName: item.fullName,
+					category: item.category,
+					email: item.email,
+					role: item.role
+				};
+
+				// Ưu tiên document ID.
+				if (item.docId) {
+					window.cachedUsersMap[item.docId] = cacheItem;
+				}
+
+				// Cho phép tra cứu thêm theo code.
+				if (item.code) {
+					window.cachedUsersMap[item.code] = cacheItem;
+				}
+
+				// Cho phép tra cứu legacy theo uid.
+				if (item.uid) {
+					window.cachedUsersMap[item.uid] = cacheItem;
 				}
 			});
 
-			// Đánh dấu đã tải cache thành công trên window để các hàm khác dễ dùng chung
-			window.isEntitiesCacheLoaded = true;
+			// ========================================================
+			// 6. ĐỒNG BỘ CACHE SECTION 1 DAILY
+			// ========================================================
+			if (!window._sec1DailyUsersCache) {
+				window._sec1DailyUsersCache = {};
+			}
+
+			window._sec1DailyUsersCache[orgId] =
+				window._sec1DailyUsersCache[orgId] || {
+					byId: {},
+					byUid: {},
+					byCode: {}
+				};
+
+			const sec1Cache = window._sec1DailyUsersCache[orgId];
+
+			sec1Cache.byId = {};
+			sec1Cache.byUid = {};
+			sec1Cache.byCode = {};
+
+			loadedEntities.forEach(item => {
+				if (item.docId) {
+					sec1Cache.byId[item.docId] = item;
+				}
+
+				if (item.uid) {
+					sec1Cache.byUid[item.uid] = item;
+				}
+
+				if (item.code) {
+					sec1Cache.byCode[item.code] = item;
+				}
+			});
+
+			// ========================================================
+			// 7. ĐỒNG BỘ CACHE SECTION 2 WEEKLY
+			// ========================================================
+			if (!window._sec2UsersCache) {
+				window._sec2UsersCache = {};
+			}
+
+			window._sec2UsersCache[orgId] =
+				window._sec2UsersCache[orgId] || {
+					byId: {},
+					byUid: {},
+					byCode: {}
+				};
+
+			const sec2Cache = window._sec2UsersCache[orgId];
+
+			sec2Cache.byId = {};
+			sec2Cache.byUid = {};
+			sec2Cache.byCode = {};
+
+			loadedEntities.forEach(item => {
+				if (item.docId) {
+					sec2Cache.byId[item.docId] = item;
+				}
+
+				if (item.uid) {
+					sec2Cache.byUid[item.uid] = item;
+				}
+
+				if (item.code) {
+					sec2Cache.byCode[item.code] = item;
+				}
+			});
+
+			// ========================================================
+			// 8. ĐỒNG BỘ CACHE ASSIGNMENT
+			//    Nếu đã có hàm chuyên dụng thì dùng nó.
+			// ========================================================
+			if (
+				typeof syncAdminAssignmentsCacheFromEntities === "function"
+			) {
+				try {
+					syncAdminAssignmentsCacheFromEntities();
+				} catch (syncError) {
+					console.warn(
+						"Không thể đồng bộ cache Assignment:",
+						syncError
+					);
+				}
+			} else {
+				// Fallback: đồng bộ card2/card3 trực tiếp.
+				const assignmentMembers = loadedEntities.map(item => ({
+					...item,
+					id: item.code || item.docId,
+					docId: item.docId,
+					code: item.code,
+					uid: item.uid
+				}));
+
+				if (Array.isArray(window.card2CachedMembers)) {
+					window.card2CachedMembers = assignmentMembers.map(item => ({
+						...item
+					}));
+				}
+
+				if (Array.isArray(window.card3CachedMembers)) {
+					window.card3CachedMembers = assignmentMembers.map(item => ({
+						...item
+					}));
+				}
+			}
+
+			// ========================================================
+			// 9. RENDER THẺ 1
+			// ========================================================
 			renderEntityTableRows(window.currentLoadedEntities);
 
 		} catch (error) {
 			console.error("Lỗi tải danh sách thực thể:", error);
-			tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: red;">Lỗi tải dữ liệu từ cơ sở dữ liệu.</td></tr>';
+
+			// Không phá cache cũ nếu đã có cache hợp lệ.
+			if (
+				!window.isEntitiesCacheLoaded ||
+				!Array.isArray(window.currentLoadedEntities)
+			) {
+				window.isEntitiesCacheLoaded = false;
+				window.currentLoadedEntities = [];
+			}
+
+			tbody.innerHTML =
+				'<tr><td colspan="5" style="text-align: center; color: red;">Lỗi tải dữ liệu từ cơ sở dữ liệu.</td></tr>';
 		}
 	}
+
+	// Cho phép gọi từ HTML hoặc script type="module".
+	window.reloadAndRenderAdminEntityList = reloadAndRenderAdminEntityList;
+
 
 	
 	// ==========================================
@@ -2199,43 +2417,438 @@ async function handleCreateSchoolAdmin(event) {
 
 	// Xóa nhân sự và Hủy kích hoạt
 	async function deleteEntityRecord(docId) {
-		// 1. Hộp thoại xác nhận trước khi xóa tránh bấm nhầm
-		if (!confirm(`Bạn có chắc chắn muốn xóa bản ghi [${docId}] này không?`)) {
+		if (!docId) {
+			alert("Không xác định được ID bản ghi cần xóa!");
 			return;
 		}
 
 		const orgId = window.currentOrgIdGlobal;
 		if (!orgId) {
-			alert("Không tìm thấy thông tin tổ chức!");
+			alert("Không xác định được tổ chức hiện tại!");
+			return;
+		}
+
+		const entityId = String(docId).trim();
+		if (!entityId) {
+			alert("ID bản ghi không hợp lệ!");
+			return;
+		}
+
+		if (!confirm(
+			`Bạn có chắc chắn muốn xóa bản ghi [${entityId}] không?\n\n` +
+			"Thao tác này chỉ xóa hồ sơ trong danh sách thực thể."
+		)) {
 			return;
 		}
 
 		try {
 			const db = firebase.firestore();
 
-			// 2. Thực hiện lệnh xóa document khỏi Firestore
-			// (Đường dẫn này tương ứng với lúc bạn lấy danh sách users trong tổ chức)
+			// 1. Xóa trực tiếp trên Firestore
 			await db.collection("organizations")
 				.doc(orgId)
 				.collection("users")
-				.doc(docId)
+				.doc(entityId)
 				.delete();
 
-			alert(`Đã xóa thành công bản ghi [${docId}]!`);
+			// 2. Cập nhật cache danh sách thực thể hiện tại
+			if (Array.isArray(window.currentLoadedEntities)) {
+				window.currentLoadedEntities =
+					window.currentLoadedEntities.filter(item => {
+						const itemId = String(item?.id || "").trim();
+						const itemUid = String(item?.uid || "").trim();
+						const itemCode = String(
+							item?.code || item?.memberId || ""
+						).trim();
 
-			// 3. 🌟 Gọi trực tiếp hàm tải và vẽ lại bảng quản trị thực thể
-			if (typeof reloadAndRenderAdminEntityList === 'function') {
-				await reloadAndRenderAdminEntityList(true); // Truyền true để ép buộc tải mới từ Firestore
-			} else {
-				// Dự phòng nếu tên hàm khác
-				location.reload(); 
+						return (
+							itemId !== entityId &&
+							itemUid !== entityId &&
+							itemCode !== entityId
+						);
+					});
 			}
 
-		} catch (err) {
-			console.error("Lỗi khi xóa bản ghi:", err);
-			alert("Không thể xóa bản ghi: " + err.message);
+			// 3. Cập nhật cache chung cachedUsersMap
+			if (
+				window.cachedUsersMap &&
+				typeof window.cachedUsersMap === "object"
+			) {
+				const cachedMap = window.cachedUsersMap;
+
+				Object.keys(cachedMap).forEach(key => {
+					const item = cachedMap[key];
+
+					if (!item || typeof item !== "object") {
+						return;
+					}
+
+					const itemKey = String(key).trim();
+					const itemId = String(item.id || "").trim();
+					const itemUid = String(item.uid || "").trim();
+					const itemCode = String(
+						item.code || item.memberId || ""
+					).trim();
+
+					if (
+						itemKey === entityId ||
+						itemId === entityId ||
+						itemUid === entityId ||
+						itemCode === entityId
+					) {
+						delete cachedMap[key];
+					}
+				});
+			}
+
+			// 4. Cập nhật cache riêng của Section 2 Weekly
+			if (
+				window._sec2UsersCache &&
+				window._sec2UsersCache[orgId]
+			) {
+				const sec2Cache = window._sec2UsersCache[orgId];
+
+				if (
+					sec2Cache.byCode &&
+					typeof sec2Cache.byCode === "object"
+				) {
+					Object.keys(sec2Cache.byCode).forEach(code => {
+						const user = sec2Cache.byCode[code];
+
+						if (!user || typeof user !== "object") {
+							return;
+						}
+
+						const userCode = String(
+							user.code || code || ""
+						).trim();
+
+						const userUid = String(
+							user.uid || ""
+						).trim();
+
+						if (
+							String(code).trim() === entityId ||
+							userCode === entityId ||
+							userUid === entityId
+						) {
+							delete sec2Cache.byCode[code];
+						}
+					});
+				}
+
+				if (
+					sec2Cache.byUid &&
+					typeof sec2Cache.byUid === "object"
+				) {
+					Object.keys(sec2Cache.byUid).forEach(uid => {
+						const user = sec2Cache.byUid[uid];
+
+						if (!user || typeof user !== "object") {
+							return;
+						}
+
+						const userUid = String(
+							user.uid || uid || ""
+						).trim();
+
+						const userCode = String(
+							user.code || ""
+						).trim();
+
+						if (
+							String(uid).trim() === entityId ||
+							userUid === entityId ||
+							userCode === entityId
+						) {
+							delete sec2Cache.byUid[uid];
+						}
+					});
+				}
+			}
+
+			// 5. Render lại bảng từ RAM, không đọc lại Firestore
+			
+			if (
+				typeof renderEntityTableRows === "function" &&
+				Array.isArray(window.currentLoadedEntities)
+			) {
+				renderEntityTableRows(
+					window.currentLoadedEntities
+				);
+			}
+
+			// Cache hiện tại vẫn hợp lệ vì đã loại đúng phần tử vừa xóa
+			window.isEntitiesCacheLoaded = true;
+
+			alert(`Đã xóa thành công bản ghi [${entityId}].`);
+			syncAdminAssignmentsCacheFromEntities();
+			
+		} catch (error) {
+			console.error(
+				"❌ Lỗi deleteEntityRecord():",
+				error
+			);
+
+			alert(
+				"Không thể xóa bản ghi.\n\n" +
+				(error?.message || error)
+			);
 		}
 	}
+	
+	// 1. KIỂM TRA USER CÓ ĐANG HOẠT ĐỘNG KHÔNG
+	function isAdminAssignmentMemberActive(member) {
+		if (!member || typeof member !== "object") {
+			return false;
+		}
+
+		// Nếu có cờ boolean thì ưu tiên cờ boolean
+		if (member.isActive === false) return false;
+		if (member.active === false) return false;
+
+		const status = String(
+			member.status ||
+			member.statusCode ||
+			member.accountStatus ||
+			""
+		).trim().toUpperCase();
+
+		if (
+			status === "INACTIVE" ||
+			status === "DISABLED" ||
+			status === "DEACTIVATED" ||
+			status === "LOCKED" ||
+			status === "NGUNG_HOAT_DONG" ||
+			status === "NGỪNG HOẠT ĐỘNG"
+		) {
+			return false;
+		}
+
+		return true;
+	}
+
+	// 2. CHUẨN HÓA 1 USER TỪ CACHE THẺ 1
+	function normalizeAdminAssignmentMember(item) {
+		if (!item || typeof item !== "object") {
+			return null;
+		}
+
+		const docId = String(
+			item.docId ||
+			item.id ||
+			item.uid ||
+			""
+		).trim();
+
+		const uid = String(
+			item.uid ||
+			""
+		).trim();
+
+		const code = String(
+			item.code ||
+			item.memberId ||
+			(
+				item.id &&
+				item.id !== uid
+					? item.id
+					: ""
+			) ||
+			""
+		).trim();
+
+		const fullName = String(
+			item.fullName ||
+			item.displayName ||
+			item.name ||
+			docId ||
+			code ||
+			uid
+		).trim();
+
+		return {
+			...item,
+
+			// docId dùng cho update/delete Firestore
+			docId: docId,
+
+			// code dùng làm mã nghiệp vụ / hiển thị
+			id: code || docId || uid,
+
+			uid: uid,
+
+			code: code,
+
+			fullName: fullName,
+
+			category: String(
+				item.category ||
+				item.className ||
+				""
+			).trim(),
+
+			email: String(
+				item.email ||
+				""
+			).trim().toLowerCase()
+		};
+	}
+
+	// 3. ĐỒNG BỘ CARD2 CACHE TỪ CACHE THẺ 1
+	//
+	// Thẻ 1:
+	//   window.currentLoadedEntities
+	//
+	// Thẻ 5 / Assignments:
+	//   window.card2CachedMembers
+	//
+	// Không đọc Firestore ở đây.
+	// =============================================================
+	function syncCard2MembersFromEntityCache() {
+		const source =
+			Array.isArray(window.currentLoadedEntities)
+				? window.currentLoadedEntities
+				: null;
+
+		if (!source) {
+			return false;
+		}
+
+		const result = [];
+		const seen = new Set();
+
+		source.forEach(item => {
+			if (!item) return;
+
+			const normalized =
+				normalizeAdminAssignmentMember(item);
+
+			if (!normalized) return;
+
+			// Không cho ADMIN vào danh sách phân công
+			const role = String(
+				normalized.role || ""
+			).trim().toUpperCase();
+
+			if (role === "ADMIN") {
+				return;
+			}
+
+			// Loại user đã hủy kích hoạt
+			if (!isAdminAssignmentMemberActive(normalized)) {
+				return;
+			}
+
+			const uniqueKey =
+				normalized.docId ||
+				normalized.uid ||
+				normalized.code ||
+				normalized.id;
+
+			if (!uniqueKey || seen.has(uniqueKey)) {
+				return;
+			}
+
+			seen.add(uniqueKey);
+			result.push(normalized);
+		});
+
+		window.card2CachedMembers = result;
+
+		// Đồng bộ luôn Card 3 vì Card 3 dùng lại cache này
+		window.card3CachedMembers = result;
+
+		return true;
+	}
+	
+	// 4. RENDER LẠI GIAO DIỆN ASSIGNMENTS TỪ CACHE
+	function renderAdminAssignmentsFromCache() {
+		const members =
+			Array.isArray(window.card2CachedMembers)
+				? window.card2CachedMembers
+				: [];
+
+		if (typeof populateCard2Categories === "function") {
+			populateCard2Categories(members);
+		}
+
+		if (typeof renderCard2MemberList === "function") {
+			renderCard2MemberList(members);
+		}
+
+		if (typeof renderDefaultMatricesBoxes === "function") {
+			renderDefaultMatricesBoxes();
+		}
+
+		// Card 3 dùng cùng nguồn cache
+		if (
+			typeof renderCard3MembersList === "function"
+		) {
+			renderCard3MembersList(members);
+		}
+	}
+
+
+	// =============================================================
+	// 7. ĐỒNG BỘ KHI CACHE THẺ 1 THAY ĐỔI
+	//
+	// Gọi hàm này sau khi Thẻ 1:
+	// - thêm user
+	// - sửa user
+	// - xóa user
+	// - thay đổi trạng thái hoạt động
+	//
+	// Nếu Thẻ Assignments đang hiển thị thì render lại ngay.
+	// =============================================================
+	function syncAdminAssignmentsCacheFromEntities() {
+		if (
+			!window.isEntitiesCacheLoaded ||
+			!Array.isArray(window.currentLoadedEntities)
+		) {
+			return;
+		}
+
+		syncCard2MembersFromEntityCache();
+
+		const assignmentsSection =
+			document.getElementById(
+				"admin-sec-assignments"
+			);
+
+		// Chỉ render khi section Assignments đang tồn tại trên DOM
+		if (assignmentsSection) {
+			renderAdminAssignmentsFromCache();
+		}
+	}
+
+
+	// =============================================================
+	// 8. PUBLIC API
+	// =============================================================
+	window.isAdminAssignmentMemberActive =
+		isAdminAssignmentMemberActive;
+
+	window.syncCard2MembersFromEntityCache =
+		syncCard2MembersFromEntityCache;
+
+	window.renderAdminAssignmentsFromCache =
+		renderAdminAssignmentsFromCache;
+
+	window.loadCard2MembersData =
+		loadCard2MembersData;
+
+	window.initAdminAssignmentsTab =
+		initAdminAssignmentsTab;
+
+	window.syncAdminAssignmentsCacheFromEntities =
+		syncAdminAssignmentsCacheFromEntities;
+
+
+	// Cần thiết nếu app.js chạy dạng ES module,
+	// để onclick="deleteEntityRecord(...)" vẫn gọi được.
+	window.deleteEntityRecord = deleteEntityRecord;
+
 	
 	// Mở modal sửa thông tin và điền sẵn dữ liệu cũ
 	async function openEditEntityModal(docId) {
@@ -2332,6 +2945,7 @@ async function handleCreateSchoolAdmin(event) {
 
 		// Đóng modal và vẽ lại bảng ngay lập tức
 		closeEditEntityModal();
+		syncAdminAssignmentsCacheFromEntities();
 		renderEntityTableRows(currentLoadedEntities);
 
 		alert("Cập nhật thông tin thành công!");
@@ -2385,31 +2999,47 @@ async function handleCreateSchoolAdmin(event) {
 	// ==========================================
 	async function activateFilteredAccounts() {
 		const orgId = window.currentOrgIdGlobal;
+
 		if (!orgId) {
 			alert("Không tìm thấy thông tin tổ chức! Vui lòng tải lại trang.");
 			return;
 		}
 
-		// 🌟 1. Lấy danh sách từ mảng cache hiện tại trên RAM
-		let sourceList = window.currentLoadedEntities || [];
-		
-		// Nếu mảng cache đang trống, thử quét ngược lại từ bảng HTML lên để dự phòng
+		// ============================================================
+		// 1. LẤY DANH SÁCH TỪ CACHE THẺ 1
+		// ============================================================
+		let sourceList = Array.isArray(window.currentLoadedEntities)
+			? window.currentLoadedEntities
+			: [];
+
+		// Dự phòng: nếu cache chưa có thì đọc từ bảng HTML hiện tại.
 		if (sourceList.length === 0) {
 			const tbody = document.getElementById("entity-table-body");
+
 			if (tbody) {
+				const fallbackList = [];
+
 				tbody.querySelectorAll("tr").forEach(tr => {
 					if (tr.querySelector("td[colspan]")) return;
+
 					const cols = tr.querySelectorAll("td");
+
 					if (cols.length >= 4) {
-						sourceList.push({
+						fallbackList.push({
 							id: cols[0].textContent.trim(),
+							code: cols[0].textContent.trim(),
 							fullName: cols[1].textContent.trim(),
 							category: cols[2].textContent.trim(),
-							email: cols[3].textContent.trim().toLowerCase() === "chưa có" ? "" : cols[3].textContent.trim(),
-							role: "STUDENT" // Mặc định nếu quét từ bảng
+							email:
+								cols[3].textContent.trim().toLowerCase() === "chưa có"
+									? ""
+									: cols[3].textContent.trim(),
+							role: "STUDENT"
 						});
 					}
 				});
+
+				sourceList = fallbackList;
 			}
 		}
 
@@ -2418,35 +3048,51 @@ async function handleCreateSchoolAdmin(event) {
 			return;
 		}
 
-		// 🌟 2. Áp dụng điều kiện lọc theo từ khóa từ ô tìm kiếm (#entity-search-input) nếu đang có giá trị gõ
+		// ============================================================
+		// 2. LỌC THEO Ô TÌM KIẾM CỦA THẺ 1
+		// ============================================================
 		const searchInput = document.getElementById("entity-search-input");
-		const keyword = searchInput ? searchInput.value.toLowerCase().trim() : "";
-		
+		const keyword = searchInput
+			? String(searchInput.value || "").toLowerCase().trim()
+			: "";
+
 		let targetList = sourceList;
+
 		if (keyword) {
 			targetList = sourceList.filter(item => {
-				const idMatch = (item.id || "").toLowerCase().includes(keyword);
-				const nameMatch = (item.fullName || "").toLowerCase().includes(keyword);
-				const catMatch = (item.category || "").toLowerCase().includes(keyword);
-				const emailMatch = (item.email || "").toLowerCase().includes(keyword);
-				return idMatch || nameMatch || catMatch || emailMatch;
+				const idMatch = String(item.id || "").toLowerCase().includes(keyword);
+				const codeMatch = String(item.code || "").toLowerCase().includes(keyword);
+				const nameMatch = String(item.fullName || "").toLowerCase().includes(keyword);
+				const catMatch = String(item.category || "").toLowerCase().includes(keyword);
+				const emailMatch = String(item.email || "").toLowerCase().includes(keyword);
+
+				return idMatch || codeMatch || nameMatch || catMatch || emailMatch;
 			});
 		}
 
 		if (targetList.length === 0) {
-			alert(`Không tìm thấy đối tượng nào khớp với từ khóa "${keyword}" trên bảng hiển thị!`);
+			alert(
+				`Không tìm thấy đối tượng nào khớp với từ khóa "${keyword}" trên bảng hiển thị!`
+			);
 			return;
 		}
 
-		// 🌟 3. Lọc tiếp các đối tượng thực sự có email hợp lệ
-		const validAccounts = targetList.filter(item => item.email && item.email.includes("@"));
+		// ============================================================
+		// 3. CHỈ XỬ LÝ NHỮNG BẢN GHI CÓ EMAIL HỢP LỆ
+		// ============================================================
+		const validAccounts = targetList.filter(item => {
+			const email = String(item.email || "").trim();
+			return email.includes("@");
+		});
+
 		if (validAccounts.length === 0) {
-			alert(`Có ${targetList.length} bản ghi đang hiển thị nhưng không có bản ghi nào chứa email hợp lệ để tạo tài khoản đăng nhập!`);
+			alert(
+				`Có ${targetList.length} bản ghi đang hiển thị nhưng không có bản ghi nào chứa email hợp lệ để tạo tài khoản đăng nhập!`
+			);
 			return;
 		}
 
-		// Thông báo xác nhận số lượng chính xác theo kết quả đang lọc
-		const confirmMsg = keyword 
+		const confirmMsg = keyword
 			? `Bạn có chắc chắn muốn kích hoạt tài khoản cho ${validAccounts.length} bản ghi đang hiển thị (theo từ khóa "${keyword}")? (Mật khẩu mặc định: 123456)`
 			: `Bạn có chắc chắn muốn kích hoạt tài khoản cho toàn bộ ${validAccounts.length} bản ghi đang hiển thị trên bảng? (Mật khẩu mặc định: 123456)`;
 
@@ -2457,12 +3103,22 @@ async function handleCreateSchoolAdmin(event) {
 		const user = firebase.auth().currentUser;
 		const db = firebase.firestore();
 
-		// 🌟 4. Đọc trước mảng academicYears từ document `emails` của Admin đang đăng nhập
+		// ============================================================
+		// 4. LẤY ACADEMIC YEARS CỦA ADMIN
+		// ============================================================
 		let adminAcademicYears = [];
+
 		try {
 			if (user && user.email) {
-				const adminEmailDoc = await db.collection("emails").doc(user.email.toLowerCase().trim()).get();
-				if (adminEmailDoc.exists && Array.isArray(adminEmailDoc.data().academicYears)) {
+				const adminEmailDoc = await db
+					.collection("emails")
+					.doc(user.email.toLowerCase().trim())
+					.get();
+
+				if (
+					adminEmailDoc.exists &&
+					Array.isArray(adminEmailDoc.data().academicYears)
+				) {
 					adminAcademicYears = adminEmailDoc.data().academicYears;
 				}
 			}
@@ -2470,94 +3126,441 @@ async function handleCreateSchoolAdmin(event) {
 			console.warn("Không lấy được academicYears của admin:", e);
 		}
 
+		// ============================================================
+		// 5. CÁC HÀM ĐỒNG BỘ CACHE
+		// ============================================================
+		function normalizeMember(item) {
+			if (!item) return null;
+
+			const docId = String(
+				item.docId ||
+				item.userDocId ||
+				item.id ||
+				item.uid ||
+				item.code ||
+				""
+			).trim();
+
+			const code = String(
+				item.code ||
+				item.memberId ||
+				item.id ||
+				""
+			).trim();
+
+			const uid = String(
+				item.uid ||
+				item.authUid ||
+				""
+			).trim();
+
+			if (!docId && !code) return null;
+
+			return {
+				...item,
+				id: docId || code,
+				docId: docId || code,
+				code: code,
+				uid: uid,
+				fullName: item.fullName || item.displayName || item.name || "",
+				category: item.category || "",
+				email: item.email || "",
+				role: item.role || "",
+				activated: item.activated === true,
+				authUid: item.authUid || ""
+			};
+		}
+
+		function updateArrayItem(array, updatedItem) {
+			if (!Array.isArray(array) || !updatedItem) return array;
+
+			const normalized = normalizeMember(updatedItem);
+			if (!normalized) return array;
+
+			const index = array.findIndex(item => {
+				const itemDocId = String(
+					item.docId ||
+					item.userDocId ||
+					item.id ||
+					""
+				).trim();
+
+				const itemCode = String(item.code || "").trim();
+
+				return (
+					(normalized.docId && itemDocId === normalized.docId) ||
+					(normalized.code && itemCode === normalized.code)
+				);
+			});
+
+			if (index >= 0) {
+				array[index] = {
+					...array[index],
+					...normalized
+				};
+			} else {
+				array.push(normalized);
+			}
+
+			return array;
+		}
+
+		function syncOneUserToCaches(updatedUser) {
+			const normalized = normalizeMember(updatedUser);
+			if (!normalized) return;
+
+			// --------------------------------------------------------
+			// CACHE THẺ 1
+			// --------------------------------------------------------
+			if (Array.isArray(window.currentLoadedEntities)) {
+				updateArrayItem(window.currentLoadedEntities, normalized);
+			}
+
+			// --------------------------------------------------------
+			// CACHE USERS CHUNG
+			// --------------------------------------------------------
+			if (window.cachedUsersMap && typeof window.cachedUsersMap === "object") {
+				const possibleKeys = [
+					normalized.docId,
+					normalized.id,
+					normalized.code,
+					normalized.uid
+				].filter(Boolean);
+
+				let existingKey = possibleKeys.find(key =>
+					Object.prototype.hasOwnProperty.call(
+						window.cachedUsersMap,
+						key
+					)
+				);
+
+				if (!existingKey) {
+					existingKey = normalized.docId || normalized.code;
+				}
+
+				if (existingKey) {
+					window.cachedUsersMap[existingKey] = {
+						...(window.cachedUsersMap[existingKey] || {}),
+						...normalized
+					};
+				}
+			}
+
+			// --------------------------------------------------------
+			// CACHE THẺ 2
+			// --------------------------------------------------------
+			if (Array.isArray(window.card2CachedMembers)) {
+				updateArrayItem(window.card2CachedMembers, normalized);
+			}
+
+			// --------------------------------------------------------
+			// CACHE THẺ 3
+			// --------------------------------------------------------
+			if (Array.isArray(window.card3CachedMembers)) {
+				updateArrayItem(window.card3CachedMembers, normalized);
+			}
+
+			// --------------------------------------------------------
+			// CACHE SECTION 2 WEEKLY
+			// --------------------------------------------------------
+			const sec2Cache =
+				window._sec2UsersCache &&
+				window._sec2UsersCache[orgId];
+
+			if (sec2Cache) {
+				sec2Cache.byId = sec2Cache.byId || {};
+				sec2Cache.byUid = sec2Cache.byUid || {};
+				sec2Cache.byCode = sec2Cache.byCode || {};
+
+				if (normalized.docId) {
+					sec2Cache.byId[normalized.docId] = normalized;
+				}
+
+				if (normalized.uid) {
+					sec2Cache.byUid[normalized.uid] = normalized;
+				}
+
+				if (normalized.code) {
+					sec2Cache.byCode[normalized.code] = normalized;
+				}
+			}
+
+			// --------------------------------------------------------
+			// CACHE SECTION 1 DAILY
+			// --------------------------------------------------------
+			const sec1Cache =
+				window._sec1DailyUsersCache &&
+				window._sec1DailyUsersCache[orgId];
+
+			if (sec1Cache) {
+				sec1Cache.byId = sec1Cache.byId || {};
+				sec1Cache.byUid = sec1Cache.byUid || {};
+				sec1Cache.byCode = sec1Cache.byCode || {};
+
+				if (normalized.docId) {
+					sec1Cache.byId[normalized.docId] = normalized;
+				}
+
+				if (normalized.uid) {
+					sec1Cache.byUid[normalized.uid] = normalized;
+				}
+
+				if (normalized.code) {
+					sec1Cache.byCode[normalized.code] = normalized;
+				}
+			}
+		}
+
+		// ============================================================
+		// 6. KÍCH HOẠT FIREBASE AUTH + CẬP NHẬT FIRESTORE
+		// ============================================================
 		let successCount = 0;
 		let secondaryApp = null;
 
 		try {
 			const firebaseConfig = firebase.app().options;
-			secondaryApp = firebase.initializeApp(firebaseConfig, "SecondaryAppForBatchActivation");
+
+			// Tránh lỗi nếu app phụ đã tồn tại từ lần chạy trước.
+			try {
+				secondaryApp = firebase.app("SecondaryAppForBatchActivation");
+			} catch (e) {
+				secondaryApp = firebase.initializeApp(
+					firebaseConfig,
+					"SecondaryAppForBatchActivation"
+				);
+			}
+
 			const secondaryAuth = secondaryApp.auth();
 
-			for (let acc of validAccounts) {
+			for (const acc of validAccounts) {
 				const rawEmail = acc.email ? String(acc.email) : "";
-				const standardizedEmail = rawEmail.toLowerCase().replace(/\s+/g, "").trim();
+				const standardizedEmail = rawEmail
+					.toLowerCase()
+					.replace(/\s+/g, "")
+					.trim();
 
-				if (!standardizedEmail || !standardizedEmail.includes("@") || !standardizedEmail.includes(".")) {
-					console.warn(`Bỏ qua dòng có email không hợp lệ: "${acc.email}"`);
+				if (
+					!standardizedEmail ||
+					!standardizedEmail.includes("@") ||
+					!standardizedEmail.includes(".")
+				) {
+					console.warn(
+						`Bỏ qua dòng có email không hợp lệ: "${acc.email}"`
+					);
+					continue;
+				}
+
+				// acc.id trong bảng Thẻ 1 là document ID của users.
+				const userDocId = String(
+					acc.docId ||
+					acc.userDocId ||
+					acc.id ||
+					acc.uid ||
+					acc.code ||
+					""
+				).trim();
+
+				if (!userDocId) {
+					console.warn(
+						`Không xác định được document ID của user: ${acc.fullName || standardizedEmail}`
+					);
 					continue;
 				}
 
 				const userRole = acc.role || "STUDENT";
 
+				let activationSucceeded = false;
+
 				try {
-					// Tạo tài khoản trên Firebase Auth với mật khẩu mặc định "123456"
-					const userCred = await secondaryAuth.createUserWithEmailAndPassword(standardizedEmail, "123456");
+					// ------------------------------------------------
+					// Tạo Firebase Auth account
+					// ------------------------------------------------
+					const userCred =
+						await secondaryAuth.createUserWithEmailAndPassword(
+							standardizedEmail,
+							"123456"
+						);
+
 					const newUid = userCred.user.uid;
 
-					// Cập nhật document tại organizations > {orgId} > users
-					await db.collection("organizations").doc(orgId).collection("users").doc(acc.id).set({
-						authUid: newUid,
-						activated: true,
-						email: standardizedEmail,
-						updatedAt: getVietnamTimestamp(),
-						uid: acc.id
-					}, { merge: true });
+					// ------------------------------------------------
+					// Cập nhật users/{docId}
+					// ------------------------------------------------
+					await db
+						.collection("organizations")
+						.doc(orgId)
+						.collection("users")
+						.doc(userDocId)
+						.set(
+							{
+								authUid: newUid,
+								activated: true,
+								email: standardizedEmail,
+								updatedAt: getVietnamTimestamp(),
 
-					// Cập nhật tại collection gốc `emails`
-					await db.collection("emails").doc(standardizedEmail).set({
-						orgId: orgId,
-						role: userRole,
-						fullName: acc.fullName || "",
-						activated: true,
-						academicYears: adminAcademicYears,
-						updatedAt: getVietnamTimestamp(),
-						uid: acc.id
-					}, { merge: true });
+								// Giữ uid nghiệp vụ cũ theo logic hiện tại.
+								uid: acc.uid || acc.id || userDocId
+							},
+							{ merge: true }
+						);
 
-					successCount++;
+					activationSucceeded = true;
+
 				} catch (err) {
-					// Nếu email đã tồn tại trên hệ thống Auth chung, chỉ cập nhật trạng thái activated = true
+					// ------------------------------------------------
+					// Email đã tồn tại trong Firebase Auth
+					// ------------------------------------------------
 					if (err.code === "auth/email-already-in-use") {
-						await db.collection("organizations").doc(orgId).collection("users").doc(acc.id).set({
-							activated: true,
-							email: standardizedEmail,
-							updatedAt: getVietnamTimestamp()
-						}, { merge: true });
+						await db
+							.collection("organizations")
+							.doc(orgId)
+							.collection("users")
+							.doc(userDocId)
+							.set(
+								{
+									activated: true,
+									email: standardizedEmail,
+									updatedAt: getVietnamTimestamp()
+								},
+								{ merge: true }
+							);
 
-						await db.collection("emails").doc(standardizedEmail).set({
-							orgId: orgId,
-							role: userRole,
-							fullName: acc.fullName || "",
-							activated: true,
-							academicYears: adminAcademicYears,
-							updatedAt: getVietnamTimestamp(),
-							uId: acc.id
-						}, { merge: true });
-
-						successCount++;
+						activationSucceeded = true;
 					} else {
-						console.error(`Không thể kích hoạt email [${standardizedEmail}]:`, err.message);
+						console.error(
+							`Không thể kích hoạt email [${standardizedEmail}]:`,
+							err.message
+						);
 					}
 				}
+
+				if (!activationSucceeded) {
+					continue;
+				}
+
+				// ----------------------------------------------------
+				// Cập nhật collection emails
+				// ----------------------------------------------------
+				try {
+					await db
+						.collection("emails")
+						.doc(standardizedEmail)
+						.set(
+							{
+								orgId: orgId,
+								role: userRole,
+								fullName: acc.fullName || "",
+								activated: true,
+								academicYears: adminAcademicYears,
+								updatedAt: getVietnamTimestamp(),
+								uid: acc.uid || acc.id || userDocId
+							},
+							{ merge: true }
+						);
+				} catch (emailErr) {
+					console.warn(
+						`Đã kích hoạt user nhưng không cập nhật được emails/${standardizedEmail}:`,
+						emailErr
+					);
+				}
+
+				// ----------------------------------------------------
+				// CẬP NHẬT CACHE RAM NGAY LẬP TỨC
+				// ----------------------------------------------------
+				syncOneUserToCaches({
+					...acc,
+					id: userDocId,
+					docId: userDocId,
+					code: acc.code || "",
+					uid: acc.uid || acc.id || userDocId,
+					authUid: acc.authUid || "",
+					email: standardizedEmail,
+					activated: true,
+					role: userRole,
+					fullName: acc.fullName || "",
+					category: acc.category || ""
+				});
+
+				successCount++;
 			}
 
 			alert(`Đã kích hoạt thành công ${successCount} tài khoản!`);
-			
-			// Làm mới lại bảng quản trị
-			window.isEntitiesCacheLoaded = false;
-			if (typeof reloadAndRenderAdminEntityList === 'function') {
-				await reloadAndRenderAdminEntityList(true);
+
+			// ========================================================
+			// 7. RENDER LẠI TỪ CACHE RAM — KHÔNG ĐỌC LẠI FIRESTORE
+			// ========================================================
+
+			// Thẻ 1
+			if (typeof renderEntityTableRows === "function") {
+				renderEntityTableRows(
+					Array.isArray(window.currentLoadedEntities)
+						? window.currentLoadedEntities
+						: []
+				);
+			}
+
+			// Thẻ 2
+			if (
+				typeof populateCard2Categories === "function" &&
+				Array.isArray(window.card2CachedMembers)
+			) {
+				populateCard2Categories(window.card2CachedMembers);
+			}
+
+			if (
+				typeof renderCard2MemberList === "function" &&
+				Array.isArray(window.card2CachedMembers)
+			) {
+				renderCard2MemberList(window.card2CachedMembers);
+			}
+
+			// Ma trận phân công
+			if (typeof renderDefaultMatricesBoxes === "function") {
+				renderDefaultMatricesBoxes();
+			}
+
+			// Thẻ 3 nếu đang có danh sách cache
+			if (
+				typeof renderCard3MembersList === "function" &&
+				Array.isArray(window.card3CachedMembers)
+			) {
+				renderCard3MembersList(window.card3CachedMembers);
+			}
+
+			// Nếu hệ thống đã có hàm đồng bộ chuyên dụng thì gọi thêm
+			// để bảo đảm toàn bộ UI assignment dùng chung cache.
+			if (
+				typeof syncAdminAssignmentsCacheFromEntities === "function"
+			) {
+				try {
+					syncAdminAssignmentsCacheFromEntities();
+				} catch (syncErr) {
+					console.warn(
+						"Không thể đồng bộ cache Assignment sau khi kích hoạt:",
+						syncErr
+					);
+				}
 			}
 
 		} catch (error) {
 			console.error("Lỗi kích hoạt hàng loạt:", error);
 			alert("Lỗi khi thực hiện kích hoạt: " + error.message);
+
 		} finally {
 			if (secondaryApp) {
-				await secondaryApp.delete();
+				try {
+					await secondaryApp.delete();
+				} catch (e) {
+					console.warn("Không thể đóng SecondaryApp:", e);
+				}
 			}
 		}
 	}
+
+	// Nếu app đang chạy bằng <script type="module">
+	// thì vẫn cho phép HTML onclick gọi được hàm.
+	window.activateFilteredAccounts = activateFilteredAccounts;
+
 	
 	// Mở rộng hàm switchAdminTab để khi Admin bấm vào Thẻ 1 thì tự động nạp dữ liệu
 	const originalSwitchAdminTab = window.switchAdminTab;
@@ -2580,9 +3583,13 @@ async function handleCreateSchoolAdmin(event) {
 
 	// Hàm khởi tạo khi Admin bấm chuyển sang Thẻ 2 (Assignments)
 	async function initAdminAssignmentsTab() {
-	  await loadCard2MembersData();
-	  renderDefaultMatricesBoxes();
+		await loadCard2MembersData(false);
+
+		if (typeof renderDefaultMatricesBoxes === "function") {
+			renderDefaultMatricesBoxes();
+		}
 	}
+
 
 	// 2. Hàm render sẵn khung checkbox cho 2 ma trận từ cache hiện có
 	function renderDefaultMatricesBoxes(selectedHomeroom = [], selectedTeaching = []) {
@@ -2631,55 +3638,156 @@ async function handleCreateSchoolAdmin(event) {
 	}
 	// 1. Tải danh sách nhân sự từ Firebase (Có kết hợp Cache để tiết kiệm quota)
 	async function loadCard2MembersData(forceRefresh = false) {
-		const container = document.getElementById("assign-members-radio-container");
+		const container =
+			document.getElementById(
+				"assign-members-radio-container"
+			);
+
 		if (!container) return;
 
-		// Đảm bảo khởi tạo mảng cache toàn cục trên window nếu chưa có
-		window.card2CachedMembers = window.card2CachedMembers || [];
+		window.card2CachedMembers =
+			window.card2CachedMembers || [];
 
-		// Nếu đã có cache và không ép làm mới -> dùng luôn dữ liệu trong RAM
-		if (!forceRefresh && window.card2CachedMembers.length > 0) {
-			populateCard2Categories(window.card2CachedMembers);
-			renderCard2MemberList(window.card2CachedMembers);
+		// =========================================================
+		// A. Nếu Thẻ 1 đã có cache thì dùng cache Thẻ 1
+		// =========================================================
+		if (
+			!forceRefresh &&
+			window.isEntitiesCacheLoaded === true &&
+			Array.isArray(window.currentLoadedEntities)
+		) {
+			syncCard2MembersFromEntityCache();
+			renderAdminAssignmentsFromCache();
 			return;
 		}
 
-		container.innerHTML = '<div style="padding: 10px; text-align: center; color: #6c757d;">Đang tải danh sách nhân sự...</div>';
+		// =========================================================
+		// B. Nếu Card2 đã có cache thì dùng RAM
+		// =========================================================
+		if (
+			!forceRefresh &&
+			window.card2CachedMembers.length > 0
+		) {
+			// Vẫn lọc lại trạng thái active để tránh giữ user
+			// vừa bị đánh dấu inactive trong cache.
+			const before =
+				window.card2CachedMembers;
+
+			window.card2CachedMembers =
+				before
+					.map(normalizeAdminAssignmentMember)
+					.filter(Boolean)
+					.filter(isAdminAssignmentMemberActive)
+					.filter(item =>
+						String(item.role || "")
+							.trim()
+							.toUpperCase() !== "ADMIN"
+					);
+
+			window.card3CachedMembers =
+				window.card2CachedMembers;
+
+			renderAdminAssignmentsFromCache();
+			return;
+		}
+
+		// =========================================================
+		// C. Chỉ đọc Firestore khi thực sự chưa có cache
+		// =========================================================
+		container.innerHTML =
+			'<div style="padding: 10px; text-align: center; color: #6c757d;">Đang tải danh sách nhân sự...</div>';
 
 		try {
-			// Lấy trực tiếp từ biến toàn cục chuẩn
-			const orgId = window.currentOrgIdGlobal;
+			const orgId =
+				window.currentOrgIdGlobal;
+
 			if (!orgId) {
-				container.innerHTML = '<div style="padding: 10px; text-align: center; color: red;">Không tìm thấy thông tin tổ chức!</div>';
+				container.innerHTML =
+					'<div style="padding: 10px; text-align: center; color: red;">Không tìm thấy thông tin tổ chức!</div>';
 				return;
 			}
 
-			const db = firebase.firestore();
-			const snapshot = await db.collection("organizations").doc(orgId).collection("users").get();
+			const db =
+				firebase.firestore();
 
-			window.card2CachedMembers = [];
+			const snapshot =
+				await db
+					.collection("organizations")
+					.doc(orgId)
+					.collection("users")
+					.get();
+
+			const members = [];
+
 			snapshot.forEach(doc => {
-				const data = doc.data();
-				const role = (data.role || "").toUpperCase();
-				
-				// Lọc các đối tượng không phải ADMIN
-				if (role !== "ADMIN") {
-					window.card2CachedMembers.push({ 
-						id: data.code || data.id || doc.id, // Ưu tiên dùng Mã định danh (code) làm id để search/hiển thị
-						docId: doc.id,                      // Lưu ID ngẫu nhiên của Firestore nếu cần dùng để update/delete
-						...data 
-					});
+				const data =
+					doc.data() || {};
+
+				const role =
+					String(data.role || "")
+						.trim()
+						.toUpperCase();
+
+				if (role === "ADMIN") {
+					return;
 				}
+
+				const item =
+					normalizeAdminAssignmentMember({
+						...data,
+						id:
+							data.code ||
+							data.id ||
+							doc.id,
+						docId: doc.id
+					});
+
+				if (!item) return;
+
+				if (!isAdminAssignmentMemberActive(item)) {
+					return;
+				}
+
+				members.push(item);
 			});
 
-			populateCard2Categories(window.card2CachedMembers);
-			renderCard2MemberList(window.card2CachedMembers);
+			window.card2CachedMembers =
+				members;
+
+			window.card3CachedMembers =
+				members;
+
+			// Đồng bộ ngược vào cache chung nếu cache chung tồn tại
+			if (
+				window.cachedUsersMap &&
+				typeof window.cachedUsersMap === "object"
+			) {
+				members.forEach(member => {
+					const key =
+						member.docId ||
+						member.uid;
+
+					if (!key) return;
+
+					window.cachedUsersMap[key] =
+						member;
+				});
+			}
+
+			renderAdminAssignmentsFromCache();
 
 		} catch (error) {
-			console.error("Lỗi tải nhân sự cho Thẻ 2:", error);
-			container.innerHTML = '<div style="padding: 10px; text-align: center; color: red;">Lỗi tải dữ liệu từ máy chủ.</div>';
+			console.error(
+				"Lỗi tải nhân sự cho Thẻ Assignments:",
+				error
+			);
+
+			container.innerHTML =
+				'<div style="padding: 10px; text-align: center; color: red;">Lỗi tải dữ liệu từ máy chủ.</div>';
 		}
 	}
+
+
 
 	// 2. Tự động quét các giá trị "category" (Tổ / Lớp / Đơn vị) để điền vào Combox lọc bên trái
 	function populateCard2Categories(members) {
@@ -6299,13 +7407,13 @@ function selectAllCard3Members(selectAll = true) {
 	  cachedModulesList.forEach(mod => {
 		const isChecked = selectedIds.includes(mod.id) ? "checked" : "";
 		chkHtml += `
+		<div>
 		  <label class="assign-mod-item" style="display: flex; align-items: center; padding: 4px 6px; margin-bottom: 2px; cursor: pointer; border-radius: 3px;" onmouseover="this.style.background='#f8f9fa'" onmouseout="this.style.background='transparent'">
 			<input type="checkbox" name="chk_assign_module" value="${mod.id}" ${isChecked} style="margin-right: 8px;">
-			<div>
 			  <span style="font-weight: 500; color: #333;">${mod.name || mod.id}</span>
 			  <small style="color: #666; margin-left: 6px;">[${mod.id}]</small>
-			</div>
 		  </label>
+		</div>
 		`;
 		selectHtml += `<option value="${mod.id}">${mod.name || mod.id} [${mod.id}]</option>`;
 	  });
@@ -6313,6 +7421,73 @@ function selectAllCard3Members(selectAll = true) {
 	  container.innerHTML = chkHtml;
 	  if (filterSelect) filterSelect.innerHTML = selectHtml;
 	}
+	
+	function filterAssignModulesCheckboxes() {
+		const input = document.getElementById("assign-mod-search-input");
+		const container = document.getElementById("assign-modules-checkboxes");
+
+		if (!input || !container) return;
+
+		const normalizeText = value =>
+			String(value || "")
+				.trim()
+				.toLowerCase()
+				.normalize("NFD")
+				.replace(/[\u0300-\u036f]/g, "");
+
+		const keyword = normalizeText(input.value);
+		const items = Array.from(container.children);
+
+		let visibleCount = 0;
+
+		items.forEach(item => {
+			const checkbox = item.querySelector('input[type="checkbox"]');
+
+			// Bỏ qua dòng "Đang tải..." / "Chưa có dữ liệu..."
+			if (!checkbox) {
+				item.style.display = keyword ? "none" : "";
+				return;
+			}
+
+			// Nếu renderAssignModulesCheckboxes() có gắn data-* thì ưu tiên dùng.
+			const code =
+				checkbox.dataset.moduleCode ||
+				checkbox.dataset.code ||
+				item.dataset.moduleCode ||
+				item.dataset.code ||
+				"";
+
+			const name =
+				checkbox.dataset.moduleName ||
+				checkbox.dataset.name ||
+				item.dataset.moduleName ||
+				item.dataset.name ||
+				"";
+
+			// Fallback: tìm trên toàn bộ nội dung hiển thị của module.
+			const searchText = normalizeText(
+				`${code} ${name} ${item.textContent || ""}`
+			);
+
+			const matched = !keyword || searchText.includes(keyword);
+
+			item.style.display = matched ? "" : "none";
+
+			if (matched) visibleCount++;
+		});
+
+		// Không bắt buộc phải có phần tử này.
+		const countElement = document.getElementById("assign-mod-search-count");
+
+		if (countElement) {
+			countElement.textContent = keyword
+				? `Hiển thị ${visibleCount} module`
+				: "";
+		}
+	}
+
+	window.filterAssignModulesCheckboxes = filterAssignModulesCheckboxes;
+
 	//===========================
 	//	LƯU PHÂN CÔNG NHIỆM VỤ
 	//===========================
@@ -7666,93 +8841,254 @@ async function initGridCard5() {
 		const perspectiveSelect = document.getElementById("admin-grid-perspective");
 
 		loadSchemaFields();
+
 		if (!tableBody || !moduleSelect) return;
 
 		const moduleId = moduleSelect.value;
 		const perspective = perspectiveSelect ? perspectiveSelect.value : "TARGET";
 
 		if (!moduleId) {
-			tableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #6c757d;">Vui lòng chọn Bài toán Module ở trên.</td></tr>';
+			tableBody.innerHTML =
+				'<tr><td colspan="4" style="text-align: center; color: #6c757d;">Vui lòng chọn Bài toán Module ở trên.</td></tr>';
 			return;
 		}
 
-		tableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #6c757d;">Đang kết nối lắng nghe nhật ký biến động (auditLogs)...</td></tr>';
+		tableBody.innerHTML =
+			'<tr><td colspan="4" style="text-align: center; color: #6c757d;">Đang kết nối lắng nghe nhật ký biến động (auditLogs)...</td></tr>';
 
-		// Hủy lắng nghe realtime cũ nếu có để tránh chồng chéo
-		if (typeof currentDailyUnsubscribe === 'function' && currentDailyUnsubscribe) {
-			currentDailyUnsubscribe();
-			currentDailyUnsubscribe = null;
+		// =========================================================
+		// 1. HỦY CÁC LISTENER CŨ
+		// =========================================================
+		if (
+			typeof window.currentDailyUnsubscribe === "function"
+		) {
+			try {
+				window.currentDailyUnsubscribe();
+			} catch (e) {
+				console.warn("Không thể hủy listener auditLogs cũ:", e);
+			}
+			window.currentDailyUnsubscribe = null;
+		}
+
+		if (
+			typeof window.currentDailyUsersUnsubscribe === "function"
+		) {
+			try {
+				window.currentDailyUsersUnsubscribe();
+			} catch (e) {
+				console.warn("Không thể hủy listener users cũ:", e);
+			}
+			window.currentDailyUsersUnsubscribe = null;
 		}
 
 		try {
-			// 1. Lấy OrgId và AcademicYearId từ biến toàn cục chuẩn
+			// =====================================================
+			// 2. ORG + ACADEMIC YEAR
+			// =====================================================
 			const orgId = window.currentOrgIdGlobal;
+
 			if (!orgId) {
-				tableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: red;">Chưa xác định được thông tin đơn vị (OrgId).</td></tr>';
+				tableBody.innerHTML =
+					'<tr><td colspan="4" style="text-align: center; color: red;">Chưa xác định được thông tin đơn vị (OrgId).</td></tr>';
 				return;
 			}
 
 			let academicYearId = "";
 			const yearsArr = window.currentAcademicYearsGlobal;
+
 			if (Array.isArray(yearsArr) && yearsArr.length > 0) {
 				const lastYearItem = yearsArr[yearsArr.length - 1];
-				academicYearId = String(typeof lastYearItem === 'object' && lastYearItem !== null ? (lastYearItem.id || lastYearItem.name || lastYearItem.year) : lastYearItem).trim();
+
+				academicYearId = String(
+					typeof lastYearItem === "object" && lastYearItem !== null
+						? (
+							lastYearItem.id ||
+							lastYearItem.name ||
+							lastYearItem.year
+						)
+						: lastYearItem
+				).trim();
 			} else if (window.currentAcademicYearIdGlobal) {
-				academicYearId = String(window.currentAcademicYearIdGlobal).trim();
+				academicYearId =
+					String(window.currentAcademicYearIdGlobal).trim();
 			}
 
 			if (!academicYearId) {
-				tableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: red;">Chưa xác định được năm học hiện tại.</td></tr>';
+				tableBody.innerHTML =
+					'<tr><td colspan="4" style="text-align: center; color: red;">Chưa xác định được năm học hiện tại.</td></tr>';
 				return;
 			}
 
 			const db = firebase.firestore();
 
-			// 2. Tải trước danh sách users để tra cứu họ tên và lớp chuẩn xác
-			let usersMap = {};
-			try {
-				const usersSnap = await db.collection("organizations").doc(orgId).collection("users").get();
-				usersSnap.forEach(uDoc => {
-					const uData = uDoc.data();
-					usersMap[uDoc.id] = {
-						fullName: uData.fullName || uDoc.id,
-						category: uData.category || uData.className || ""
-					};
-				});
-			} catch (e) {
-				console.warn("Không tải được bảng users:", e);
+			// =====================================================
+			// 3. NGÀY ĐƯỢC CHỌN
+			// =====================================================
+			const dateInput =
+				document.getElementById("grid-sec1-date-select") ||
+				document.getElementById("grid-sec2-date-select");
+
+			const selectedDateStr = dateInput
+				? dateInput.value
+				: new Date().toLocaleDateString("en-CA");
+
+			if (!selectedDateStr) {
+				tableBody.innerHTML =
+					'<tr><td colspan="4" style="text-align: center; color: red;">Vui lòng chọn ngày cần xem nhật ký.</td></tr>';
+				return;
 			}
 
-			// 🌟 2.5: Xây dựng bản đồ tra cứu nhanh từ Key -> Label của các trường (dựa vào Cache Thẻ 3)
+			// =====================================================
+			// 4. CACHE USERS DÙNG CHUNG CHO DAILY
+			//
+			// Không dùng users.get() nữa.
+			// users.onSnapshot() sẽ:
+			// - nhận added
+			// - nhận modified
+			// - nhận removed
+			//
+			// Đồng thời giữ cache tra cứu theo:
+			// - document ID
+			// - UID
+			// - CODE
+			// =====================================================
+			const usersCache = {
+				byId: {},
+				byUid: {},
+				byCode: {},
+				loaded: false,
+				updatedAt: 0
+			};
+
+			// Nếu đã có cache Daily trước đó thì tận dụng ngay,
+			// sau đó listener users sẽ đồng bộ tiếp.
+			const oldUsersCache =
+				window._sec1DailyUsersCache &&
+				window._sec1DailyUsersCache[orgId];
+
+			if (
+				oldUsersCache &&
+				oldUsersCache.byId &&
+				typeof oldUsersCache.byId === "object"
+			) {
+				usersCache.byId = { ...oldUsersCache.byId };
+			}
+
+			if (
+				oldUsersCache &&
+				oldUsersCache.byUid &&
+				typeof oldUsersCache.byUid === "object"
+			) {
+				usersCache.byUid = { ...oldUsersCache.byUid };
+			}
+
+			if (
+				oldUsersCache &&
+				oldUsersCache.byCode &&
+				typeof oldUsersCache.byCode === "object"
+			) {
+				usersCache.byCode = { ...oldUsersCache.byCode };
+			}
+
+			window._sec1DailyUsersCache =
+				window._sec1DailyUsersCache || {};
+
+			window._sec1DailyUsersCache[orgId] = usersCache;
+
+			// =====================================================
+			// 5. HÀM CẬP NHẬT CACHE USER
+			// =====================================================
+			function rebuildDailyUserIndexes() {
+				usersCache.byUid = {};
+				usersCache.byCode = {};
+
+				Object.keys(usersCache.byId).forEach(docId => {
+					const user = usersCache.byId[docId];
+
+					if (!user) return;
+
+					const uid = String(user.uid || "").trim();
+
+					const code = String(
+						user.code ||
+						user.memberId ||
+						""
+					).trim();
+
+					if (uid) {
+						usersCache.byUid[uid] = user;
+					}
+
+					if (code) {
+						usersCache.byCode[code] = user;
+					}
+				});
+
+				usersCache.loaded = true;
+				usersCache.updatedAt = Date.now();
+			}
+
+			// =====================================================
+			// 6. HÀM TRA CỨU USER
+			//
+			// Ưu tiên:
+			// entityId -> document ID
+			// entityId -> CODE
+			// entityId -> UID
+			// sau đó mới fallback currentLoadedEntities
+			// =====================================================
+			function getDailyUserInfo(entityId) {
+				const key = String(entityId || "").trim();
+
+				if (!key) return null;
+
+				return (
+					usersCache.byId[key] ||
+					usersCache.byCode[key] ||
+					usersCache.byUid[key] ||
+					null
+				);
+			}
+
+			// =====================================================
+			// 7. FIELD LABEL MAP
+			// =====================================================
 			let fieldLabelMap = {};
-			const currentFields = window.cachedSchemaFields || cachedSchemaFields || [];
+
+			const currentFields =
+				window.cachedSchemaFields ||
+				(typeof cachedSchemaFields !== "undefined"
+					? cachedSchemaFields
+					: []) ||
+				[];
+
 			currentFields.forEach(f => {
 				fieldLabelMap[f.key] = f.label || f.key;
 			});
 
-			// Lấy ngày được chọn trên giao diện (mặc định lấy ngày hôm nay nếu chưa có)
-			const dateInput = document.getElementById("grid-sec1-date-select") || document.getElementById("grid-sec2-date-select");
-			const selectedDateStr = dateInput ? dateInput.value : new Date().toLocaleDateString('en-CA');
+			// =====================================================
+			// 8. LƯU SNAPSHOT AUDIT LOG HIỆN TẠI
+			//
+			// Khi users thay đổi, không đọc auditLogs lại.
+			// Chỉ render lại snapshot đang có trong RAM.
+			// =====================================================
+			let currentAuditSnapshot = null;
 
-			if (!selectedDateStr) {
-				tableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: red;">Vui lòng chọn ngày cần xem nhật ký.</td></tr>';
-				return;
-			}
+			function renderDailyFromSnapshot(snapshot) {
+				if (!snapshot) return;
 
-			// 3. Đường dẫn chuẩn xác tới auditLogs của module (Có kết hợp bộ lọc .where theo ngày)
-			const auditLogsRef = db.collection("organizations")
-								   .doc(orgId)
-								   .collection("academicYears")
-								   .doc(academicYearId)
-								   .collection("modulesData")
-								   .doc(moduleId)
-								   .collection("auditLogs")
-								   .where("date", "==", selectedDateStr); // 🌟 Lọc chính xác theo ngày được chọn
-
-			// 4. Lắng nghe realtime collection `auditLogs`
-			currentDailyUnsubscribe = auditLogsRef.onSnapshot(snapshot => {
 				if (snapshot.empty) {
-					tableBody.innerHTML = `<tr><td colspan="4" style="text-align: center; font-style: italic; color: #6c757d;">Chưa có lịch sử nhật ký biến động nào cho module này.</td></tr>`;
+					tableBody.innerHTML =
+						'<tr><td colspan="4" style="text-align: center; font-style: italic; color: #6c757d;">Chưa có lịch sử nhật ký biến động nào cho module này.</td></tr>';
+
+					const badge =
+						document.getElementById("sec1-cache-time-badge");
+
+					if (badge) {
+						badge.innerText =
+							"📡 Đang theo dõi realtime (0 biến động)";
+					}
+
 					return;
 				}
 
@@ -7761,88 +9097,324 @@ async function initGridCard5() {
 
 				snapshot.forEach(doc => {
 					const data = doc.data();
-					const entityId = data.entityId || "Unknown"; // Mã ID học sinh/nhân sự
+
+					const entityId =
+						data.entityId || "Unknown";
 
 					if (!aggregatedMap[entityId]) {
-						const userInfo = usersMap[entityId] || {};
-						const cachedUser = (window.currentLoadedEntities || []).find(u => u.id === entityId);
-						
+						const userInfo =
+							getDailyUserInfo(entityId) || {};
+
+						const currentLoaded =
+							Array.isArray(window.currentLoadedEntities)
+								? window.currentLoadedEntities.find(u =>
+									String(u?.id || "").trim() ===
+									String(entityId).trim() ||
+									String(u?.uid || "").trim() ===
+									String(entityId).trim() ||
+									String(u?.code || u?.memberId || "").trim() ===
+									String(entityId).trim()
+								)
+								: null;
+
 						aggregatedMap[entityId] = {
 							id: entityId,
-							name: userInfo.fullName || (cachedUser ? cachedUser.fullName : null) || data.updaterName || entityId,
-							category: userInfo.category || (cachedUser ? cachedUser.category : null) || "",
+
+							name:
+								userInfo.fullName ||
+								(currentLoaded
+									? currentLoaded.fullName
+									: null) ||
+								data.updaterName ||
+								entityId,
+
+							category:
+								userInfo.category ||
+								userInfo.className ||
+								(currentLoaded
+									? (
+										currentLoaded.category ||
+										currentLoaded.className ||
+										""
+									)
+									: "") ||
+								"",
+
 							totalCount: 0,
 							details: []
 						};
 					}
 
-					// Tăng số lượt dựa trên số lượng bản ghi trong auditLogs (thêm, sửa, xóa)
-					aggregatedMap[entityId].totalCount += Number(data.count || 1);
+					// Tăng số lượt theo count của audit log
+					aggregatedMap[entityId].totalCount +=
+						Number(data.count || 1);
+
 					totalLogsCount++;
 
-					// Lấy thông tin người thực hiện và thời gian
-					const updaterName = data.updaterName || data.updaterEmail || "Hệ thống";
+					// Người thực hiện + thời gian
+					const updaterName =
+						data.updaterName ||
+						data.updaterEmail ||
+						"Hệ thống";
+
 					let timeStr = "vừa xong";
-					if (data.timestamp && typeof data.timestamp.toDate === 'function') {
-						timeStr = data.timestamp.toDate().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+
+					if (
+						data.timestamp &&
+						typeof data.timestamp.toDate === "function"
+					) {
+						timeStr =
+							data.timestamp
+								.toDate()
+								.toLocaleTimeString(
+									"vi-VN",
+									{
+										hour: "2-digit",
+										minute: "2-digit"
+									}
+								);
 					}
 
-					// Trích xuất nội dung thay đổi từ trường `changes` theo đúng thứ tự yêu cầu
-					const changesObj = data.changes || {};
-					const changeKeys = Object.keys(changesObj);
+					// Nội dung thay đổi
+					const changesObj =
+						data.changes || {};
+
+					const changeKeys =
+						Object.keys(changesObj);
 
 					if (changeKeys.length > 0) {
 						changeKeys.forEach(fieldKey => {
-							const val = changesObj[fieldKey];
-							const valStr = Array.isArray(val) ? val.join(", ") : String(val);
-							
-							// 🌟 Lấy tên hiển thị (Label) từ cache, nếu không có thì giữ nguyên fieldKey gốc
-							const displayLabel = fieldLabelMap[fieldKey] || fieldKey;
-							
-							// Định dạng hiển thị kèm nhãn đẹp mắt
-							aggregatedMap[entityId].details.push(
-								`<li><b>${displayLabel}:</b> ${valStr} <span style="color: #6c757d; font-size: 0.85em;">(ghi/sửa bởi ${updaterName} lúc ${timeStr})</span></li>`
-							);
+							const val =
+								changesObj[fieldKey];
+
+							const valStr =
+								Array.isArray(val)
+									? val.join(", ")
+									: String(val);
+
+							const displayLabel =
+								fieldLabelMap[fieldKey] ||
+								fieldKey;
+
+							aggregatedMap[entityId]
+								.details
+								.push(
+									`<li><b>${displayLabel}:</b> ${valStr} <span style="color: #6c757d; font-size: 0.85em;">(ghi/sửa bởi ${updaterName} lúc ${timeStr})</span></li>`
+								);
 						});
 					} else {
-						const actionName = data.action || "Cập nhật dữ liệu";
-						aggregatedMap[entityId].details.push(
-							`<li><b>${actionName}</b> <span style="color: #6c757d; font-size: 0.85em;">(ghi/sửa bởi ${updaterName} lúc ${timeStr})</span></li>`
-						);
+						const actionName =
+							data.action ||
+							"Cập nhật dữ liệu";
+
+						aggregatedMap[entityId]
+							.details
+							.push(
+								`<li><b>${actionName}</b> <span style="color: #6c757d; font-size: 0.85em;">(ghi/sửa bởi ${updaterName} lúc ${timeStr})</span></li>`
+							);
 					}
 				});
 
-				// Render ra bảng HTML
+				// =================================================
+				// 9. RENDER BẢNG
+				// =================================================
 				let html = "";
+
 				for (const keyId in aggregatedMap) {
-					const item = aggregatedMap[keyId];
+					const item =
+						aggregatedMap[keyId];
+
 					html += `
-					  <tr style="border-bottom: 1px solid #dee2e6;">
-						<td style="font-family: monospace; font-weight: bold;">${item.id}</td>
-						<td>${item.name} ${item.category ? `(${item.category})` : ''}</td>
-						<td style="text-align: center;"><span style="background: #e7f1ff; color: #0d6efd; padding: 2px 6px; border-radius: 4px; font-weight: bold;">${item.totalCount} lượt</span></td>
-						<td><ul style="margin: 0; padding-left: 15px; font-size: 0.9em; max-height: 120px; overflow-y: auto;">${item.details.join("")}</ul></td>
-					  </tr>
+						<tr style="border-bottom: 1px solid #dee2e6;">
+							<td style="font-family: monospace; font-weight: bold;">
+								${item.id}
+							</td>
+
+							<td>
+								${item.name}
+								${item.category
+									? `(${item.category})`
+									: ""}
+							</td>
+
+							<td style="text-align: center;">
+								<span style="background: #e7f1ff; color: #0d6efd; padding: 2px 6px; border-radius: 4px; font-weight: bold;">
+									${item.totalCount} lượt
+								</span>
+							</td>
+
+							<td>
+								<ul style="margin: 0; padding-left: 15px; font-size: 0.9em; max-height: 120px; overflow-y: auto;">
+									${item.details.join("")}
+								</ul>
+							</td>
+						</tr>
 					`;
 				}
 
 				tableBody.innerHTML = html;
 
-				const badge = document.getElementById("sec1-cache-time-badge");
+				const badge =
+					document.getElementById(
+						"sec1-cache-time-badge"
+					);
+
 				if (badge) {
-					badge.innerText = "📡 Cập nhật lúc: " + new Date().toLocaleTimeString() + ` (${totalLogsCount} biến động)`;
+					badge.innerText =
+						"📡 Cập nhật lúc: " +
+						new Date().toLocaleTimeString() +
+						` (${totalLogsCount} biến động)`;
 				}
+			}
 
-			}, error => {
-				console.error("Lỗi realtime auditLogs:", error);
-				tableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: red;">Lỗi kết nối thời gian thực bảng nhật ký.</td></tr>';
-			});
+			// =====================================================
+			// 10. LISTENER USERS - REALTIME
+			//
+			// Đây là phần thay thế users.get().
+			//
+			// Khi:
+			// - thêm user
+			// - sửa user
+			// - xóa user
+			//
+			// cache sẽ tự cập nhật.
+			// =====================================================
+			const usersRef = db
+				.collection("organizations")
+				.doc(orgId)
+				.collection("users");
 
-		 } catch (error) {
-			console.error("Lỗi khởi tạo:", error);
-			tableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: red;">Lỗi tải dữ liệu.</td></tr>';
+			window.currentDailyUsersUnsubscribe =
+				usersRef.onSnapshot(
+					snapshot => {
+						snapshot.docChanges().forEach(change => {
+							const docId =
+								change.doc.id;
+
+							if (change.type === "removed") {
+								delete usersCache.byId[docId];
+								return;
+							}
+
+							const uData =
+								change.doc.data() || {};
+
+							usersCache.byId[docId] = {
+								id: docId,
+
+								uid:
+									uData.uid ||
+									docId,
+
+								code:
+									uData.code ||
+									uData.memberId ||
+									"",
+
+								fullName:
+									uData.fullName ||
+									uData.displayName ||
+									uData.name ||
+									docId,
+
+								category:
+									uData.category ||
+									uData.className ||
+									"",
+
+								className:
+									uData.className ||
+									uData.category ||
+									"",
+
+								email:
+									uData.email ||
+									"",
+
+								role:
+									uData.role ||
+									""
+							};
+						});
+
+						rebuildDailyUserIndexes();
+
+						// Nếu audit snapshot đã có thì chỉ render lại
+						// từ snapshot RAM, không đọc Firestore lần nữa.
+						if (currentAuditSnapshot) {
+							renderDailyFromSnapshot(
+								currentAuditSnapshot
+							);
+						}
+					},
+					error => {
+						console.error(
+							"Lỗi realtime users Section 1:",
+							error
+						);
+					}
+				);
+
+			// =====================================================
+			// 11. ĐƯỜNG DẪN AUDIT LOGS
+			// =====================================================
+			const auditLogsRef = db
+				.collection("organizations")
+				.doc(orgId)
+				.collection("academicYears")
+				.doc(academicYearId)
+				.collection("modulesData")
+				.doc(moduleId)
+				.collection("auditLogs")
+				.where(
+					"date",
+					"==",
+					selectedDateStr
+				);
+
+			// =====================================================
+			// 12. LISTENER AUDIT LOGS - REALTIME
+			// =====================================================
+			window.currentDailyUnsubscribe =
+				auditLogsRef.onSnapshot(
+					snapshot => {
+						currentAuditSnapshot =
+							snapshot;
+
+						renderDailyFromSnapshot(
+							snapshot
+						);
+					},
+					error => {
+						console.error(
+							"Lỗi realtime auditLogs:",
+							error
+						);
+
+						tableBody.innerHTML =
+							'<tr><td colspan="4" style="text-align: center; color: red;">Lỗi kết nối thời gian thực bảng nhật ký.</td></tr>';
+					}
+				);
+
+		} catch (error) {
+			console.error(
+				"Lỗi khởi tạo Section 1 Daily:",
+				error
+			);
+
+			tableBody.innerHTML =
+				'<tr><td colspan="4" style="text-align: center; color: red;">Lỗi tải dữ liệu.</td></tr>';
 		}
 	}
+
+	// =============================================================
+	// EXPOSE RA WINDOW
+	// Nếu app.js chạy dạng ES module thì onclick/onchange
+	// từ HTML vẫn gọi được hàm.
+	// =============================================================
+	window.loadGridSection1Daily =
+		loadGridSection1Daily;
+
 
 	// ==========================================
 	// 4. SECTION 5.2: BÁO CÁO TUẦN (CÓ CACHE)
@@ -12881,12 +14453,7 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 		// ============================================================
 
 		else if (tabIndex === 3) {
-
-			if (
-				typeof loadAuditLogsTimeline === "function"
-			) {
-				await loadAuditLogsTimeline();
-			}
+			await window.initEmployeeAuditMonitorTab();
 		}
 
 
@@ -12904,81 +14471,6 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 		}
 	}
 
-	// 🌟 2. Hàm kiểm tra quyền và hiển thị Tab 4, Tab 5 động khi nhân viên đăng nhập thành công
-	async function checkAndShowEmployeeSpecialTabs() {
-		const btnTab4 = document.getElementById("btn-emp-tab-4");
-		const btnTab5 = document.getElementById("btn-emp-tab-5");
-
-		// Mặc định ẩn 2 thẻ đi
-		if (btnTab4) btnTab4.style.display = "none";
-		if (btnTab5) btnTab5.style.display = "none";
-
-		const authUser = firebase.auth().currentUser;
-		if (!authUser || !authUser.email) return;
-
-		const email = authUser.email.toLowerCase().trim();
-		const db = firebase.firestore();
-
-		try {
-			// 1. Lấy thông tin user ở collection ngang cấp `users` để lấy uId (memberId) và orgId
-			const usersSnap = await db.collection("users")
-									  .where("email", "==", email)
-									  .limit(1)
-									  .get();
-
-			let orgId = window.currentOrgIdGlobal;
-			let memberId = "";
-			if (!usersSnap.empty) {
-				const userData = usersSnap.docs[0].data();
-				orgId = userData.orgId || orgId;
-				memberId = userData.uId || ""; // Lấy uId (ví dụ: "GV001")
-			}
-
-			if (!orgId) return;
-
-			// 2. Lấy năm học hiện tại chuẩn xác
-			let academicYearId = currentAcademicYear || "";
-			const yearsArr = window.currentAcademicYearsGlobal;
-			if (!academicYearId && Array.isArray(yearsArr) && yearsArr.length > 0) {
-				const lastYearItem = yearsArr[yearsArr.length - 1];
-				academicYearId = String(typeof lastYearItem === 'object' && lastYearItem !== null ? (lastYearItem.id || lastYearItem.name || lastYearItem.year) : lastYearItem).trim();
-			}
-
-			if (!academicYearId) return;
-
-			const assignmentsRef = db.collection("organizations")
-									 .doc(orgId)
-									 .collection("academicYears")
-									 .doc(academicYearId)
-									 .collection("assignments");
-
-			// 3. 🌟 THỬ ĐỌC THEO EMAIL TRƯỚC, NẾU KHÔNG TỒN TẠI THÌ ĐỌC THEO MEMBERID (uId)
-			let assignDocSnap = await assignmentsRef.doc(email).get();
-			
-			if (!assignDocSnap.exists && memberId) {
-				assignDocSnap = await assignmentsRef.doc(memberId).get();
-			}
-
-			if (assignDocSnap.exists) {
-				const assignData = assignDocSnap.data();
-				const homeroomList = Array.isArray(assignData.homeroom) ? assignData.homeroom : [];
-				const teachingList = Array.isArray(assignData.teaching) ? assignData.teaching : [];
-
-				// 🌟 Nếu có lớp chủ nhiệm -> Hiển thị Thẻ 4 (Lớp Chủ nhiệm)
-				if (homeroomList.length > 0 && btnTab4) {
-					btnTab4.style.display = "inline-block";
-				}
-
-				// 🌟 Nếu có phân công giảng dạy/tổ -> Hiển thị Thẻ 5 (Tổ chuyên môn)
-				if (teachingList.length > 0 && btnTab5) {
-					btnTab5.style.display = "inline-block";
-				}
-			}
-
-		} catch (error) {
-			console.error("Lỗi kiểm tra hiển thị thẻ đặc biệt cho employee:", error);
-	}
-		}
 	
 	
 	// Hàm khởi tạo danh sách năm học cho Employee Panel đọc trực tiếp từ sub-collection `academicYears`
@@ -15479,6 +16971,8 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 		}
 	}
 
+
+	window.saveAllEmployeeEntries = saveAllEmployeeEntries;
 	//	SAVE DỮ LIỆU ĐƠN
 	
 	async function saveSingleEmployeeEntry(entityId) {
@@ -16166,6 +17660,3275 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 		}
 	}
 	
+	//  THẺ 3 - NHẬT KÝ BIẾN ĐỘNG
+	
+
+	window.auditMonitorFilterState=window.auditMonitorFilterState||{
+	  currentType:"",
+	  options:{updater:[],module:[]},
+	  selected:{updater:[],module:[]},
+	  draft:{updater:[],module:[]}
+	};
+
+	function normalizeText(v){
+	  return String(v||"").trim().toLowerCase()
+		.normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+	}
+
+	function escapeHtml(v){
+	  return String(v||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")
+		.replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
+	}
+
+	function filterInfo(type){
+	  if(type==="updater") return {
+		title:"Chọn người nhập liệu",
+		icon:"fa-solid fa-user-pen",
+		placeholder:"Tìm theo tên hoặc email..."
+	  };
+	  return {
+		title:"Chọn bài toán được phân công",
+		icon:"fa-solid fa-list-check",
+		placeholder:"Tìm theo mã hoặc tên bài toán..."
+	  };
+	}
+
+	window.openAuditMonitorFilterForm=function(type){
+	  if(type!=="updater"&&type!=="module")return;
+	  const s=window.auditMonitorFilterState;
+	  s.currentType=type;
+	  s.draft[type]=[...(s.selected[type]||[])];
+
+	  const info=filterInfo(type);
+	  const modal=document.getElementById("audit-monitor-filter-modal");
+	  const title=document.getElementById("audit-monitor-filter-title");
+	  const icon=document.getElementById("audit-monitor-filter-title-icon");
+	  const search=document.getElementById("audit-monitor-filter-search");
+	  if(!modal)return;
+
+	  if(title)title.textContent=info.title;
+	  if(icon)icon.className=info.icon;
+	  if(search){search.placeholder=info.placeholder;search.value=""}
+
+	  renderAuditMonitorFilterList();
+	  modal.style.display="block";
+	  document.body.classList.add("audit-monitor-filter-modal-open");
+	  setTimeout(()=>search?.focus(),50);
+	};
+
+	window.closeAuditMonitorFilterForm=function(){
+	  const modal=document.getElementById("audit-monitor-filter-modal");
+	  if(modal)modal.style.display="none";
+	  document.body.classList.remove("audit-monitor-filter-modal-open");
+	};
+
+	function renderAuditMonitorFilterList(){
+	  const s=window.auditMonitorFilterState;
+	  const type=s.currentType;
+	  const box=document.getElementById("audit-monitor-filter-list");
+	  if(!box||!type)return;
+
+	  const options=Array.isArray(s.options[type])?s.options[type]:[];
+	  const selected=Array.isArray(s.draft[type])?s.draft[type]:[];
+
+	  if(!options.length){
+		box.innerHTML='<div class="audit-monitor-filter-empty">Chưa có dữ liệu.</div>';
+		updateSelectedCount();
+		return;
+	  }
+
+	  let html="";
+	  options.forEach(item=>{
+		item=(typeof item==="object"&&item)?item:{id:String(item)};
+		const id=String(item.id||item.email||item.code||item.moduleId||"").trim();
+		if(!id)return;
+
+		const title=String(
+		  type==="updater"
+			? (item.name||item.fullName||item.updaterName||item.email||id)
+			: (item.name||item.title||item.moduleName||id)
+		).trim();
+
+		const subtitle=String(
+		  type==="updater"
+			? (item.email||"")
+			: (item.id||item.moduleId||"")
+		).trim();
+
+		const checked=selected.includes(id)?"checked":"";
+		const searchText=escapeHtml(normalizeText(`${title} ${subtitle} ${id}`));
+
+		html+=`
+		  <label class="audit-monitor-filter-item"
+				 data-filter-search="${searchText}">
+			<input type="checkbox" value="${escapeHtml(id)}" ${checked}
+				   onchange="updateAuditMonitorFilterSelectedCount()">
+			<span class="audit-monitor-filter-item-content">
+			  <span class="audit-monitor-filter-item-title">${escapeHtml(title)||escapeHtml(id)}</span>
+			  ${subtitle?`<span class="audit-monitor-filter-item-subtitle">${escapeHtml(subtitle)}</span>`:""}
+			</span>
+		  </label>`;
+	  });
+
+	  box.innerHTML=html||'<div class="audit-monitor-filter-empty">Chưa có dữ liệu.</div>';
+	  updateSelectedCount();
+	}
+
+	window.filterAuditMonitorFilterList=function(){
+	  const search=document.getElementById("audit-monitor-filter-search");
+	  const box=document.getElementById("audit-monitor-filter-list");
+	  if(!search||!box)return;
+	  const keyword=normalizeText(search.value);
+
+	  box.querySelectorAll(".audit-monitor-filter-item").forEach(item=>{
+		const text=item.getAttribute("data-filter-search")||"";
+		item.style.display=(!keyword||text.includes(keyword))?"flex":"none";
+	  });
+	};
+
+	window.selectAllAuditMonitorFilterItems=function(yes){
+	  const s=window.auditMonitorFilterState;
+	  const type=s.currentType;
+	  const box=document.getElementById("audit-monitor-filter-list");
+	  if(!type||!box)return;
+
+	  const draft=[...(s.draft[type]||[])];
+
+	  box.querySelectorAll(".audit-monitor-filter-item").forEach(item=>{
+		if(item.style.display==="none")return;
+		const cb=item.querySelector("input[type=checkbox]");
+		if(!cb)return;
+		const id=String(cb.value||"").trim();
+		cb.checked=yes;
+		const idx=draft.indexOf(id);
+		if(yes&&idx===-1)draft.push(id);
+		if(!yes&&idx!==-1)draft.splice(idx,1);
+	  });
+
+	  s.draft[type]=[...new Set(draft)];
+	  updateSelectedCount();
+	};
+
+	window.updateAuditMonitorFilterSelectedCount=function(){
+	  updateSelectedCount();
+	};
+
+	function updateSelectedCount(){
+	  const s=window.auditMonitorFilterState;
+	  const type=s.currentType;
+	  const box=document.getElementById("audit-monitor-filter-list");
+	  const count=document.getElementById("audit-monitor-filter-selected-count");
+	  if(!type||!box||!count)return;
+
+	  const old=[...(s.draft[type]||[])];
+	  const visibleIds=[];
+	  const visibleChecked=[];
+
+	  box.querySelectorAll(".audit-monitor-filter-item").forEach(item=>{
+		if(item.style.display==="none")return;
+		const cb=item.querySelector("input[type=checkbox]");
+		if(!cb)return;
+		const id=String(cb.value||"").trim();
+		if(id)visibleIds.push(id);
+		if(cb.checked&&id)visibleChecked.push(id);
+	  });
+
+	  const hiddenSelected=old.filter(id=>!visibleIds.includes(id));
+	  s.draft[type]=[...new Set([...hiddenSelected,...visibleChecked])];
+	  count.textContent=`Đã chọn: ${s.draft[type].length}`;
+	}
+
+	window.applyAuditMonitorFilterForm=function(){
+	  const s=window.auditMonitorFilterState;
+	  const type=s.currentType;
+	  if(!type){closeAuditMonitorFilterForm();return;}
+
+	  s.selected[type]=[...(s.draft[type]||[])];
+
+	  const badge=document.getElementById(
+		type==="updater"?"audit-filter-updater-count":"audit-filter-module-count"
+	  );
+	  if(badge)badge.textContent=s.selected[type].length;
+
+	  closeAuditMonitorFilterForm();
+
+	  if(typeof window.applyEmployeeAuditMonitorFilters==="function"){
+		window.applyEmployeeAuditMonitorFilters();
+	  }
+	};
+
+	window.setAuditMonitorFilterOptions=function(data){
+	  const s=window.auditMonitorFilterState;
+	  data=data||{};
+	  s.options.updater=Array.isArray(data.updater)?data.updater:[];
+	  s.options.module=Array.isArray(data.module)?data.module:[];
+
+	  ["updater","module"].forEach(type=>{
+		const ids=s.options[type].map(item=>{
+		  if(typeof item==="string"||typeof item==="number")return String(item);
+		  item=item||{};
+		  return String(item.id||item.email||item.code||item.moduleId||"").trim();
+		}).filter(Boolean);
+
+		s.selected[type]=(s.selected[type]||[]).filter(id=>ids.includes(id));
+		s.draft[type]=(s.draft[type]||[]).filter(id=>ids.includes(id));
+
+		const badge=document.getElementById(
+		  type==="updater"?"audit-filter-updater-count":"audit-filter-module-count"
+		);
+		if(badge)badge.textContent=s.selected[type].length;
+	  });
+
+	  if(s.currentType&&document.getElementById("audit-monitor-filter-modal")?.style.display!=="none"){
+		renderAuditMonitorFilterList();
+	  }
+	};
+
+	window.getAuditMonitorFilterValues=function(){
+	  const s=window.auditMonitorFilterState;
+	  return {
+		updater:[...(s.selected.updater||[])],
+		module:[...(s.selected.module||[])]
+	  };
+	};
+
+	document.addEventListener("keydown",function(e){
+	  if(e.key==="Escape"){
+		const modal=document.getElementById("audit-monitor-filter-modal");
+		if(modal&&modal.style.display!=="none")window.closeAuditMonitorFilterForm();
+	  }
+	});
+
+	/* ============================================================
+	   1. STATE
+	============================================================ */
+
+	window.employeeAuditMonitorState =
+		window.employeeAuditMonitorState || {
+			rows: [],
+			allRows: [],
+			loading: false,
+			initialized: false,
+			lastQueryKey: "",
+			usersByCode: {},
+			usersByUid: {},
+			usersByEmail: {},
+			modulesById: {},
+			assignmentsByEmail: {},
+			moduleAssignedPeople: {}
+		};
+
+
+	/* ============================================================
+	   2. CHUẨN HÓA TEXT
+	============================================================ */
+
+	function normalizeEmployeeAuditMonitorText(value) {
+		return String(value || "")
+			.trim()
+			.toLowerCase()
+			.normalize("NFD")
+			.replace(/[\u0300-\u036f]/g, "");
+	}
+
+
+	/* ============================================================
+	   3. ESCAPE HTML
+	============================================================ */
+
+	function escapeEmployeeAuditMonitorHtml(value) {
+		return String(value || "")
+			.replace(/&/g, "&amp;")
+			.replace(/</g, "&lt;")
+			.replace(/>/g, "&gt;")
+			.replace(/"/g, "&quot;")
+			.replace(/'/g, "&#039;");
+	}
+
+
+	/* ============================================================
+	   4. LẤY ORG / NĂM HỌC
+	============================================================ */
+
+	async function getEmployeeAuditMonitorContext() {
+
+		let orgId =
+			window.currentEmployeeOrgIdGlobal ||
+			window.currentOrgIdGlobal ||
+			"";
+
+		if (!orgId && typeof ensureOrgId === "function") {
+			orgId = await ensureOrgId();
+		}
+
+		let academicId =
+			window.currentEmployeeAcademicIdGlobal ||
+			window.currentAcademicYearIdGlobal ||
+			window.currentAcademicYear ||
+			"";
+
+		if (typeof academicId === "object" && academicId !== null) {
+			academicId =
+				academicId.id ||
+				academicId.name ||
+				academicId.year ||
+				"";
+		}
+
+		if (!academicId) {
+			const years =
+				window.currentAcademicYearsGlobal;
+
+			if (Array.isArray(years) && years.length > 0) {
+
+				const item =
+					years[years.length - 1];
+
+				academicId =
+					typeof item === "object" && item !== null
+						? (
+							item.id ||
+							item.name ||
+							item.year ||
+							""
+						)
+						: item;
+			}
+		}
+
+		return {
+			orgId: String(orgId || "").trim(),
+			academicId: String(academicId || "").trim()
+		};
+	}
+
+
+	/* ============================================================
+	   5. LẤY CACHE NHÂN SỰ
+	============================================================ */
+
+	function buildEmployeeAuditMonitorUserCache() {
+
+		const state =
+			window.employeeAuditMonitorState;
+
+		state.usersByCode = {};
+		state.usersByUid = {};
+		state.usersByEmail = {};
+
+		let users = [];
+
+		/*
+		 * Ưu tiên employeeDataCache.users vì đây là cache
+		 * đang được khối nhập liệu sử dụng.
+		 */
+		const employeeCache =
+			window.employeeDataCache;
+
+		if (
+			employeeCache &&
+			Array.isArray(employeeCache.users)
+		) {
+			users = employeeCache.users;
+		}
+
+		/*
+		 * Nếu cache trên chưa có thì dùng currentEmployeeEntitiesGlobal.
+		 */
+		if (
+			!users.length &&
+			Array.isArray(window.currentEmployeeEntitiesGlobal)
+		) {
+			users =
+				window.currentEmployeeEntitiesGlobal;
+		}
+
+		/*
+		 * Nếu hệ thống đã có currentLoadedEntities thì bổ sung.
+		 */
+		if (
+			!users.length &&
+			Array.isArray(window.currentLoadedEntities)
+		) {
+			users =
+				window.currentLoadedEntities;
+		}
+
+
+		users.forEach(function (user) {
+
+			user = user || {};
+
+			const code =
+				String(
+					user.code ||
+					user.memberId ||
+					""
+				).trim();
+
+			const uid =
+				String(
+					user.uid ||
+					user.authUid ||
+					user.id ||
+					user.docId ||
+					""
+				).trim();
+
+			const email =
+				String(
+					user.email ||
+					""
+				).trim().toLowerCase();
+
+			const normalized = {
+				...user,
+				code: code,
+				uid: uid,
+				email: email,
+				fullName:
+					user.fullName ||
+					user.displayName ||
+					user.name ||
+					code ||
+					uid,
+				category:
+					user.category ||
+					user.group ||
+					user.className ||
+					""
+			};
+
+
+			if (code) {
+				state.usersByCode[code] =
+					normalized;
+			}
+
+			if (uid) {
+				state.usersByUid[uid] =
+					normalized;
+			}
+
+			if (email) {
+				state.usersByEmail[email] =
+					normalized;
+			}
+
+		});
+
+		return state;
+	}
+
+
+	/* ============================================================
+	   6. LẤY CACHE MODULE
+	============================================================ */
+
+	window.employeeAuditMonitorModulesCache =
+    window.employeeAuditMonitorModulesCache &&
+    !Array.isArray(window.employeeAuditMonitorModulesCache)
+        ? window.employeeAuditMonitorModulesCache
+        : {};
+
+
+async function buildEmployeeAuditMonitorModuleCache(forceRefresh = false) {
+
+    const state = window.employeeAuditMonitorState =
+        window.employeeAuditMonitorState || {
+            rows: [],
+            allRows: [],
+            loading: false,
+            initialized: false,
+            lastQueryKey: "",
+            usersByCode: {},
+            usersByUid: {},
+            usersByEmail: {},
+            modulesById: {},
+            assignmentsByEmail: {},
+            moduleAssignedPeople: {}
+        };
+
+    const orgId =
+        String(window.currentOrgIdGlobal || "").trim();
+
+    if (!orgId) {
+        state.modulesById = {};
+        window.employeeAuditMonitorModulesCache = {};
+        return {};
+    }
+
+    if (
+        !forceRefresh &&
+        window.employeeAuditMonitorModulesCache &&
+        Object.keys(window.employeeAuditMonitorModulesCache).length > 0
+    ) {
+        state.modulesById = {
+            ...window.employeeAuditMonitorModulesCache
+        };
+        return state.modulesById;
+    }
+
+    const db = firebase.firestore();
+
+    const snapshot =
+        await db
+            .collection("organizations")
+            .doc(orgId)
+            .collection("modules")
+            .get();
+
+    const modulesById = {};
+
+    snapshot.forEach(function (moduleDoc) {
+
+        const data = moduleDoc.data() || {};
+
+        const fields =
+            Array.isArray(data.fields)
+                ? data.fields
+                : [];
+
+        /*
+         * Chỉ nhận module có ít nhất 1 trường dữ liệu KPI.
+         * Field hợp lệ khi có key / id / fieldKey.
+         */
+        const hasKpiFields =
+            fields.some(function (fieldObj) {
+
+                if (
+                    !fieldObj ||
+                    typeof fieldObj !== "object"
+                ) {
+                    return false;
+                }
+
+                const fieldKey =
+                    String(
+                        fieldObj.key ||
+                        fieldObj.id ||
+                        fieldObj.fieldKey ||
+                        ""
+                    ).trim();
+
+                return !!fieldKey;
+            });
+
+        if (!hasKpiFields) {
+            return;
+        }
+
+        const moduleId =
+            String(
+                moduleDoc.id ||
+                data.id ||
+                data.moduleId ||
+                ""
+            ).trim();
+
+        if (!moduleId) {
+            return;
+        }
+
+        modulesById[moduleId] = {
+            id: moduleId,
+
+            code:
+                String(
+                    data.code ||
+                    moduleId
+                ).trim(),
+
+            name:
+                String(
+                    data.name ||
+                    data.title ||
+                    data.moduleName ||
+                    data.displayName ||
+                    moduleId
+                ).trim(),
+
+            title:
+                String(
+                    data.title ||
+                    data.name ||
+                    data.moduleName ||
+                    data.displayName ||
+                    moduleId
+                ).trim(),
+
+            targetType:
+                String(
+                    data.targetType || ""
+                ).trim().toUpperCase(),
+
+            fields: fields
+        };
+    });
+
+    state.modulesById = modulesById;
+
+    window.employeeAuditMonitorModulesCache = {
+        ...modulesById
+    };
+
+    return modulesById;
+}
+
+
+
+	async function getEmployeeAuditMonitorModuleIdsForQuery(
+		selectedModuleIds = []
+	) {
+
+		const selected =
+			Array.isArray(selectedModuleIds)
+				? selectedModuleIds
+					.map(function (id) {
+						return String(id || "").trim();
+					})
+					.filter(Boolean)
+				: [];
+
+		/*
+		 * Nếu người dùng chọn module:
+		 * chỉ đọc các module được chọn.
+		 */
+		if (selected.length) {
+			return [...new Set(selected)];
+		}
+
+		/*
+		 * Nếu không chọn:
+		 * đọc TOÀN BỘ module KPI công khai.
+		 */
+		const modules =
+			await buildEmployeeAuditMonitorModuleCache(false);
+
+		return Object.keys(modules);
+	}
+
+
+	/* ============================================================
+	   7. LẤY CACHE PHÂN CÔNG
+	============================================================ */
+
+	function buildEmployeeAuditMonitorAssignmentCache() {
+
+		const state =
+			window.employeeAuditMonitorState;
+
+		state.assignmentsByEmail = {};
+		state.moduleAssignedPeople = {};
+
+		const assignments =
+			Array.isArray(window.cachedAssignmentsList)
+				? window.cachedAssignmentsList
+				: [];
+
+
+		assignments.forEach(function (assignment) {
+
+			assignment = assignment || {};
+
+			const email =
+				String(
+					assignment.email ||
+					assignment.id ||
+					""
+				).trim().toLowerCase();
+
+			const memberId =
+				String(
+					assignment.memberId ||
+					assignment.code ||
+					assignment.uid ||
+					""
+				).trim();
+
+			const uid =
+				String(
+					assignment.uid ||
+					""
+				).trim();
+
+			const fullName =
+				String(
+					assignment.fullName ||
+					""
+				).trim();
+
+			const modules =
+				Array.isArray(assignment.modules)
+					? assignment.modules
+						.map(id => String(id || "").trim())
+						.filter(Boolean)
+					: [];
+
+
+			if (!email) return;
+
+
+			const item = {
+				...assignment,
+				email: email,
+				memberId: memberId,
+				uid: uid,
+				fullName: fullName,
+				modules: modules
+			};
+
+
+			state.assignmentsByEmail[email] =
+				item;
+
+
+			modules.forEach(function (moduleId) {
+
+				if (!state.moduleAssignedPeople[moduleId]) {
+					state.moduleAssignedPeople[moduleId] = [];
+				}
+
+
+				state.moduleAssignedPeople[moduleId].push({
+					email: email,
+					memberId: memberId,
+					uid: uid,
+					fullName: fullName
+				});
+
+			});
+
+		});
+
+
+		return state;
+	}
+
+
+	/* ============================================================
+	   8. CHUẨN BỊ TOÀN BỘ CACHE CHO FORM LỌC
+	============================================================ */
+
+	window.prepareEmployeeAuditMonitorCaches =
+		function () {
+
+			buildEmployeeAuditMonitorUserCache();
+
+			buildEmployeeAuditMonitorModuleCache();
+
+			buildEmployeeAuditMonitorAssignmentCache();
+
+			return window.employeeAuditMonitorState;
+		};
+
+
+	/* ============================================================
+	   9. TẠO DANH SÁCH NGƯỜI NHẬP LIỆU
+	============================================================ */
+
+	function buildEmployeeAuditMonitorUpdaterOptions() {
+
+		const state =
+			window.employeeAuditMonitorState;
+
+		const result = {};
+
+		/*
+		 * Người nhập liệu được lấy từ assignment cache.
+		 * Như vậy nhân sự được phân công nhưng chưa từng nhập
+		 * vẫn có thể được chọn để theo dõi.
+		 */
+		Object.keys(state.assignmentsByEmail)
+			.forEach(function (email) {
+
+				const assignment =
+					state.assignmentsByEmail[email];
+
+				const user =
+					state.usersByEmail[email] ||
+					state.usersByCode[
+						assignment.memberId
+					] ||
+					state.usersByUid[
+						assignment.uid
+					] ||
+					{};
+
+
+				const id =
+					email;
+
+				if (!id) return;
+
+
+				result[id] = {
+
+					id: id,
+
+					name:
+						user.fullName ||
+						assignment.fullName ||
+						email,
+
+					email: email,
+
+					code:
+						user.code ||
+						assignment.memberId ||
+						"",
+
+					category:
+						user.category ||
+						""
+
+				};
+
+			});
+
+
+		/*
+		 * Nếu assignment cache chưa có,
+		 * fallback sang danh sách nhân sự.
+		 */
+		if (!Object.keys(result).length) {
+
+			Object.keys(state.usersByEmail)
+				.forEach(function (email) {
+
+					const user =
+						state.usersByEmail[email];
+
+					result[email] = {
+
+						id: email,
+
+						name:
+							user.fullName ||
+							email,
+
+						email: email,
+
+						code:
+							user.code ||
+							"",
+
+						category:
+							user.category ||
+							""
+
+					};
+
+				});
+
+		}
+
+
+		return Object.values(result)
+			.sort(function (a, b) {
+
+				return normalizeEmployeeAuditMonitorText(
+					a.name
+				).localeCompare(
+					normalizeEmployeeAuditMonitorText(
+						b.name
+					)
+				);
+
+			});
+
+	}
+
+
+	/* ============================================================
+	   10. TẠO DANH SÁCH MODULE ĐƯỢC PHÂN CÔNG
+	============================================================ */
+
+	function buildEmployeeAuditMonitorModuleOptions() {
+
+		const state =
+			window.employeeAuditMonitorState;
+
+		const modulesById =
+			state.modulesById || {};
+
+		return Object.values(modulesById)
+			.filter(function (module) {
+				return module && module.id;
+			})
+			.sort(function (a, b) {
+
+				const nameA =
+					String(
+						a.name ||
+						a.title ||
+						a.id ||
+						""
+					).toLowerCase();
+
+				const nameB =
+					String(
+						b.name ||
+						b.title ||
+						b.id ||
+						""
+					).toLowerCase();
+
+				return nameA.localeCompare(
+					nameB,
+					"vi"
+				);
+			})
+			.map(function (module) {
+
+				return {
+					id:
+						String(module.id),
+
+					label:
+						String(
+							module.name ||
+							module.title ||
+							module.id
+						),
+
+					name:
+						String(
+							module.name ||
+							module.title ||
+							module.id
+						),
+
+					code:
+						String(
+							module.code ||
+							module.id
+						),
+
+					targetType:
+						String(
+							module.targetType || ""
+						)
+				};
+			});
+	}
+
+
+
+
+	/* ============================================================
+	   11. ĐỔ DỮ LIỆU VÀO FORM LỌC
+	============================================================ */
+	window.openAuditMonitorFilterForm=function(type){
+	  if(type!=="updater"&&type!=="module")return;
+	  const s=window.auditMonitorFilterState;
+	  s.currentType=type;
+	  s.draft[type]=[...(s.selected[type]||[])];
+
+	  const info=filterInfo(type);
+	  const modal=document.getElementById("audit-monitor-filter-modal");
+	  const title=document.getElementById("audit-monitor-filter-title");
+	  const icon=document.getElementById("audit-monitor-filter-title-icon");
+	  const search=document.getElementById("audit-monitor-filter-search");
+	  if(!modal)return;
+
+	  if(title)title.textContent=info.title;
+	  if(icon)icon.className=info.icon;
+	  if(search){search.placeholder=info.placeholder;search.value=""}
+
+	  renderAuditMonitorFilterList();
+	  modal.style.display="block";
+	  document.body.classList.add("audit-monitor-filter-modal-open");
+	  setTimeout(()=>search?.focus(),50);
+	};
+
+
+
+	window.loadEmployeeAuditMonitorFilterOptions =
+		async function (forceRefresh = false) {
+
+			try {
+
+				/*
+				 * Không đổi logic cache nhân sự / assignment hiện có.
+				 */
+				if (
+					typeof window.prepareEmployeeAuditMonitorCaches ===
+					"function"
+				) {
+					window.prepareEmployeeAuditMonitorCaches();
+				}
+
+				const updaters =
+					typeof buildEmployeeAuditMonitorUpdaterOptions ===
+					"function"
+						? buildEmployeeAuditMonitorUpdaterOptions()
+						: [];
+
+				/*
+				 * Module phải đọc từ Firestore riêng cho Thẻ 3.
+				 * Không phụ thuộc assignment.
+				 */
+				await buildEmployeeAuditMonitorModuleCache(
+					forceRefresh
+				);
+
+				const modules =
+					buildEmployeeAuditMonitorModuleOptions();
+
+				if (
+					typeof window.setAuditMonitorFilterOptions ===
+					"function"
+				) {
+					window.setAuditMonitorFilterOptions({
+						updater: updaters,
+						module: modules
+					});
+				}
+
+				return {
+					updaters: updaters,
+					modules: modules
+				};
+
+			} catch (error) {
+
+				console.error(
+					"[AuditMonitor] Lỗi load filter options:",
+					error
+				);
+
+				if (
+					typeof window.setAuditMonitorFilterOptions ===
+					"function"
+				) {
+					window.setAuditMonitorFilterOptions({
+						updater: [],
+						module: []
+					});
+				}
+
+				return {
+					updaters: [],
+					modules: []
+				};
+			}
+		};
+
+
+
+
+	/* ============================================================
+	   12. LẤY KHOẢNG NGÀY
+	============================================================ */
+
+	function getEmployeeAuditMonitorDateRange() {
+
+		const startEl =
+			document.getElementById(
+				"audit-monitor-start-date"
+			);
+
+		const endEl =
+			document.getElementById(
+				"audit-monitor-end-date"
+			);
+
+
+		let start =
+			String(
+				startEl?.value ||
+				""
+			).trim();
+
+		let end =
+			String(
+				endEl?.value ||
+				""
+			).trim();
+
+
+		/*
+		 * Nếu người dùng bỏ trống:
+		 * - start = ngày hiện tại
+		 * - end = ngày hiện tại
+		 */
+		const today =
+			new Date()
+				.toLocaleDateString("en-CA");
+
+
+		if (!start) {
+			start = today;
+		}
+
+		if (!end) {
+			end = today;
+		}
+
+
+		if (start > end) {
+
+			const temp = start;
+
+			start = end;
+			end = temp;
+
+		}
+
+
+		return {
+			startDate: start,
+			endDate: end
+		};
+
+	}
+
+
+	/* ============================================================
+	   13. LẤY BỘ LỌC HIỆN TẠI
+	============================================================ */
+
+	function getEmployeeAuditMonitorSelectedFilters() {
+
+		if (
+			typeof window.getAuditMonitorFilterValues ===
+			"function"
+		) {
+
+			return window.getAuditMonitorFilterValues();
+
+		}
+
+
+		return {
+			updater: [],
+			module: []
+		};
+
+	}
+
+
+	/* ============================================================
+	   14. TẠO QUERY KEY
+	============================================================ */
+
+	function createEmployeeAuditMonitorQueryKey(
+		context,
+		dateRange,
+		filters
+	) {
+
+		return JSON.stringify({
+
+			orgId:
+				context.orgId,
+
+			academicId:
+				context.academicId,
+
+			start:
+				dateRange.startDate,
+
+			end:
+				dateRange.endDate,
+
+			updater:
+				[...(filters.updater || [])].sort(),
+
+			module:
+				[...(filters.module || [])].sort()
+
+		});
+
+	}
+
+
+	/* ============================================================
+	   15. CHUYỂN CHANGES THÀNH "CHI TIẾT"
+	============================================================ */
+
+	function formatEmployeeAuditMonitorChanges(
+		changes
+	) {
+
+		if (!changes) {
+			return "";
+		}
+
+
+		/*
+		 * Trường hợp changes là string.
+		 */
+		if (typeof changes === "string") {
+			return changes.trim();
+		}
+
+
+		if (Array.isArray(changes)) {
+
+			return changes
+				.map(function (item) {
+
+					if (
+						item &&
+						typeof item === "object"
+					) {
+
+						return (
+							item.content ||
+							item.value ||
+							item.label ||
+							JSON.stringify(item)
+						);
+
+					}
+
+					return String(item || "");
+
+				})
+				.filter(Boolean)
+				.join("; ");
+
+		}
+
+
+		if (
+			typeof changes !== "object"
+		) {
+
+			return String(changes || "");
+
+		}
+
+
+		const details = [];
+
+
+		Object.keys(changes)
+			.forEach(function (fieldKey) {
+
+				const value =
+					changes[fieldKey];
+
+
+				if (
+					value === null ||
+					value === undefined ||
+					value === ""
+				) {
+					return;
+				}
+
+
+				let text = "";
+
+
+				if (
+					Array.isArray(value)
+				) {
+
+					text =
+						value
+							.map(function (item) {
+
+								if (
+									item &&
+									typeof item === "object"
+								) {
+
+									return (
+										item.content ||
+										item.value ||
+										item.label ||
+										JSON.stringify(item)
+									);
+
+								}
+
+								return String(item || "");
+
+							})
+							.filter(Boolean)
+							.join(", ");
+
+				} else if (
+					typeof value === "object"
+				) {
+
+					text =
+						value.content ||
+						value.value ||
+						value.label ||
+						JSON.stringify(value);
+
+				} else {
+
+					text =
+						String(value);
+
+				}
+
+
+				if (text) {
+
+					details.push(
+						`${fieldKey}: ${text}`
+					);
+
+				}
+
+			});
+
+
+		return details.join(" | ");
+
+	}
+
+
+	/* ============================================================
+	   16. CHUYỂN TIMESTAMP THÀNH THỜI GIAN HIỂN THỊ
+	============================================================ */
+
+	function formatEmployeeAuditMonitorTime(
+		timestamp,
+		fallbackDate
+	) {
+
+		let date = null;
+
+
+		if (
+			timestamp &&
+			typeof timestamp.toDate === "function"
+		) {
+
+			date =
+				timestamp.toDate();
+
+		} else if (
+			timestamp instanceof Date
+		) {
+
+			date =
+				timestamp;
+
+		} else if (
+			typeof timestamp === "string" ||
+			typeof timestamp === "number"
+		) {
+
+			const parsed =
+				new Date(timestamp);
+
+			if (
+				!Number.isNaN(
+					parsed.getTime()
+				)
+			) {
+
+				date = parsed;
+
+			}
+
+		}
+
+
+		if (!date && fallbackDate) {
+
+			/*
+			 * date của audit log chỉ là YYYY-MM-DD.
+			 */
+			const parsed =
+				new Date(
+					`${fallbackDate}T00:00:00`
+				);
+
+			if (
+				!Number.isNaN(
+					parsed.getTime()
+				)
+			) {
+
+				date = parsed;
+
+			}
+
+		}
+
+
+		if (!date) {
+			return fallbackDate || "";
+		}
+
+
+		const day =
+			String(
+				date.getDate()
+			).padStart(2, "0");
+
+		const month =
+			String(
+				date.getMonth() + 1
+			).padStart(2, "0");
+
+		const year =
+			date.getFullYear();
+
+
+		const hour =
+			String(
+				date.getHours()
+			).padStart(2, "0");
+
+		const minute =
+			String(
+				date.getMinutes()
+			).padStart(2, "0");
+
+
+		return `${hour}:${minute} ${day}/${month}/${year}`;
+
+	}
+
+
+	/* ============================================================
+	   17. TRA NHÂN SỰ THEO ENTITY ID
+	============================================================ */
+
+	function findEmployeeAuditMonitorEntity(
+		entityId
+	) {
+
+		const state =
+			window.employeeAuditMonitorState;
+
+
+		const id =
+			String(
+				entityId || ""
+			).trim();
+
+
+		if (!id) {
+			return {};
+		}
+
+
+		return (
+			state.usersByCode[id] ||
+			state.usersByUid[id] ||
+			{}
+		);
+
+	}
+
+
+	/* ============================================================
+	   18. ĐỌC AUDIT LOG CỦA MỘT MODULE
+	============================================================ */
+
+	async function loadEmployeeAuditMonitorLogsForModule(
+		db,
+		orgId,
+		academicId,
+		moduleId,
+		startDate,
+		endDate
+	) {
+
+		const collectionRef =
+			db.collection("organizations")
+				.doc(orgId)
+				.collection("academicYears")
+				.doc(academicId)
+				.collection("modulesData")
+				.doc(moduleId)
+				.collection("auditLogs");
+
+
+		/*
+		 * Audit log hiện có trường date dạng YYYY-MM-DD,
+		 * nên ưu tiên query theo date để tránh tải toàn bộ lịch sử.
+		 */
+		const snapshot =
+			await collectionRef
+				.where(
+					"date",
+					">=",
+					startDate
+				)
+				.where(
+					"date",
+					"<=",
+					endDate
+				)
+				.get();
+
+
+		const rows = [];
+
+
+		snapshot.forEach(function (doc) {
+
+			const log =
+				doc.data() || {};
+
+
+			const entityId =
+				String(
+					log.entityId ||
+					""
+				).trim();
+
+
+			const updaterEmail =
+				String(
+					log.updaterEmail ||
+					""
+				).trim()
+				.toLowerCase();
+
+
+			const updaterName =
+				String(
+					log.updaterName ||
+					""
+				).trim();
+
+
+			const entity =
+				findEmployeeAuditMonitorEntity(
+					entityId
+				);
+
+
+			const detail =
+				formatEmployeeAuditMonitorChanges(
+					log.changes
+				);
+
+
+			/*
+			 * Nếu changes không có thì không bỏ log.
+			 * Nhưng bảng Chi tiết sẽ dùng action nếu cần
+			 * để tránh một dòng hoàn toàn trống.
+			 */
+			const finalDetail =
+				detail ||
+				String(
+					log.action ||
+					""
+				).trim();
+
+
+			rows.push({
+
+				logId:
+					doc.id,
+
+				moduleId:
+					moduleId,
+
+				moduleName:
+					window.employeeAuditMonitorState
+						.modulesById[moduleId]
+						?.name ||
+					moduleId,
+
+				entityId:
+					entityId,
+
+				employeeName:
+					entity.fullName ||
+					entity.name ||
+					entity.displayName ||
+					entityId,
+
+				employeeCode:
+					entity.code ||
+					entityId,
+
+				employeeCategory:
+					entity.category ||
+					"",
+
+				updaterEmail:
+					updaterEmail,
+
+				updaterName:
+					updaterName ||
+					updaterEmail,
+
+				detail:
+					finalDetail,
+
+				date:
+					String(
+						log.date ||
+						""
+					),
+
+				time:
+					formatEmployeeAuditMonitorTime(
+						log.timestamp,
+						log.date
+					),
+
+				timestamp:
+					log.timestamp || null
+
+			});
+
+		});
+
+
+		return rows;
+
+	}
+
+
+	/* ============================================================
+	   19. LOAD + LỌC + RENDER TOÀN BỘ
+	============================================================ */
+window.loadEmployeeAuditMonitorData =
+	async function (
+		forceRefresh = false
+	) {
+
+		const tableBody =
+			document.getElementById(
+				"audit-monitor-table-body"
+			);
+
+
+		if (!tableBody) {
+
+			console.warn(
+				"[AuditMonitor] Không tìm thấy #audit-monitor-table-body"
+			);
+
+			return;
+
+		}
+
+
+		const context =
+			await getEmployeeAuditMonitorContext();
+
+
+		if (
+			!context.orgId ||
+			!context.academicId
+		) {
+
+			renderEmployeeAuditMonitorMessage(
+				"Chưa xác định được tổ chức hoặc năm học."
+			);
+
+			return;
+
+		}
+
+
+		const dateRange =
+			getEmployeeAuditMonitorDateRange();
+
+
+		const filters =
+			getEmployeeAuditMonitorSelectedFilters();
+
+
+		const state =
+			window.employeeAuditMonitorState;
+
+
+		const queryKey =
+			createEmployeeAuditMonitorQueryKey(
+				context,
+				dateRange,
+				filters
+			);
+
+
+		if (
+			!forceRefresh &&
+			state.lastQueryKey === queryKey &&
+			Array.isArray(state.rows)
+		) {
+
+			renderEmployeeAuditMonitorTable(
+				state.rows
+			);
+
+			return;
+
+		}
+
+
+		state.loading = true;
+
+
+		tableBody.innerHTML =
+			`
+			<tr>
+				<td colspan="5"
+					style="text-align:center;color:#6c757d;padding:18px;">
+					Đang tải dữ liệu theo dõi...
+				</td>
+			</tr>
+			`;
+
+
+		try {
+
+			/*
+			 * Chuyển field key trong Chi tiết sang LABEL tự nhiên.
+			 *
+			 * Ví dụ:
+			 *   CLGD9_onLuyen: Có
+			 *
+			 * thành:
+			 *   Giao nhiệm vụ và đánh giá học sinh trên phần mềm ôn luyện: Có
+			 *
+			 * Hàm được đặt bên trong loadEmployeeAuditMonitorData()
+			 * để không tạo thêm tên hàm global, tránh trùng với các
+			 * hàm đang có trong file Thẻ 3.
+			 */
+			const convertAuditDetailToLabel =
+				function (detail, moduleId) {
+
+					if (!detail) {
+						return "";
+					}
+
+					const rawDetail =
+						String(detail).trim();
+
+					if (!rawDetail) {
+						return "";
+					}
+
+
+					/*
+					 * Tìm module hiện tại từ các cache đang có.
+					 * Ưu tiên state.modulesById.
+					 */
+					let moduleItem = null;
+
+
+					if (
+						state.modulesById &&
+						typeof state.modulesById === "object"
+					) {
+
+						moduleItem =
+							state.modulesById[moduleId] ||
+							null;
+
+					}
+
+
+					/*
+					 * Fallback cache module của Thẻ 3.
+					 */
+					if (!moduleItem) {
+
+						const moduleCache =
+							window.employeeAuditMonitorModulesCache;
+
+						if (Array.isArray(moduleCache)) {
+
+							moduleItem =
+								moduleCache.find(
+									function (item) {
+										return String(
+											item?.id || ""
+										).trim() === String(
+											moduleId || ""
+										).trim();
+									}
+								) || null;
+
+						} else if (
+							moduleCache &&
+							typeof moduleCache === "object"
+						) {
+
+							moduleItem =
+								moduleCache[moduleId] ||
+								null;
+
+						}
+
+					}
+
+
+					/*
+					 * Fallback cachedModulesList nếu hệ thống hiện tại
+					 * vẫn đang dùng cache module cũ.
+					 */
+					if (!moduleItem) {
+
+						const modules =
+							Array.isArray(window.cachedModulesList)
+								? window.cachedModulesList
+								: [];
+
+
+						moduleItem =
+							modules.find(
+								function (item) {
+									return String(
+										item?.id || ""
+									).trim() === String(
+										moduleId || ""
+									).trim();
+								}
+							) || null;
+
+					}
+
+
+					if (!moduleItem) {
+						return rawDetail;
+					}
+
+
+					/*
+					 * Có thể module cache dùng fields hoặc kpiFields.
+					 */
+					const fields =
+						Array.isArray(moduleItem.fields)
+							? moduleItem.fields
+							: Array.isArray(moduleItem.kpiFields)
+								? moduleItem.kpiFields
+								: [];
+
+
+					if (!fields.length) {
+						return rawDetail;
+					}
+
+
+					const labelMap = {};
+
+
+					fields.forEach(
+						function (field) {
+
+							if (
+								!field ||
+								typeof field !== "object"
+							) {
+								return;
+							}
+
+
+							const key =
+								String(
+									field.key ||
+									field.id ||
+									field.fieldKey ||
+									""
+								).trim();
+
+
+							if (!key) {
+								return;
+							}
+
+
+							const label =
+								String(
+									field.label ||
+									field.title ||
+									field.name ||
+									field.displayName ||
+									key
+								).trim();
+
+
+							labelMap[key] =
+								label || key;
+
+						}
+					);
+
+
+					/*
+					 * Detail hiện tại được tạo theo dạng:
+					 *   fieldKey: value | fieldKey2: value2
+					 *
+					 * Thay đúng phần fieldKey ở đầu mỗi segment.
+					 */
+					return rawDetail
+						.split(" | ")
+						.map(
+							function (part) {
+
+								const text =
+									String(part || "").trim();
+
+
+								if (!text) {
+									return "";
+								}
+
+
+								const separatorIndex =
+									text.indexOf(":");
+
+
+								if (separatorIndex <= 0) {
+									return text;
+								}
+
+
+								const fieldKey =
+									text
+										.slice(0, separatorIndex)
+										.trim();
+
+
+								const value =
+									text
+										.slice(separatorIndex + 1)
+										.trim();
+
+
+								const label =
+									labelMap[fieldKey] ||
+									fieldKey;
+
+
+								return value
+									? `${label}: ${value}`
+									: label;
+
+							}
+						)
+						.filter(Boolean)
+						.join(" | ");
+
+				};
+
+
+			/*
+			 * Lấy lại filters sau khi cache được chuẩn bị.
+			 */
+			const activeFilters =
+				getEmployeeAuditMonitorSelectedFilters();
+
+
+			/*
+			 * Module được chọn:
+			 * - Nếu có chọn: chỉ đọc module đó.
+			 * - Nếu không chọn: đọc tất cả module được phân công.
+			 */
+			let moduleIds =
+				Array.isArray(
+					activeFilters.module
+				)
+					? [
+						...activeFilters.module
+					]
+					: [];
+
+
+			if (!moduleIds.length) {
+
+				moduleIds =
+					buildEmployeeAuditMonitorModuleOptions()
+						.map(
+							item => item.id
+						);
+
+			}
+
+
+			/*
+			 * Không có module thì bảng rỗng.
+			 */
+			if (!moduleIds.length) {
+
+				state.rows = [];
+				state.allRows = [];
+				state.lastQueryKey = queryKey;
+
+				renderEmployeeAuditMonitorMessage(
+					"Chưa có bài toán được phân công."
+				);
+
+				return;
+
+			}
+
+
+			const db =
+				firebase.firestore();
+
+
+			const allRows = [];
+
+
+			/*
+			 * Đọc auditLogs từng module.
+			 */
+			for (
+				const moduleId
+				of moduleIds
+			) {
+
+				const rows =
+					await loadEmployeeAuditMonitorLogsForModule(
+						db,
+						context.orgId,
+						context.academicId,
+						moduleId,
+						dateRange.startDate,
+						dateRange.endDate
+					);
+
+
+				/*
+				 * Đổi field key -> label ngay sau khi lấy log,
+				 * đồng thời tách mỗi cập nhật thành một dòng riêng.
+				 * Không sửa object log gốc trong Firestore.
+				 */
+				/*
+				 * Đổi field key -> label và tách MỖI cập nhật thành MỘT ROW.
+				 *
+				 * Ví dụ một log có:
+				 *   CLGD9_onLuyen: Có | DiHocMuon: 2 | KhongDongPhuc: 1
+				 *
+				 * sẽ trở thành 3 dòng riêng trong bảng và Excel.
+				 */
+				rows.forEach(
+					function (row) {
+
+						if (!row) {
+							return;
+						}
+
+						const labeledDetail =
+							convertAuditDetailToLabel(
+								row.detail,
+								moduleId
+							);
+
+						/*
+						 * Detail được tạo từ format cũ bằng dấu " | ".
+						 * Tách từng phần để mỗi cập nhật là một dòng.
+						 *
+						 * Không dùng <br> vì dữ liệu này còn được dùng
+						 * trực tiếp cho chức năng xuất Excel.
+						 */
+						const detailItems =
+							String(labeledDetail || "")
+								.split(/\s*\|\s*/)
+								.map(
+									function (item) {
+										return String(item || "").trim();
+									}
+								)
+								.filter(Boolean);
+
+						/*
+						 * Trường hợp không có chi tiết vẫn giữ nguyên
+						 * một dòng log để không làm mất bản ghi.
+						 */
+						if (!detailItems.length) {
+							allRows.push({
+								...row,
+								detail: ""
+							});
+							return;
+						}
+
+						/*
+						 * Mỗi detailItem = một row.
+						 * Các thông tin thời gian, nhân sự, người nhập,
+						 * module... được giữ nguyên.
+						 */
+						detailItems.forEach(
+							function (detailItem) {
+
+								allRows.push({
+									...row,
+									detail: detailItem
+								});
+
+							}
+						);
+
+					}
+				);
+
+			}
+
+
+			/*
+			 * Lọc Người nhập liệu.
+			 */
+			const updaterFilter =
+				Array.isArray(
+					activeFilters.updater
+				)
+					? activeFilters.updater
+						.map(
+							value =>
+								String(
+									value || ""
+								)
+								.trim()
+								.toLowerCase()
+						)
+						.filter(Boolean)
+					: [];
+
+
+			let filteredRows =
+				allRows;
+
+
+			if (updaterFilter.length) {
+
+				const updaterSet =
+					new Set(
+						updaterFilter
+					);
+
+
+				filteredRows =
+					filteredRows.filter(
+						row =>
+							updaterSet.has(
+								String(
+									row.updaterEmail ||
+									""
+								)
+								.trim()
+								.toLowerCase()
+							)
+					);
+
+			}
+
+
+			/*
+			 * Sắp xếp:
+			 * mới nhất lên đầu.
+			 */
+			filteredRows.sort(
+				function (a, b) {
+
+					const ta =
+						getEmployeeAuditMonitorTimestampValue(
+							a.timestamp,
+							a.date
+						);
+
+					const tb =
+						getEmployeeAuditMonitorTimestampValue(
+							b.timestamp,
+							b.date
+						);
+
+					return tb - ta;
+
+				}
+			);
+
+
+			state.allRows =
+				allRows;
+
+			state.rows =
+				filteredRows;
+
+			state.lastQueryKey =
+				queryKey;
+
+			state.loading =
+				false;
+
+
+			renderEmployeeAuditMonitorTable(
+				filteredRows
+			);
+
+
+		} catch (error) {
+
+			state.loading = false;
+
+			console.error(
+				"[AuditMonitor] Lỗi tải dữ liệu:",
+				error
+			);
+
+
+			renderEmployeeAuditMonitorMessage(
+				"Lỗi tải dữ liệu: " +
+				(
+					error?.message ||
+					error
+				)
+			);
+
+		}
+
+	};
+
+
+
+	/* ============================================================
+	   20. TIMESTAMP -> NUMBER ĐỂ SORT
+	============================================================ */
+
+	function getEmployeeAuditMonitorTimestampValue(
+		timestamp,
+		fallbackDate
+	) {
+
+		if (
+			timestamp &&
+			typeof timestamp.toDate === "function"
+		) {
+
+			return timestamp
+				.toDate()
+				.getTime();
+
+		}
+
+
+		if (timestamp instanceof Date) {
+			return timestamp.getTime();
+		}
+
+
+		if (
+			typeof timestamp === "string" ||
+			typeof timestamp === "number"
+		) {
+
+			const parsed =
+				new Date(timestamp);
+
+			if (
+				!Number.isNaN(
+					parsed.getTime()
+				)
+			) {
+
+				return parsed.getTime();
+
+			}
+
+		}
+
+
+		if (fallbackDate) {
+
+			const parsed =
+				new Date(
+					`${fallbackDate}T00:00:00`
+				);
+
+			if (
+				!Number.isNaN(
+					parsed.getTime()
+				)
+			) {
+
+				return parsed.getTime();
+
+			}
+
+		}
+
+
+		return 0;
+
+	}
+
+
+	/* ============================================================
+	   21. RENDER THÔNG BÁO
+	============================================================ */
+
+	function renderEmployeeAuditMonitorMessage(
+		message
+	) {
+
+		const tbody =
+			document.getElementById(
+				"audit-monitor-table-body"
+			);
+
+
+		if (!tbody) return;
+
+
+		tbody.innerHTML =
+			`
+			<tr>
+				<td colspan="5"
+					style="text-align:center;color:#6c757d;padding:18px;">
+					${escapeEmployeeAuditMonitorHtml(message)}
+				</td>
+			</tr>
+			`;
+
+	}
+
+
+	/* ============================================================
+	   22. RENDER BẢNG
+	============================================================ */
+
+	window.renderEmployeeAuditMonitorTable =
+		function (rows) {
+
+			const tbody =
+				document.getElementById(
+					"audit-monitor-table-body"
+				);
+
+
+			if (!tbody) {
+				return;
+			}
+
+
+			if (
+				!Array.isArray(rows) ||
+				!rows.length
+			) {
+
+				renderEmployeeAuditMonitorMessage(
+					"Không có dữ liệu phù hợp với bộ lọc."
+				);
+
+				return;
+
+			}
+
+
+			let html = "";
+
+
+			rows.forEach(function (row) {
+
+				const time =
+					escapeEmployeeAuditMonitorHtml(
+						row.time ||
+						row.date ||
+						""
+					);
+
+
+				const employeeName =
+					escapeEmployeeAuditMonitorHtml(
+						row.employeeName ||
+						row.entityId ||
+						""
+					);
+
+
+				const employeeCode =
+					escapeEmployeeAuditMonitorHtml(
+						row.employeeCode ||
+						row.entityId ||
+						""
+					);
+
+
+				const updater =
+					escapeEmployeeAuditMonitorHtml(
+						row.updaterName ||
+						row.updaterEmail ||
+						""
+					);
+
+
+				const detail =
+					escapeEmployeeAuditMonitorHtml(
+						row.detail ||
+						""
+					);
+
+
+				html +=
+					`
+					<tr>
+
+						<td>
+							${time}
+						</td>
+
+						<td>
+							<div style="font-weight:600;">
+								${employeeName}
+							</div>
+							${
+								row.employeeCategory
+									? `
+										<div style="
+											font-size:.7rem;
+											color:#6c757d;
+											margin-top:2px;
+										">
+											${escapeEmployeeAuditMonitorHtml(
+												row.employeeCategory
+											)}
+										</div>
+									  `
+									: ""
+							}
+						</td>
+
+						<td>
+							${employeeCode}
+						</td>
+
+						<td>
+							<div style="font-weight:600;">
+								${updater}
+							</div>
+							${
+								row.updaterEmail
+									? `
+										<div style="
+											font-size:.7rem;
+											color:#6c757d;
+											margin-top:2px;
+										">
+											${escapeEmployeeAuditMonitorHtml(
+												row.updaterEmail
+											)}
+										</div>
+									  `
+									: ""
+							}
+						</td>
+
+						<td>
+							${detail}
+						</td>
+
+					</tr>
+					`;
+
+			});
+
+
+			tbody.innerHTML =
+				html;
+
+		};
+
+
+	/* ============================================================
+	   23. ÁP DỤNG FILTER -> LOAD BẢNG
+	============================================================ */
+
+	window.applyEmployeeAuditMonitorFilters =
+		function () {
+
+			/*
+			 * Khi người dùng bấm "Áp dụng" trên modal,
+			 * gọi lại dữ liệu.
+			 */
+			window.loadEmployeeAuditMonitorData(
+				true
+			);
+
+		};
+
+
+	/* ============================================================
+	   24. GẮN SỰ KIỆN CHO NGÀY
+	============================================================ */
+
+	function initEmployeeAuditMonitorDateEvents() {
+
+		const start =
+			document.getElementById(
+				"audit-monitor-start-date"
+			);
+
+		const end =
+			document.getElementById(
+				"audit-monitor-end-date"
+			);
+
+
+		[start, end]
+			.forEach(function (element) {
+
+				if (!element) return;
+
+
+				if (
+					element.dataset.auditMonitorBound ===
+					"1"
+				) {
+					return;
+				}
+
+
+				element.dataset.auditMonitorBound =
+					"1";
+
+
+				element.addEventListener(
+					"change",
+					function () {
+
+						window.loadEmployeeAuditMonitorData(
+							true
+						);
+
+					}
+				);
+
+			});
+
+	}
+
+
+	/* ============================================================
+	   25. KHỞI TẠO THẺ 3
+	============================================================ */
+
+	window.initEmployeeAuditMonitorTab =
+    async function () {
+
+        const tab =
+            document.getElementById(
+                "emp-tab-sec-3"
+            );
+
+        if (!tab) {
+
+            console.warn(
+                "[AuditMonitor] Không tìm thấy #emp-tab-sec-3"
+            );
+
+            return;
+        }
+
+        try {
+
+            if (
+                typeof window.initEmployeeAuditMonitorDateEvents ===
+                "function"
+            ) {
+                window.initEmployeeAuditMonitorDateEvents();
+            }
+
+            /*
+             * Nạp updater + toàn bộ module KPI.
+             */
+            await window.loadEmployeeAuditMonitorFilterOptions(
+                false
+            );
+
+            /*
+             * Đọc audit log.
+             */
+            await window.loadEmployeeAuditMonitorData(
+                false
+            );
+
+            if (
+                window.employeeAuditMonitorState &&
+                typeof window.employeeAuditMonitorState ===
+                    "object"
+            ) {
+                window.employeeAuditMonitorState.initialized =
+                    true;
+            }
+
+        } catch (error) {
+
+            console.error(
+                "[AuditMonitor] Lỗi khởi tạo Thẻ 3:",
+                error
+            );
+
+            if (
+                window.employeeAuditMonitorState
+            ) {
+                window.employeeAuditMonitorState.loading =
+                    false;
+            }
+
+            if (
+                typeof renderEmployeeAuditMonitorMessage ===
+                "function"
+            ) {
+                renderEmployeeAuditMonitorMessage(
+                    "Không thể tải dữ liệu theo dõi người nhập liệu."
+                );
+            }
+        }
+    };
+
+		
+
+
+	/* ============================================================
+	   26. REFRESH THỦ CÔNG
+	============================================================ */
+
+	window.refreshEmployeeAuditMonitor =
+		async function () {
+
+			const state =
+				window.employeeAuditMonitorState;
+
+			if (state) {
+				state.lastQueryKey = "";
+			}
+
+			/*
+			 * Force reload module KPI + updater options.
+			 */
+			await window.loadEmployeeAuditMonitorFilterOptions(
+				true
+			);
+
+			/*
+			 * Force reload audit logs.
+			 */
+			await window.loadEmployeeAuditMonitorData(
+				true
+			);
+		};
+
+
+
+
+	/* ============================================================
+	   27. TỰ ĐỒNG BỘ CACHE KHI MỞ THẺ 3
+	============================================================ */
+
+	document.addEventListener(
+		"DOMContentLoaded",
+		function () {
+
+			/*
+			 * Chỉ gắn event ngày.
+			 * Không tự load Firestore khi trang vừa mở.
+			 */
+			initEmployeeAuditMonitorDateEvents();
+
+		}
+	);
+
+
+	/* ============================================================
+	   28. KHI CÁC CACHE PHÂN CÔNG / MODULE THAY ĐỔI
+		   CÓ THỂ GỌI HÀM NÀY TỪ TAB QUẢN TRỊ
+	============================================================ */
+
+	window.syncEmployeeAuditMonitorFilterCache =
+		async function () {
+
+			await window.loadEmployeeAuditMonitorFilterOptions(
+				true
+			);
+
+			return window.employeeAuditMonitorState;
+		};
+
+
+
+	/* ============================================================
+	   29. HÀM TIỆN ÍCH KIỂM TRA DỮ LIỆU
+	============================================================ */
+
+	window.getEmployeeAuditMonitorState =
+		function () {
+
+			return window.employeeAuditMonitorState;
+
+		};
+
+	
+	
+
+	// KHỐI XUẤT DỮ LIỆU CHÍNH RA FILE EXCEL
+	
+		/* ============================================================
+	   THẺ 3 - XUẤT DỮ LIỆU EXCEL
+	   ============================================================
+	   Nút HTML:
+	   onclick="exportEmployeeAuditMonitorExcel()"
+
+	   Logic:
+	   - Xuất đúng dữ liệu đang hiển thị sau bộ lọc Thời gian /
+		 Người nhập / Module.
+	   - 1 người nhập  -> 1 file XLSX, mỗi module 1 sheet.
+	   - Nhiều người   -> 1 file ZIP, mỗi người 1 file XLSX.
+	   - Không có dữ liệu -> thông báo, không tạo file.
+	   - Ưu tiên SheetJS (XLSX) và JSZip nếu đã được nạp.
+	   ============================================================ */
+
+	
+
+		function getExportRows() {
+			const state = window.employeeAuditMonitorState || {};
+			return Array.isArray(state.rows) ? [...state.rows] : [];
+		}
+
+		function getExportFilters() {
+			if (typeof window.getAuditMonitorFilterValues === "function") {
+				return window.getAuditMonitorFilterValues();
+			}
+
+			return {
+				updater: [],
+				module: []
+			};
+		}
+
+		function getExportDateRange() {
+			const startEl = document.getElementById("audit-monitor-start-date");
+			const endEl = document.getElementById("audit-monitor-end-date");
+
+			let start = String(startEl?.value || "").trim();
+			let end = String(endEl?.value || "").trim();
+
+			const today = new Date().toLocaleDateString("en-CA");
+
+			if (!start) start = today;
+			if (!end) end = today;
+
+			if (start > end) {
+				const temp = start;
+				start = end;
+				end = temp;
+			}
+
+			return {
+				startDate: start,
+				endDate: end
+			};
+		}
+
+		function safeFileName(value, fallback) {
+			const text = String(value || fallback || "")
+				.trim()
+				.replace(/[\\/:*?"<>|]/g, "_")
+				.replace(/\s+/g, " ");
+
+			return text || fallback || "export";
+		}
+
+		function safeSheetName(value, fallback) {
+			let name = String(value || fallback || "Sheet")
+				.trim()
+				.replace(/[\\/*?:[\]]/g, " ")
+				.replace(/\s+/g, " ");
+
+			if (!name) name = fallback || "Sheet";
+
+			/* Excel giới hạn tên sheet tối đa 31 ký tự. */
+			return name.substring(0, 31);
+		}
+
+		function uniqueSheetName(workbook, desiredName) {
+			const base = safeSheetName(desiredName, "Module");
+			let name = base;
+			let index = 2;
+
+			while (workbook.SheetNames.includes(name)) {
+				const suffix = ` (${index})`;
+				name = base.substring(0, 31 - suffix.length) + suffix;
+				index++;
+			}
+
+			return name;
+		}
+
+		function formatExportDetail(row) {
+			return String(
+				row?.detail ||
+				""
+			).trim();
+		}
+
+		function rowToExcelArray(row) {
+			return [
+				row?.time || row?.date || "",
+				row?.employeeName || row?.entityId || "",
+				row?.employeeCode || row?.entityId || "",
+				row?.updaterName || row?.updaterEmail || "",
+				row?.updaterEmail || "",
+				row?.moduleName || row?.moduleId || "",
+				formatExportDetail(row)
+			];
+		}
+
+		function getExcelHeaders() {
+			return [
+				"Thời gian",
+				"Họ và tên",
+				"Mã định danh",
+				"Người nhập",
+				"Email người nhập",
+				"Module nhiệm vụ",
+				"Chi tiết"
+			];
+		}
+
+		function buildWorkbookForRows(rows, employeeName) {
+			if (
+				typeof XLSX === "undefined" ||
+				!XLSX.utils
+			) {
+				throw new Error(
+					"Chưa nạp thư viện Excel (SheetJS/XLSX)."
+				);
+			}
+
+			const workbook = XLSX.utils.book_new();
+
+			/*
+			 * Gom theo module.
+			 * Mỗi module = một sheet.
+			 */
+			const groups = {};
+
+			rows.forEach(function (row) {
+				const moduleId = String(
+					row?.moduleId || "unknown"
+				).trim();
+
+				const moduleName = String(
+					row?.moduleName ||
+					moduleId ||
+					"Module"
+				).trim();
+
+				const key = moduleId || moduleName;
+
+				if (!groups[key]) {
+					groups[key] = {
+						moduleName: moduleName,
+						rows: []
+					};
+				}
+
+				groups[key].rows.push(row);
+			});
+
+			const groupList = Object.values(groups);
+
+			/*
+			 * Nếu vì lý do nào đó không có module,
+			 * vẫn tạo một sheet Tổng hợp.
+			 */
+			if (!groupList.length) {
+				groupList.push({
+					moduleName: "Tổng hợp",
+					rows: rows
+				});
+			}
+
+			/*
+			 * Sheet Tổng hợp luôn đặt đầu tiên.
+			 */
+			const summaryRows = [
+				getExcelHeaders(),
+				...rows.map(rowToExcelArray)
+			];
+
+			const summarySheet =
+				XLSX.utils.aoa_to_sheet(summaryRows);
+
+			summarySheet["!cols"] = [
+				{ wch: 20 },
+				{ wch: 24 },
+				{ wch: 14 },
+				{ wch: 24 },
+				{ wch: 30 },
+				{ wch: 28 },
+				{ wch: 70 }
+			];
+
+			XLSX.utils.book_append_sheet(
+				workbook,
+				summarySheet,
+				"Tổng hợp"
+			);
+
+			groupList.forEach(function (group) {
+				const data = [
+					getExcelHeaders(),
+					...group.rows.map(rowToExcelArray)
+				];
+
+				const sheet =
+					XLSX.utils.aoa_to_sheet(data);
+
+				sheet["!cols"] = [
+					{ wch: 20 },
+					{ wch: 24 },
+					{ wch: 14 },
+					{ wch: 24 },
+					{ wch: 30 },
+					{ wch: 28 },
+					{ wch: 70 }
+				];
+
+				const sheetName =
+					uniqueSheetName(
+						workbook,
+						group.moduleName
+					);
+
+				XLSX.utils.book_append_sheet(
+					workbook,
+					sheet,
+					sheetName
+				);
+			});
+
+			return workbook;
+		}
+
+		function writeWorkbookToBlob(workbook) {
+			const arrayBuffer = XLSX.write(
+				workbook,
+				{
+					bookType: "xlsx",
+					type: "array"
+				}
+			);
+
+			return new Blob(
+				[arrayBuffer],
+				{
+					type:
+						"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+				}
+			);
+		}
+
+		function downloadBlob(blob, fileName) {
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement("a");
+
+			anchor.href = url;
+			anchor.download = fileName;
+			anchor.style.display = "none";
+
+			document.body.appendChild(anchor);
+			anchor.click();
+			anchor.remove();
+
+			setTimeout(function () {
+				URL.revokeObjectURL(url);
+			}, 1500);
+		}
+
+		function groupRowsByUpdater(rows) {
+			const groups = {};
+
+			rows.forEach(function (row) {
+				const email = String(
+					row?.updaterEmail ||
+					""
+				).trim().toLowerCase();
+
+				/*
+				 * Nếu audit log cũ không có email,
+				 * dùng updaterName làm khóa tạm.
+				 */
+				const key =
+					email ||
+					String(
+						row?.updaterName ||
+						"unknown"
+					).trim() ||
+					"unknown";
+
+				if (!groups[key]) {
+					groups[key] = {
+						email: email,
+						name:
+							String(
+								row?.updaterName ||
+								email ||
+								"Người nhập dữ liệu"
+							).trim(),
+						rows: []
+					};
+				}
+
+				groups[key].rows.push(row);
+			});
+
+			return Object.values(groups);
+		}
+
+		function showExportMessage(message) {
+			/*
+			 * Nếu project có toast riêng thì ưu tiên dùng.
+			 */
+			if (
+				typeof window.showToast === "function"
+			) {
+				window.showToast(message);
+				return;
+			}
+
+			if (
+				typeof window.showNotification === "function"
+			) {
+				window.showNotification(message);
+				return;
+			}
+
+			alert(message);
+		}
+
+		function setExportButtonBusy(isBusy) {
+			const button =
+				document.querySelector(
+					".audit-monitor-export-btn"
+				) ||
+				document.querySelector(
+					'[onclick*="exportEmployeeAuditMonitorExcel"]'
+				);
+
+			if (!button) return;
+
+			if (isBusy) {
+				if (!button.dataset.oldHtml) {
+					button.dataset.oldHtml =
+						button.innerHTML;
+				}
+
+				button.disabled = true;
+				button.innerHTML =
+					'<i class="fa-solid fa-spinner fa-spin"></i>';
+				button.style.opacity = "0.65";
+				button.style.pointerEvents = "none";
+			} else {
+				button.disabled = false;
+
+				if (button.dataset.oldHtml) {
+					button.innerHTML =
+						button.dataset.oldHtml;
+					delete button.dataset.oldHtml;
+				}
+
+				button.style.opacity = "";
+				button.style.pointerEvents = "";
+			}
+		}
+
+		async function exportOneEmployeeToXlsx(
+			employeeGroup,
+			dateRange
+		) {
+			const workbook =
+				buildWorkbookForRows(
+					employeeGroup.rows,
+					employeeGroup.name
+				);
+
+			const safeName =
+				safeFileName(
+					employeeGroup.name,
+					"Nguoi_nhap"
+				);
+
+			const fileName =
+				`Theo_doi_${safeName}_${dateRange.startDate}_${dateRange.endDate}.xlsx`;
+
+			const blob =
+				writeWorkbookToBlob(workbook);
+
+			downloadBlob(blob, fileName);
+
+			return fileName;
+		}
+
+		async function exportMultipleEmployeesToZip(
+			employeeGroups,
+			dateRange
+		) {
+			if (typeof JSZip === "undefined") {
+				throw new Error(
+					"Chưa nạp thư viện ZIP (JSZip)."
+				);
+			}
+
+			const zip = new JSZip();
+
+			employeeGroups.forEach(function (group) {
+				const workbook =
+					buildWorkbookForRows(
+						group.rows,
+						group.name
+					);
+
+				const arrayBuffer =
+					XLSX.write(
+						workbook,
+						{
+							bookType: "xlsx",
+							type: "array"
+						}
+					);
+
+				const safeName =
+					safeFileName(
+						group.name,
+						"Nguoi_nhap"
+					);
+
+				const fileName =
+					`Theo_doi_${safeName}_${dateRange.startDate}_${dateRange.endDate}.xlsx`;
+
+				zip.file(
+					fileName,
+					arrayBuffer
+				);
+			});
+
+			const zipBlob =
+				await zip.generateAsync({
+					type: "blob",
+					compression: "DEFLATE",
+					compressionOptions: {
+						level: 6
+					}
+				});
+
+			const zipName =
+				`Theo_doi_nguoi_nhap_${dateRange.startDate}_${dateRange.endDate}.zip`;
+
+			downloadBlob(
+				zipBlob,
+				zipName
+			);
+
+			return zipName;
+		}
+
+		/*
+		 * ============================================================
+		 * HÀM CHÍNH - GỌI TỪ NÚT EXCEL
+		 * ============================================================
+		 */
+		window.exportEmployeeAuditMonitorExcel =
+			async function () {
+				if (
+					typeof XLSX === "undefined"
+				) {
+					showExportMessage(
+						"Chưa nạp thư viện Excel (SheetJS/XLSX)."
+					);
+					return;
+				}
+
+				const rows =
+					getExportRows();
+
+				if (!rows.length) {
+					showExportMessage(
+						"Không có dữ liệu để xuất."
+					);
+					return;
+				}
+
+				const dateRange =
+					getExportDateRange();
+
+				const filters =
+					getExportFilters();
+
+				setExportButtonBusy(true);
+
+				try {
+					/*
+					 * Kiểm tra bộ lọc thực tế.
+					 *
+					 * Dữ liệu state.rows chính là dữ liệu đã
+					 * được lọc theo thời gian + người nhập + module.
+					 *
+					 * Vì vậy không query Firestore lần nữa.
+					 */
+					const employeeGroups =
+						groupRowsByUpdater(rows);
+
+					if (!employeeGroups.length) {
+						showExportMessage(
+							"Không xác định được người nhập dữ liệu."
+						);
+						return;
+					}
+
+					/*
+					 * ------------------------------------------------
+					 * TRƯỜNG HỢP CHỈ CÓ 1 NGƯỜI
+					 * ------------------------------------------------
+					 *
+					 * Xuất trực tiếp 1 XLSX.
+					 */
+					if (
+						employeeGroups.length === 1
+					) {
+						await exportOneEmployeeToXlsx(
+							employeeGroups[0],
+							dateRange
+						);
+
+						return;
+					}
+
+					/*
+					 * ------------------------------------------------
+					 * NHIỀU NGƯỜI
+					 * ------------------------------------------------
+					 *
+					 * Nếu có nhiều người thì tạo ZIP,
+					 * bên trong mỗi người là một file XLSX.
+					 */
+					await exportMultipleEmployeesToZip(
+						employeeGroups,
+						dateRange
+					);
+
+				} catch (error) {
+					console.error(
+						"[AuditMonitor] Lỗi xuất Excel:",
+						error
+					);
+
+					showExportMessage(
+						"Không thể xuất dữ liệu: " +
+						(
+							error?.message ||
+							error
+						)
+					);
+				} finally {
+					setExportButtonBusy(false);
+				}
+			};
+
+
+
 	//	THẺ 4 - LỚP CHỦ NHIỆM
 async function loadHomeroomClassData(forceRefresh = false) {
     const tableBody = document.getElementById("emp-homeroom-body-rows");
