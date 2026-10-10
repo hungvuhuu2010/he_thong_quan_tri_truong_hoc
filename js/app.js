@@ -26761,1565 +26761,1273 @@ async function loadPotentialAssistantsForHelp(orgId, academicYearId, moduleId, c
 	
 	
 	// 	EMPLOYEE PANEL - THẺ 2
-async function searchIndividualAuditSheet(forceRefresh = false) {
-
-	const keywordInput =
-		document.getElementById("lookup-entity-keyword");
-
-	if (!keywordInput) return;
-
-	const rawKeyword =
-		keywordInput.value.trim();
-
-	if (!rawKeyword) {
-		alert("Vui lòng nhập Mã định danh hoặc Tên cá nhân cần tra cứu!");
-		return;
-	}
-
-	const keyword =
-		rawKeyword.toLowerCase();
-
-	const nameEl =
-		document.getElementById("sheet-entity-name");
-
-	const categoryEl =
-		document.getElementById("sheet-entity-category");
-
-	const idEl =
-		document.getElementById("sheet-entity-id");
-
-	const rankEl =
-		document.getElementById("sheet-entity-rank");
-
-	const violationsListEl =
-		document.getElementById("sheet-violations-list");
-
-	if (violationsListEl) {
-		violationsListEl.innerHTML =
-			'<div style="color:#6c757d;font-style:italic;">' +
-			'Đang tra cứu dữ liệu từ hệ thống...' +
-			'</div>';
-	}
-
-	try {
-
-		const orgId =
-			window.currentOrgIdGlobal;
-
-		if (!orgId) {
-			alert("Chưa xác định được thông tin đơn vị (OrgId).");
-			return;
-		}
-
-		// =====================================================
-		// 1. XÁC ĐỊNH NĂM HỌC
-		// =====================================================
-
-		let academicYearId = "";
-
-		const yearsArr =
-			window.currentAcademicYearsGlobal;
-
-		if (
-			Array.isArray(yearsArr) &&
-			yearsArr.length > 0
-		) {
-
-			const lastYearItem =
-				yearsArr[yearsArr.length - 1];
-
-			academicYearId =
-				String(
-					typeof lastYearItem === "object" &&
-					lastYearItem !== null
-						? (
-							lastYearItem.id ||
-							lastYearItem.name ||
-							lastYearItem.year
-						)
-						: lastYearItem
-				).trim();
-
-		} else if (
-			window.currentAcademicYearIdGlobal
-		) {
-
-			academicYearId =
-				String(
-					window.currentAcademicYearIdGlobal
-				).trim();
-		}
-
-		if (!academicYearId) {
-			alert("Chưa xác định được năm học hiện tại.");
-			return;
-		}
-
-		const db =
-			firebase.firestore();
-
-		// =====================================================
-		// 2. KHỞI TẠO CACHE RAM
-		// =====================================================
-
-		window.individualAuditUserCache =
-			window.individualAuditUserCache ||
-			new Map();
-
-		window.individualAuditModulesCache =
-			window.individualAuditModulesCache ||
-			new Map();
-
-		window.individualAuditResultCache =
-			window.individualAuditResultCache ||
-			new Map();
-
-		// =====================================================
-		// 3. XÁC ĐỊNH KỲ TRA CỨU
-		// =====================================================
+	async function loadPersonalStatusData(forceRefresh = false) {
+		// ============================================================
+		// THEO DÕI CÁ NHÂN
+		// Nguồn dữ liệu: auditLogs
+		// Chỉ lấy các field có isKpi === true.
 		//
-		// Ưu tiên ngày bắt đầu / kết thúc nếu giao diện đã nhập.
-		// Nếu giao diện có bộ chọn tháng nhưng chưa nhập ngày,
-		// tự đọc cấu hình:
+		// Bảng:
+		//   Thời gian | Người ghi nhận | Lỗi ghi nhận
 		//
-		// organizations/{orgId}.reportingPeriod.monthly.startDay
+		// "Lỗi ghi nhận" được ghép từ:
+		//   field.label + option label
 		//
-		// Ví dụ startDay = 21:
-		// Tháng 10/2026 => 21/09/2026 -> 20/10/2026.
+		// Ví dụ:
+		//   Đi học muộn – Có đi muộn
 		//
-		// Nếu giao diện không có bộ chọn tháng và cũng không có
-		// ngày bắt đầu/kết thúc thì giữ ALL để không làm thay đổi
-		// hành vi tra cứu cũ.
-		//
+		// Lưu ý:
+		// - entityId ưu tiên CODE, UID chỉ dùng fallback cho dữ liệu cũ.
+		// - AuditLog là nguồn dữ liệu chính, không lấy records để dựng
+		//   danh sách lỗi.
+		// ============================================================
 
-		const startDateEl =
-			document.getElementById(
-				"lookup-audit-start-date"
-			);
+		const listEl = document.getElementById("emp-personal-status-list");
+		const moduleCountEl = document.getElementById("emp-personal-module-count");
+		const errorCountEl = document.getElementById("emp-personal-error-count");
+		const statusEl = document.getElementById("emp-personal-status");
 
-		const endDateEl =
-			document.getElementById(
-				"lookup-audit-end-date"
-			);
+		const nameEl = document.getElementById("emp-personal-user-name");
+		const categoryEl = document.getElementById("emp-personal-user-category");
+		const codeEl = document.getElementById("emp-personal-user-code");
 
-		let startDate =
-			startDateEl?.value?.trim() || "";
+		const periodSelect = document.getElementById("emp-personal-period-select");
+		const periodType = periodSelect?.value || "week";
 
-		let endDate =
-			endDateEl?.value?.trim() || "";
+		if (!listEl) return;
 
-		// Hỗ trợ nhiều ID có thể được dùng cho bộ chọn tháng.
-		const auditMonthEl =
-			document.getElementById("lookup-audit-month-select") ||
-			document.getElementById("lookup-audit-month") ||
-			document.getElementById("emp-individual-month-select");
+		const escapeHtml = value => {
+			return String(value ?? "")
+				.replace(/&/g, "&amp;")
+				.replace(/</g, "&lt;")
+				.replace(/>/g, "&gt;")
+				.replace(/"/g, "&quot;")
+				.replace(/'/g, "&#039;");
+		};
 
-		const selectedAuditMonth =
-			auditMonthEl?.value?.trim() || "";
+		const normalizeText = value =>
+			String(value ?? "")
+				.trim()
+				.toLowerCase();
 
-		if (
-			!startDate &&
-			!endDate &&
-			selectedAuditMonth &&
-			/^\d{4}-\d{2}$/.test(selectedAuditMonth)
-		) {
-			const [selectedYear, selectedMonth] =
-				selectedAuditMonth.split("-").map(Number);
+		const normalizeKey = value =>
+			String(value ?? "")
+				.trim()
+				.toLowerCase();
 
-			// Mặc định an toàn: tháng dương lịch.
-			let monthlyStartDay = 1;
+		const formatDateTime = value => {
+			if (!value) return "--";
+
+			let date = null;
 
 			try {
-				const reportingConfigDoc =
-					await db
+				if (value instanceof Date) {
+					date = value;
+				} else if (typeof value?.toDate === "function") {
+					date = value.toDate();
+				} else if (typeof value === "number") {
+					date = new Date(value);
+				} else if (typeof value === "string") {
+					const text = value.trim();
+
+					// ISO / chuỗi ngày giờ thông thường
+					const parsed = new Date(text);
+					if (!Number.isNaN(parsed.getTime())) {
+						date = parsed;
+					}
+				}
+			} catch (e) {
+				console.warn("[PersonalStatus] Không parse được timestamp:", value, e);
+			}
+
+			if (!date || Number.isNaN(date.getTime())) {
+				return String(value ?? "--");
+			}
+
+			return date.toLocaleString("vi-VN", {
+				day: "2-digit",
+				month: "2-digit",
+				year: "numeric",
+				hour: "2-digit",
+				minute: "2-digit"
+			});
+		};
+
+		const toDate = value => {
+			if (!value) return null;
+
+			try {
+				if (value instanceof Date) return value;
+
+				if (typeof value?.toDate === "function") {
+					return value.toDate();
+				}
+
+				if (typeof value === "number") {
+					const d = new Date(value);
+					return Number.isNaN(d.getTime()) ? null : d;
+				}
+
+				if (typeof value === "string") {
+					const d = new Date(value);
+					return Number.isNaN(d.getTime()) ? null : d;
+				}
+			} catch (e) {
+				return null;
+			}
+
+			return null;
+		};
+
+		// ------------------------------------------------------------
+		// Lấy khoảng thời gian
+		// ------------------------------------------------------------
+		const getPeriodRange = async () => {
+			const now = new Date();
+
+			if (periodType === "week") {
+				// Tuần hiện tại: Thứ 2 -> Chủ nhật
+				const current = new Date(
+					now.getFullYear(),
+					now.getMonth(),
+					now.getDate()
+				);
+
+				const day = current.getDay(); // CN = 0
+				const diffToMonday = day === 0 ? 6 : day - 1;
+
+				const start = new Date(current);
+				start.setDate(current.getDate() - diffToMonday);
+				start.setHours(0, 0, 0, 0);
+
+				const end = new Date(start);
+				end.setDate(start.getDate() + 7);
+				end.setHours(0, 0, 0, 0);
+
+				return {
+					start,
+					end,
+					label: `Tuần này (${start.toLocaleDateString("vi-VN")} - ${new Date(end.getTime() - 1).toLocaleDateString("vi-VN")})`
+				};
+			}
+
+			// --------------------------------------------------------
+			// THÁNG:
+			// Đọc ngày bắt đầu kỳ báo cáo từ organizations/{orgId}
+			// reportingPeriod.monthly.startDay
+			//
+			// Ví dụ startDay = 21:
+			// Tháng 10/2026 = 21/09/2026 -> 20/10/2026
+			// --------------------------------------------------------
+			const orgId =
+				window.currentEmployeeOrgIdGlobal ||
+				window.currentOrgIdGlobal;
+
+			let startDay = 1;
+
+			if (orgId) {
+				try {
+					const orgDoc = await firebase.firestore()
 						.collection("organizations")
 						.doc(orgId)
 						.get();
 
-				const reportingConfig =
-					reportingConfigDoc.exists
-						? reportingConfigDoc.data()?.reportingPeriod
-						: null;
+					const reportingPeriod = orgDoc.exists
+						? (orgDoc.data()?.reportingPeriod || {})
+						: {};
 
-				const configuredStartDay =
-					Number(
-						reportingConfig?.monthly?.startDay
+					const monthly = reportingPeriod.monthly || {};
+					const configuredStartDay = Number(monthly.startDay);
+
+					if (
+						Number.isFinite(configuredStartDay) &&
+						configuredStartDay >= 1 &&
+						configuredStartDay <= 31
+					) {
+						startDay = Math.floor(configuredStartDay);
+					}
+				} catch (e) {
+					console.warn(
+						"[PersonalStatus] Không đọc được reportingPeriod, dùng ngày 1.",
+						e
 					);
-
-				if (
-					Number.isInteger(configuredStartDay) &&
-					configuredStartDay >= 1 &&
-					configuredStartDay <= 31
-				) {
-					monthlyStartDay = configuredStartDay;
 				}
-			} catch (periodConfigError) {
-				console.warn(
-					"[AUDIT PERIOD] Không đọc được cấu hình kỳ báo cáo, dùng ngày 1:",
-					periodConfigError
-				);
 			}
 
-			// selectedAuditMonth được hiểu là tháng kết thúc kỳ.
-			const selectedMonthLastDay =
-				new Date(
-					selectedYear,
-					selectedMonth,
-					0
-				).getDate();
+			const safeDay = Math.min(
+				startDay,
+				new Date(now.getFullYear(), now.getMonth(), 0).getDate()
+			);
 
-			// Ngày bắt đầu thuộc tháng ngay trước tháng được chọn.
-			// Vì vậy phải lấy số ngày của tháng trước để xử lý
-			// an toàn khi cấu hình là 29/30/31.
-			const previousMonthLastDay =
-				new Date(
-					selectedYear,
-					selectedMonth - 1,
-					0
-				).getDate();
+			let start;
+			let end;
 
-			const actualStartDay =
-				monthlyStartDay === 1
-					? 1
-					: Math.min(
-						monthlyStartDay,
-						previousMonthLastDay
-					);
-
-			const startDateObj =
-				new Date(
-					selectedYear,
-					selectedMonth - 2,
-					actualStartDay
+			if (startDay === 1) {
+				start = new Date(now.getFullYear(), now.getMonth(), 1);
+				end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+			} else if (now.getDate() >= startDay) {
+				start = new Date(
+					now.getFullYear(),
+					now.getMonth(),
+					safeDay
 				);
 
-			const endDateObj =
-				monthlyStartDay === 1
-					? new Date(
-						selectedYear,
-						selectedMonth,
-						0
-					)
-					: new Date(
-						selectedYear,
-						selectedMonth - 1,
-						actualStartDay - 1
-					);
+				const nextMonthLastDay = new Date(
+					now.getFullYear(),
+					now.getMonth() + 2,
+					0
+				).getDate();
 
-			const formatDate =
-				date => [
-					date.getFullYear(),
-					String(date.getMonth() + 1).padStart(2, "0"),
-					String(date.getDate()).padStart(2, "0")
-				].join("-");
+				const endDay = Math.min(startDay, nextMonthLastDay);
 
-			startDate = formatDate(startDateObj);
-			endDate = formatDate(endDateObj);
+				end = new Date(
+					now.getFullYear(),
+					now.getMonth() + 1,
+					endDay
+				);
+			} else {
+				const previousMonthYear = now.getMonth() === 0
+					? now.getFullYear() - 1
+					: now.getFullYear();
 
-			console.log(
-				"[AUDIT PERIOD] Kỳ báo cáo:",
-				{
-					selectedMonth: selectedAuditMonth,
-					startDay: monthlyStartDay,
-					startDate,
-					endDate,
-					selectedMonthLastDay,
+				const previousMonth = now.getMonth() === 0
+					? 11
+					: now.getMonth() - 1;
+
+				const previousMonthLastDay = new Date(
+					previousMonthYear,
+					previousMonth + 1,
+					0
+				).getDate();
+
+				const previousSafeDay = Math.min(
+					startDay,
 					previousMonthLastDay
-				}
-			);
-		}
-
-		// Nếu chỉ có một trong hai ngày được nhập thì không ép
-		// thành kỳ tháng; giữ nguyên logic lọc hiện tại.
-		
-		// =====================================================
-		// 4. CACHE KEY
-		// =====================================================
-
-		const cacheKey =
-			[
-				orgId,
-				academicYearId,
-				keyword,
-				startDate || "ALL",
-				endDate || "ALL"
-			].join("__");
-
-		if (
-			!forceRefresh &&
-			window.individualAuditResultCache.has(cacheKey)
-		) {
-
-			console.log(
-				"[AUDIT CACHE] HIT:",
-				cacheKey
-			);
-
-			const cachedResult =
-				window.individualAuditResultCache.get(
-					cacheKey
 				);
 
-			renderIndividualAuditSheet(cachedResult);
+				start = new Date(
+					previousMonthYear,
+					previousMonth,
+					previousSafeDay
+				);
 
-			return cachedResult;
-		}
+				const currentMonthLastDay = new Date(
+					now.getFullYear(),
+					now.getMonth() + 1,
+					0
+				).getDate();
 
-		console.log(
-			"[AUDIT CACHE] MISS:",
-			cacheKey
-		);
-
-		// =====================================================
-		// 5. TÌM USER
-		// =====================================================
-
-		let foundUser = null;
-
-		// -----------------------------------------------------
-		// 5A. ƯU TIÊN CACHE THÀNH VIÊN
-		// -----------------------------------------------------
-		//
-		// Mã định danh chính = code.
-		// UID chỉ dùng để tương thích dữ liệu cũ.
-		//
-
-		const preloadedEntities =
-		    window.card2CachedMembers ||
-		    window.currentLoadedEntities ||
-		    [];
-
-		if (
-		    Array.isArray(preloadedEntities) &&
-		    preloadedEntities.length > 0
-		) {
-
-		    foundUser =
-		        preloadedEntities.find(u => {
-
-		            const uCode =
-		                String(
-		                    u.code || ""
-		                ).trim().toLowerCase();
-
-		            const uId =
-		                String(
-		                    u.id ||
-		                    u.uid ||
-		                    ""
-		                ).trim().toLowerCase();
-
-		            const uName =
-		                String(
-		                    u.fullName ||
-		                    ""
-		                ).trim().toLowerCase();
-
-		            return (
-		                uCode === keyword ||
-		                uId === keyword ||
-		                uName.includes(keyword)
-		            );
-		        });
-		}
-
-
-		// -----------------------------------------------------
-		// 5B. CACHE USER RIÊNG
-		// -----------------------------------------------------
-
-		if (!foundUser) {
-
-		    const cachedUser =
-		        window.individualAuditUserCache.get(
-		            keyword
-		        );
-
-		    if (cachedUser) {
-		        foundUser = cachedUser;
-		    }
-		}
-
-
-		// -----------------------------------------------------
-		// 5C. TRA CỨU USERS COLLECTION
-		// -----------------------------------------------------
-		//
-		// Tìm theo thứ tự:
-		// code -> UID/document ID -> tên.
-		//
-
-		if (!foundUser) {
-
-		    console.log(
-		        "[AUDIT USER LOOKUP]:",
-		        rawKeyword
-		    );
-
-		    const usersSnap =
-		        await db
-		            .collection("organizations")
-		            .doc(orgId)
-		            .collection("users")
-		            .get();
-
-		    usersSnap.forEach(uDoc => {
-
-		        if (foundUser) return;
-
-		        const uData =
-		            uDoc.data() || {};
-
-		        const code =
-		            String(
-		                uData.code || ""
-		            ).trim();
-
-		        const uid =
-		            String(
-		                uData.uid ||
-		                uDoc.id ||
-		                ""
-		            ).trim();
-
-		        const fullName =
-		            String(
-		                uData.fullName ||
-		                uData.displayName ||
-		                uData.name ||
-		                ""
-		            ).trim();
-
-		        const codeLower =
-		            code.toLowerCase();
-
-		        const uidLower =
-		            uid.toLowerCase();
-
-		        const nameLower =
-		            fullName.toLowerCase();
-
-		        if (
-		            codeLower === keyword ||
-		            uidLower === keyword ||
-		            nameLower.includes(keyword)
-		        ) {
-
-		            foundUser = {
-		                // code là ID chính của hệ thống mới.
-		                id:
-		                    code ||
-		                    uid,
-
-		                code:
-		                    code,
-
-		                uid:
-		                    uid,
-
-		                fullName:
-		                    fullName ||
-		                    code ||
-		                    uid,
-
-		                category:
-		                    uData.category ||
-		                    uData.className ||
-		                    "Chưa phân loại"
-		            };
-		        }
-		    });
-		}
-
-
-		// Chuẩn hóa user tìm được.
-		// code là mã dùng để hiển thị và truy vấn dữ liệu mới.
-		if (foundUser) {
-		    foundUser.code =
-		        String(
-		            foundUser.code ||
-		            ""
-		        ).trim();
-
-		    foundUser.uid =
-		        String(
-		            foundUser.uid ||
-		            foundUser.id ||
-		            ""
-		        ).trim();
-
-		    foundUser.id =
-		        foundUser.code ||
-		        foundUser.id ||
-		        foundUser.uid;
-		}
-
-		// =====================================================
-		// 6. KHÔNG TÌM THẤY
-		// =====================================================
-
-		if (!foundUser) {
-
-			if (nameEl)
-				nameEl.innerText =
-					"Không tìm thấy";
-
-			if (categoryEl)
-				categoryEl.innerText =
-					"---";
-
-			if (idEl)
-				idEl.innerText =
-					rawKeyword.toUpperCase();
-
-			if (rankEl)
-				rankEl.innerText =
-					"---";
-
-			if (violationsListEl) {
-
-				violationsListEl.innerHTML =
-					'<div style="color:red;font-style:italic;">' +
-					'Không tìm thấy thông tin cá nhân phù hợp với từ khóa.' +
-					'</div>';
+				end = new Date(
+					now.getFullYear(),
+					now.getMonth(),
+					Math.min(startDay, currentMonthLastDay)
+				);
 			}
 
-			return null;
-		}
-		// Cache theo code là khóa chính.
-		if (foundUser.code) {
-		    window.individualAuditUserCache.set(
-		        String(foundUser.code).toLowerCase(),
-		        foundUser
-		    );
-		}
-
-		// Cache thêm UID để hỗ trợ dữ liệu lịch sử.
-		if (foundUser.uid) {
-		    window.individualAuditUserCache.set(
-		        String(foundUser.uid).toLowerCase(),
-		        foundUser
-		    );
-		}
-
-		// =====================================================
-		// 7. HIỂN THỊ THÔNG TIN CÁ NHÂN
-		// =====================================================
-
-		if (nameEl)
-			nameEl.innerText =
-				foundUser.fullName;
-
-		if (categoryEl)
-			categoryEl.innerText =
-				foundUser.category ||
-				foundUser.className ||
-				"Chưa phân loại";
-
-		if (idEl)
-			idEl.innerText =
-				foundUser.code || foundUser.id || "";
-
-		// =====================================================
-		// 8. FIELD LABEL MAP
-		// =====================================================
-
-		const fieldLabelMap = {};
-
-		const currentFields =
-			window.cachedSchemaFields || [];
-
-		currentFields.forEach(f => {
-
-			if (f?.key) {
-
-				fieldLabelMap[f.key] =
-					f.label ||
-					f.key;
-			}
-		});
-
-		// =====================================================
-		// 9. MODULE CACHE
-		// =====================================================
-
-		const modulesCacheKey =
-			`${orgId}__${academicYearId}`;
-
-		let modules =
-			window.individualAuditModulesCache.get(
-				modulesCacheKey
-			);
-
-		if (modules) {
-
-			console.log(
-				"[AUDIT MODULE CACHE] HIT:",
-				modules.length
-			);
-
-		} else {
-
-			const modulesSnap =
-				await db
-					.collection("organizations")
-					.doc(orgId)
-					.collection("modules")
-					.get();
-
-			modules =
-				modulesSnap.docs.map(doc => ({
-					id: doc.id,
-					...doc.data()
-				}));
-
-			window.individualAuditModulesCache.set(
-				modulesCacheKey,
-				modules
-			);
-
-			console.log(
-				"[AUDIT MODULE READ] docs:",
-				modules.length
-			);
-		}
-
-		// =====================================================
-		// 10. QUERY AUDIT LOGS
-		// =====================================================
-		//
-		// Điểm quan trọng:
-		//
-		// Không còn:
-		//
-		//   .where("entityId", "==", foundUser.id)
-		//   .get()
-		//
-		// nếu có khoảng ngày.
-		//
-		// Khi có start/end:
-		//
-		//   entityId == UID
-		//   timestamp >= start
-		//   timestamp < end + 1 ngày
-		//
-		// =====================================================
-
-		const modulePromises =
-		    modules.map(async mod => {
-
-		        // Dữ liệu mới: auditLogs.entityId = code.
-		        // Dữ liệu cũ: có thể vẫn là UID.
-		        const primaryEntityId =
-		            foundUser.code ||
-		            foundUser.id;
-
-		        let query =
-		            db
-		                .collection("organizations")
-		                .doc(orgId)
-		                .collection("academicYears")
-		                .doc(academicYearId)
-		                .collection("modulesData")
-		                .doc(mod.id)
-		                .collection("auditLogs")
-		                .where(
-		                    "entityId",
-		                    "==",
-		                    primaryEntityId
-		                );
-
-		        // ------------------------------------------------
-		        // LỌC THỜI GIAN NGAY TẠI FIRESTORE
-		        // ------------------------------------------------
-
-		        if (
-		            startDate &&
-		            endDate
-		        ) {
-
-		            const startDateObj =
-		                new Date(
-		                    `${startDate}T00:00:00`
-		                );
-
-		            const endDateObj =
-		                new Date(
-		                    `${endDate}T00:00:00`
-		                );
-
-		            endDateObj.setDate(
-		                endDateObj.getDate() + 1
-		            );
-
-		            const startTimestamp =
-		                firebase.firestore.Timestamp.fromDate(
-		                    startDateObj
-		                );
-
-		            const endTimestamp =
-		                firebase.firestore.Timestamp.fromDate(
-		                    endDateObj
-		                );
-
-		            query =
-		                query
-		                    .where(
-		                        "timestamp",
-		                        ">=",
-		                        startTimestamp
-		                    )
-		                    .where(
-		                        "timestamp",
-		                        "<",
-		                        endTimestamp
-		                    );
-		        }
-
-		        let logsSnap =
-		            await query.get();
-
-		        let logsDocs =
-		            logsSnap.docs;
-
-		        // Nếu chưa có log theo code, thử UID của dữ liệu cũ.
-		        if (
-		            logsDocs.length === 0 &&
-		            foundUser.uid &&
-		            foundUser.uid !== primaryEntityId
-		        ) {
-
-		            let legacyQuery =
-		                db
-		                    .collection("organizations")
-		                    .doc(orgId)
-		                    .collection("academicYears")
-		                    .doc(academicYearId)
-		                    .collection("modulesData")
-		                    .doc(mod.id)
-		                    .collection("auditLogs")
-		                    .where(
-		                        "entityId",
-		                        "==",
-		                        foundUser.uid
-		                    );
-
-		            if (
-		                startDate &&
-		                endDate
-		            ) {
-
-		                const legacyStart =
-		                    new Date(
-		                        `${startDate}T00:00:00`
-		                    );
-
-		                const legacyEnd =
-		                    new Date(
-		                        `${endDate}T00:00:00`
-		                    );
-
-		                legacyEnd.setDate(
-		                    legacyEnd.getDate() + 1
-		                );
-
-		                legacyQuery =
-		                    legacyQuery
-		                        .where(
-		                            "timestamp",
-		                            ">=",
-		                            firebase.firestore.Timestamp.fromDate(
-		                                legacyStart
-		                            )
-		                        )
-		                        .where(
-		                            "timestamp",
-		                            "<",
-		                            firebase.firestore.Timestamp.fromDate(
-		                                legacyEnd
-		                            )
-		                        );
-		            }
-
-		            const legacySnap =
-		                await legacyQuery.get();
-
-		            logsDocs =
-		                legacySnap.docs;
-		        }
-
-		        console.log(
-		            "[AUDIT LOG READ]",
-		            {
-		                moduleId: mod.id,
-		                entityId: primaryEntityId,
-		                count: logsDocs.length,
-		                period:
-		                    startDate && endDate
-		                        ? `${startDate} → ${endDate}`
-		                        : "ALL"
-		            }
-		        );
-
-		        return {
-		            moduleId: mod.id,
-		            docs: logsDocs
-		        };
-		    });
-
-		// =====================================================
-		// 11. ĐỌC CÁC MODULE SONG SONG
-		// =====================================================
-
-		const moduleResults =
-			await Promise.all(
-				modulePromises
-			);
-
-		// =====================================================
-		// 12. GOM KẾT QUẢ
-		// =====================================================
-
-		const allViolations = [];
-
-		let auditDocsRead = 0;
-
-		moduleResults.forEach(moduleResult => {
-
-			auditDocsRead +=
-				moduleResult.docs.length;
-
-			moduleResult.docs.forEach(logDoc => {
-
-				const logData =
-					logDoc.data() || {};
-
-				// ---------------------------------------------
-				// Thời gian
-				// ---------------------------------------------
-
-				let timeStr =
-					"Gần đây";
-
-				let sortTime = 0;
-
-				if (
-					logData.timestamp &&
-					typeof logData.timestamp.toDate ===
-						"function"
-				) {
-
-					const dateObj =
-						logData.timestamp.toDate();
-
-					sortTime =
-						dateObj.getTime();
-
-					timeStr =
-						dateObj.toLocaleString(
-							"vi-VN"
-						);
-				}
-
-				// ---------------------------------------------
-				// Changes
-				// ---------------------------------------------
-
-				const changes =
-					logData.changes || {};
-
-				const changeKeys =
-					Object.keys(changes);
-
-				if (changeKeys.length > 0) {
-
-					changeKeys.forEach(fieldKey => {
-
-						const val =
-							changes[fieldKey];
-
-						const valStr =
-							Array.isArray(val)
-								? val.join(", ")
-								: String(val);
-
-						const displayLabel =
-							fieldLabelMap[fieldKey] ||
-							fieldKey;
-
-						allViolations.push({
-
-							date:
-								timeStr,
-
-							sortTime:
-								sortTime,
-
-							content:
-								`<b>${escapeHtmlAudit(displayLabel)}:</b> ${escapeHtmlAudit(valStr)}`,
-
-							updater:
-								logData.updaterName ||
-								logData.updaterEmail ||
-								"Hệ thống"
-						});
-					});
-
-				} else {
-
-					const actionName =
-						logData.action ||
-						"Cập nhật dữ liệu";
-
-					allViolations.push({
-
-						date:
-							timeStr,
-
-						sortTime:
-							sortTime,
-
-						content:
-							`<b>${escapeHtmlAudit(actionName)}</b>`,
-
-						updater:
-							logData.updaterName ||
-							logData.updaterEmail ||
-							"Hệ thống"
-					});
-				}
-			});
-		});
-
-		// =====================================================
-		// 13. SẮP XẾP MỚI NHẤT → CŨ NHẤT
-		// =====================================================
-
-		allViolations.sort(
-			(a, b) =>
-				(b.sortTime || 0) -
-				(a.sortTime || 0)
-		);
-
-		// =====================================================
-		// 14. KẾT QUẢ
-		// =====================================================
-
-		const result = {
-
-			user:
-				foundUser,
-
-			violations:
-				allViolations,
-
-			startDate:
-				startDate || null,
-
-			endDate:
-				endDate || null,
-
-			auditDocsRead:
-				auditDocsRead,
-
-			moduleCount:
-				modules.length,
-
-			loadedAt:
-				Date.now()
+			start.setHours(0, 0, 0, 0);
+			end.setHours(0, 0, 0, 0);
+
+			return {
+				start,
+				end,
+				label: `Kỳ báo cáo (${start.toLocaleDateString("vi-VN")} - ${new Date(end.getTime() - 1).toLocaleDateString("vi-VN")})`
+			};
 		};
 
-		// =====================================================
-		// 15. CACHE KẾT QUẢ
-		// =====================================================
-
-		window.individualAuditResultCache.set(
-			cacheKey,
-			result
-		);
-
-		console.log(
-			"======================================"
-		);
-
-		console.log(
-			"[AUDIT RESULT]",
-			{
-				code:
-
-				    foundUser.code || foundUser.id,
-
-
-				uid:
-
-				    foundUser.uid || "",
-
-				name:
-					foundUser.fullName,
-
-				modules:
-					modules.length,
-
-				auditDocsRead:
-					auditDocsRead,
-
-				violations:
-					allViolations.length,
-
-				period:
-					startDate && endDate
-						? `${startDate} → ${endDate}`
-						: "ALL"
+		// ------------------------------------------------------------
+		// Chuẩn hóa option
+		//
+		// Cấu trúc hiện tại:
+		// field.options = ["VALUE_1", "VALUE_2", ...]
+		// field.kpiOptions = {
+		//    VALUE_1: { scoreWeight, kpiWeekly, kpiMonthly }
+		// }
+		//
+		// Có hỗ trợ thêm trường hợp options là object để không làm
+		// hỏng dữ liệu nếu sau này nâng cấp cấu trúc option.
+		// ------------------------------------------------------------
+		const getOptionLabel = (field, optionValue) => {
+			if (optionValue === undefined || optionValue === null) {
+				return "";
 			}
-		);
 
-		console.log(
-			"======================================"
-		);
+			const rawValue = String(optionValue).trim();
+			if (!rawValue) return "";
 
-		// =====================================================
-		// 16. RENDER
-		// =====================================================
+			const options = Array.isArray(field?.options)
+				? field.options
+				: [];
 
-		renderIndividualAuditSheet(result);
+			const exactOption = options.find(option => {
+				if (option && typeof option === "object") {
+					const value =
+						option.value ??
+						option.key ??
+						option.id ??
+						option.code;
 
-		return result;
+					return normalizeText(value) === normalizeText(rawValue);
+				}
 
-	} catch (error) {
+				return normalizeText(option) === normalizeText(rawValue);
+			});
 
-		console.error(
-			"Lỗi tra cứu phiếu đối soát:",
-			error
-		);
+			if (exactOption && typeof exactOption === "object") {
+				return String(
+					exactOption.label ??
+					exactOption.name ??
+					exactOption.title ??
+					exactOption.value ??
+					exactOption.key ??
+					rawValue
+				).trim();
+			}
 
-		if (violationsListEl) {
+			// Với cấu trúc hiện tại, option chính là chuỗi hiển thị.
+			return exactOption !== undefined
+				? String(exactOption).trim()
+				: rawValue;
+		};
 
-			violationsListEl.innerHTML =
-				'<div style="color:red;font-style:italic;">' +
-				'Lỗi kết nối khi tải dữ liệu đối soát.' +
-				'</div>';
-		}
+		// ------------------------------------------------------------
+		// Tách giá trị option từ:
+		// "Cập nhật options: [value1, value2]"
+		//
+		// Có hỗ trợ:
+		//   [value1, value2]
+		//   value1, value2
+		//   "value1", "value2"
+		// ------------------------------------------------------------
+		const extractOptionValues = changeValue => {
+			if (changeValue === undefined || changeValue === null) {
+				return [];
+			}
 
-		return null;
-	}
-}
+			if (Array.isArray(changeValue)) {
+				return changeValue
+					.map(v => String(v ?? "").trim())
+					.filter(Boolean);
+			}
 
-	async function loadMyAuditLogsTimeline() {
+			if (typeof changeValue === "object") {
+				const values =
+					changeValue.values ??
+					changeValue.options ??
+					changeValue.value;
 
-		const container =
-			document.getElementById("my-audit-logs-timeline");
+				if (Array.isArray(values)) {
+					return values
+						.map(v => String(v ?? "").trim())
+						.filter(Boolean);
+				}
 
-		const dateInput =
-			document.getElementById("emp-my-audit-date-select");
+				if (values !== undefined && values !== null) {
+					return [String(values).trim()].filter(Boolean);
+				}
 
-		if (!container) return;
+				return [];
+			}
 
+			const text = String(changeValue).trim();
 
-		// ============================================================
-		// 1. LẤY CONTEXT HIỆN TẠI
-		// ============================================================
+			// Dạng: Cập nhật options: [A, B]
+			const bracketMatch = text.match(/\[([\s\S]*?)\]/);
 
-		const orgId =
-			window.currentOrgIdGlobal;
+			if (bracketMatch) {
+				return bracketMatch[1]
+					.split(",")
+					.map(v => v.trim())
+					.map(v => v.replace(/^["']|["']$/g, "").trim())
+					.filter(Boolean);
+			}
 
-		const academicSelect =
-			document.getElementById("emp-academic-year-select");
-
-		let academicId =
-			academicSelect
-				? academicSelect.value
-				: "";
-
-		if (
-			!academicId &&
-			Array.isArray(window.currentAcademicYearsGlobal) &&
-			window.currentAcademicYearsGlobal.length > 0
-		) {
-			academicId =
-				window.currentAcademicYearsGlobal[
-					window.currentAcademicYearsGlobal.length - 1
-				];
-		}
-
-
-		// Module hiện tại
-		const moduleSelectEl =
-			document.getElementById("emp-module-select");
-
-		const moduleId =
-			window.currentModuleIdGlobal ||
-			(
-				moduleSelectEl
-					? moduleSelectEl.value
-					: ""
+			// Nếu auditLog sau này ghi trực tiếp danh sách.
+			const prefixMatch = text.match(
+				/(?:options?|giá\s*trị)\s*:\s*(.+)$/i
 			);
 
+			if (prefixMatch) {
+				const raw = prefixMatch[1].trim();
 
-		// Email người đăng nhập
-		const myEmail =
-			(
-				window.currentUserEmailGlobal ||
-				firebase.auth().currentUser?.email ||
-				""
-			)
-			.toLowerCase()
-			.trim();
+				if (raw.includes(",")) {
+					return raw
+						.split(",")
+						.map(v => v.trim())
+						.map(v => v.replace(/^["']|["']$/g, "").trim())
+						.filter(Boolean);
+				}
 
+				return [
+					raw.replace(/^["']|["']$/g, "").trim()
+				].filter(Boolean);
+			}
 
-		// ============================================================
-		// 2. KIỂM TRA CONTEXT
-		// ============================================================
+			return [];
+		};
 
-		if (
-			!orgId ||
-			!academicId ||
-			!moduleId
-		) {
+		// ------------------------------------------------------------
+		// Dạng text:
+		// "Thêm mới: "abc""
+		//
+		// Với field KPI dạng text, vẫn hiển thị giá trị sau khi
+		// ghép với label của field.
+		// ------------------------------------------------------------
+		const extractTextValue = changeValue => {
+			if (changeValue === undefined || changeValue === null) {
+				return "";
+			}
 
-			container.innerHTML =
-				'<p style="color:red; text-align:center; padding:15px;">' +
-				'Vui lòng chọn đầy đủ Tổ chức, Năm học và Nhiệm vụ trước khi xem nhật ký cá nhân.' +
-				'</p>';
+			if (typeof changeValue === "object") {
+				const value =
+					changeValue.value ??
+					changeValue.content ??
+					changeValue.text;
 
-			return;
-		}
+				return value === undefined || value === null
+					? ""
+					: String(value).trim();
+			}
 
+			const text = String(changeValue).trim();
 
-		if (!myEmail) {
+			// "Thêm mới: "ABC""
+			const addMatch = text.match(
+				/thêm\s*mới\s*:\s*["“”']?([\s\S]*?)["“”']?\s*$/i
+			);
 
-			container.innerHTML =
-				'<p style="color:red; text-align:center; padding:15px;">' +
-				'Không xác định được thông tin tài khoản đăng nhập của bạn.' +
-				'</p>';
+			if (addMatch) {
+				return addMatch[1].trim();
+			}
 
-			return;
-		}
+			// Trường hợp audit khác nhưng vẫn có dấu :
+			const colonIndex = text.indexOf(":");
 
+			if (colonIndex >= 0) {
+				const value = text
+					.slice(colonIndex + 1)
+					.trim()
+					.replace(/^\[|\]$/g, "")
+					.replace(/^["“”']|["“”']$/g, "")
+					.trim();
 
-		// ============================================================
-		// 3. XÁC ĐỊNH NGÀY CẦN XEM
-		// ============================================================
+				return value;
+			}
 
-		if (
-			dateInput &&
-			!dateInput.value
-		) {
-			dateInput.value =
-				new Date().toLocaleDateString("en-CA");
-		}
+			return text;
+		};
 
+		// ------------------------------------------------------------
+		// Chuyển một audit change thành các dòng hiển thị.
+		// Chỉ giữ field KPI.
+		// ------------------------------------------------------------
+		const buildKpiDetailsFromAudit = (auditData, moduleConfig) => {
+			const changes = auditData?.changes;
 
-		const selectedDateStr =
-			dateInput
-				? dateInput.value
-				: new Date().toLocaleDateString("en-CA");
+			if (!changes || typeof changes !== "object") {
+				return [];
+			}
 
+			const fields = Array.isArray(moduleConfig?.fields)
+				? moduleConfig.fields
+				: [];
 
-		// Kiểm tra format YYYY-MM-DD
-		const dateParts =
-			selectedDateStr.split("-").map(Number);
+			const fieldsByKey = {};
 
-		if (
-			dateParts.length !== 3 ||
-			dateParts.some(Number.isNaN)
-		) {
+			fields.forEach(field => {
+				if (!field || typeof field !== "object") return;
 
-			container.innerHTML =
-				'<p style="color:red; text-align:center; padding:15px;">' +
-				'Ngày được chọn không hợp lệ.' +
-				'</p>';
+				const key =
+					field.key ??
+					field.id ??
+					field.fieldKey;
 
-			return;
-		}
+				if (!key) return;
 
+				fieldsByKey[normalizeKey(key)] = field;
+			});
 
-		try {
+			const result = [];
 
-			container.innerHTML =
-				`<p style="color:#0d6efd; text-align:center; padding:15px;">
-					⏳ Đang tải lịch sử thao tác cá nhân ngày
-					<b>${selectedDateStr}</b>...
-				</p>`;
+			Object.entries(changes).forEach(([fieldKey, changeValue]) => {
+				const field =
+					fieldsByKey[normalizeKey(fieldKey)];
 
+				// Chỉ trường KPI mới được đưa vào theo dõi cá nhân.
+				if (!field || field.isKpi !== true) {
+					return;
+				}
 
-			const db =
-				firebase.firestore();
+				const fieldLabel =
+					String(
+						field.label ??
+						field.title ??
+						field.name ??
+						fieldKey
+					).trim();
 
+				if (!fieldLabel) return;
 
-			// ========================================================
-			// 4. TẠO KHOẢNG THỜI GIAN CỦA NGÀY
-			// ========================================================
+				const isOptions =
+					String(field.type || "").toLowerCase() === "options" ||
+					Array.isArray(field.options);
 
-			const [
-				year,
-				month,
-				day
-			] = dateParts;
+				if (isOptions) {
+					const optionValues =
+						extractOptionValues(changeValue);
 
+					if (optionValues.length > 0) {
+						optionValues.forEach(optionValue => {
+							const optionLabel =
+								getOptionLabel(
+									field,
+									optionValue
+								);
 
-			const startOfDay =
-				new Date(
-					year,
-					month - 1,
-					day,
-					0,
-					0,
-					0,
-					0
-				);
+							const detail = optionLabel
+								? `${fieldLabel} – ${optionLabel}`
+								: fieldLabel;
 
+							result.push({
+								fieldKey,
+								fieldLabel,
+								optionValue,
+								optionLabel,
+								detail
+							});
+						});
 
-			const startOfNextDay =
-				new Date(
-					year,
-					month - 1,
-					day + 1,
-					0,
-					0,
-					0,
-					0
-				);
+						return;
+					}
+				}
 
+				// KPI dạng text / số / kiểu khác.
+				const textValue =
+					extractTextValue(changeValue);
 
-			const startTimestamp =
-				firebase.firestore.Timestamp.fromDate(
-					startOfDay
-				);
+				const detail = textValue
+					? `${fieldLabel} – ${textValue}`
+					: fieldLabel;
 
-			const endTimestamp =
-				firebase.firestore.Timestamp.fromDate(
-					startOfNextDay
-				);
-
-
-			// ========================================================
-			// 5. CHỈ ĐỌC:
-			//    - ĐÚNG MODULE
-			//    - ĐÚNG NGÀY
-			//    - ĐÚNG NGƯỜI ĐĂNG NHẬP
-			// ========================================================
-
-			const snapshot =
-				await db
-					.collection("organizations")
-					.doc(orgId)
-					.collection("academicYears")
-					.doc(academicId)
-					.collection("modulesData")
-					.doc(moduleId)
-					.collection("auditLogs")
-					.where(
-						"updaterEmail",
-						"==",
-						myEmail
-					)
-					.where(
-						"timestamp",
-						">=",
-						startTimestamp
-					)
-					.where(
-						"timestamp",
-						"<",
-						endTimestamp
-					)
-					.get();
-
-
-			// ========================================================
-			// 6. LẤY LOG
-			// ========================================================
-
-			const myLogs = [];
-
-			snapshot.forEach(doc => {
-
-				const log =
-					doc.data();
-
-				myLogs.push({
-					...log,
-
-					// Giữ document ID nếu sau này cần thao tác
-					_docId: doc.id
+				result.push({
+					fieldKey,
+					fieldLabel,
+					optionValue: "",
+					optionLabel: "",
+					detail
 				});
 			});
 
+			return result;
+		};
 
-			// ========================================================
-			// 7. KHÔNG CÓ LOG
-			// ========================================================
+		// ------------------------------------------------------------
+		// HIỂN THỊ TRẠNG THÁI ĐANG TẢI
+		// ------------------------------------------------------------
+		listEl.innerHTML = `
+			<div style="
+				text-align:center;
+				color:#6c757d;
+				padding:20px;
+			">
+				<i class="fa-solid fa-spinner fa-spin"></i>
+				Đang tải dữ liệu theo dõi cá nhân...
+			</div>
+		`;
 
-			container.innerHTML = "";
+		if (moduleCountEl) moduleCountEl.textContent = "0";
+		if (errorCountEl) errorCountEl.textContent = "0";
+		if (statusEl) {
+			statusEl.textContent = "Đang tải...";
+			statusEl.style.color = "#0d6efd";
+		}
 
-			if (myLogs.length === 0) {
+		try {
+			const db = firebase.firestore();
 
-				container.innerHTML =
-					`<p style="color:#6c757d;
-							   font-style:italic;
-							   text-align:center;
-							   padding:15px;">
-						Bạn chưa thực hiện thao tác nhập liệu nào
-						trong ngày <b>${selectedDateStr}</b>.
-					</p>`;
+			const user = firebase.auth().currentUser;
+
+			if (!user) {
+				throw new Error(
+					"Không xác định được người dùng đang đăng nhập."
+				);
+			}
+
+			const orgId =
+				window.currentEmployeeOrgIdGlobal ||
+				window.currentOrgIdGlobal;
+
+			if (!orgId) {
+				throw new Error(
+					"Không xác định được đơn vị (OrgId)."
+				);
+			}
+
+			// --------------------------------------------------------
+			// 1. TÌM USER HIỆN TẠI
+			// --------------------------------------------------------
+			let currentUserData = null;
+
+			const cachedUsers =
+				window.employeeDataCache?.users;
+
+			if (Array.isArray(cachedUsers) && cachedUsers.length > 0) {
+				currentUserData =
+					cachedUsers.find(u =>
+						String(u.uid || "").trim() === user.uid
+					) ||
+					cachedUsers.find(u =>
+						String(u.id || "").trim() === user.uid
+					) ||
+					cachedUsers.find(u =>
+						normalizeText(u.email) ===
+						normalizeText(user.email)
+					);
+			}
+
+			if (!currentUserData) {
+				const userById = await db
+					.collection("organizations")
+					.doc(orgId)
+					.collection("users")
+					.doc(user.uid)
+					.get();
+
+				if (userById.exists) {
+					currentUserData = {
+						id: userById.id,
+						...userById.data()
+					};
+				}
+			}
+
+			// Fallback tìm theo email nếu document ID không phải UID.
+			if (!currentUserData && user.email) {
+				const emailSnap = await db
+					.collection("organizations")
+					.doc(orgId)
+					.collection("users")
+					.where("email", "==", user.email)
+					.limit(1)
+					.get();
+
+				if (!emailSnap.empty) {
+					const doc = emailSnap.docs[0];
+
+					currentUserData = {
+						id: doc.id,
+						...doc.data()
+					};
+				}
+			}
+
+			if (!currentUserData) {
+				throw new Error(
+					"Không tìm thấy thông tin nhân sự trong đơn vị."
+				);
+			}
+
+			const currentUid =
+				String(
+					currentUserData.uid ||
+					currentUserData.id ||
+					user.uid ||
+					""
+				).trim();
+
+			const currentCode =
+				String(
+					currentUserData.code ||
+					currentUserData.memberId ||
+					""
+				).trim();
+
+			const currentEmail =
+				String(
+					currentUserData.email ||
+					user.email ||
+					""
+				).trim().toLowerCase();
+
+			const currentName =
+				String(
+					currentUserData.fullName ||
+					currentUserData.displayName ||
+					currentUserData.name ||
+					user.displayName ||
+					currentEmail ||
+					currentCode ||
+					currentUid
+				).trim();
+
+			const currentCategory =
+				String(
+					currentUserData.category ||
+					currentUserData.className ||
+					currentUserData.department ||
+					""
+				).trim();
+
+			if (nameEl) nameEl.textContent = currentName || "--";
+			if (categoryEl) categoryEl.textContent = currentCategory || "--";
+			if (codeEl) codeEl.textContent =
+				currentCode || currentUid || "--";
+
+			// --------------------------------------------------------
+			// 2. XÁC ĐỊNH KỲ THỜI GIAN
+			// --------------------------------------------------------
+			const period = await getPeriodRange();
+
+			// --------------------------------------------------------
+			// 3. ĐỌC TOÀN BỘ MODULE CÓ ÍT NHẤT 1 FIELD KPI
+			//
+			// Không phụ thuộc assignment để tránh bỏ sót auditLog.
+			// --------------------------------------------------------
+			const moduleSnapshot = await db
+				.collection("organizations")
+				.doc(orgId)
+				.collection("modules")
+				.get();
+
+			const kpiModules = [];
+
+			moduleSnapshot.forEach(doc => {
+				const data = doc.data() || {};
+
+				const fields =
+					Array.isArray(data.fields)
+						? data.fields
+						: [];
+
+				const kpiFields = fields.filter(
+					field =>
+						field &&
+						typeof field === "object" &&
+						field.isKpi === true
+				);
+
+				if (kpiFields.length === 0) {
+					return;
+				}
+
+				kpiModules.push({
+					id: doc.id,
+					...data,
+					fields: fields,
+					kpiFields
+				});
+			});
+
+			if (moduleCountEl) {
+				moduleCountEl.textContent =
+					String(kpiModules.length);
+			}
+
+			if (kpiModules.length === 0) {
+				listEl.innerHTML = `
+					<div style="
+						text-align:center;
+						color:#6c757d;
+						padding:20px;
+						border:1px dashed #ced4da;
+						border-radius:6px;
+					">
+						Chưa có nhiệm vụ nào có trường KPI.
+					</div>
+				`;
+
+				if (errorCountEl) errorCountEl.textContent = "0";
+				if (statusEl) {
+					statusEl.textContent = "Không có dữ liệu KPI";
+					statusEl.style.color = "#6c757d";
+				}
 
 				return;
 			}
 
+			// --------------------------------------------------------
+			// 4. ĐỌC AUDIT LOG CỦA TỪNG MODULE
+			//
+			// AuditLog nằm tại:
+			// organizations/{orgId}
+			//   /academicYears/{academicId}
+			//   /modulesData/{moduleId}/auditLogs
+			//
+			// Ưu tiên tìm entityId = CODE.
+			// Nếu không có CODE thì fallback UID/email.
+			// --------------------------------------------------------
+			let academicId =
+				window.currentEmployeeAcademicIdGlobal ||
+				document.getElementById(
+					"emp-academic-year-select"
+				)?.value ||
+				"";
 
-			// ========================================================
-			// 8. SẮP XẾP MỚI NHẤT → CŨ NHẤT
-			// ========================================================
+			if (
+				!academicId &&
+				Array.isArray(window.currentAcademicYearsGlobal) &&
+				window.currentAcademicYearsGlobal.length > 0
+			) {
+				academicId =
+					window.currentAcademicYearsGlobal[
+						window.currentAcademicYearsGlobal.length - 1
+					];
+			}
 
-			myLogs.sort((a, b) => {
+			if (!academicId) {
+				throw new Error(
+					"Không xác định được năm học."
+				);
+			}
 
-				const timeA =
-					a.timestamp &&
-					typeof a.timestamp.toDate === "function"
-						? a.timestamp.toDate().getTime()
-						: new Date(
-							a.timestamp || 0
-						).getTime();
+			const auditRows = [];
 
+			// Tránh đọc trùng cùng một audit log nếu có nhiều
+			// phương thức nhận diện entity.
+			const seenAuditIds = new Set();
 
-				const timeB =
-					b.timestamp &&
-					typeof b.timestamp.toDate === "function"
-						? b.timestamp.toDate().getTime()
-						: new Date(
-							b.timestamp || 0
-						).getTime();
+			for (const moduleConfig of kpiModules) {
+				const moduleId = moduleConfig.id;
 
+				let auditSnapshot = null;
 
-				return timeB - timeA;
-			});
+				try {
+					const auditRef = db
+						.collection("organizations")
+						.doc(orgId)
+						.collection("academicYears")
+						.doc(academicId)
+						.collection("modulesData")
+						.doc(moduleId)
+						.collection("auditLogs");
 
+					// AuditLog hiện tại có date dạng YYYY-MM-DD.
+					// Query theo date trước để giảm số lượng đọc.
+					const startDateStr =
+						period.start.toLocaleDateString("en-CA");
 
-			// ========================================================
-			// 9. TẠO CARD
-			// ========================================================
+					const endDateStr =
+						new Date(period.end.getTime() - 1)
+							.toLocaleDateString("en-CA");
 
-			const cardDiv =
-				document.createElement("div");
+					auditSnapshot = await auditRef
+						.where("date", ">=", startDateStr)
+						.where("date", "<=", endDateStr)
+						.get();
 
-
-			cardDiv.style.cssText =
-				"background:white;" +
-				"border:1px solid #dee2e6;" +
-				"border-radius:6px;" +
-				"padding:12px;" +
-				"box-shadow:0 1px 3px rgba(0,0,0,0.05);";
-
-
-			let logsHtml = `
-				<div style="
-					border-bottom:1px solid #eee;
-					padding-bottom:6px;
-					margin-bottom:8px;
-					display:flex;
-					justify-content:space-between;
-					align-items:center;
-				">
-					<b style="
-						color:#084298;
-						font-size:1.05em;
-					">
-						<i class="fa-solid fa-user-pen"></i>
-						Lịch sử thao tác của bạn
-					</b>
-
-					<span style="
-						background:#e7f1ff;
-						color:#0d6efd;
-						padding:2px 8px;
-						border-radius:10px;
-						font-weight:bold;
-						font-size:0.85em;
-					">
-						${myLogs.length} lượt thao tác
-					</span>
-				</div>
-
-				<ul style="
-					margin:0;
-					padding-left:18px;
-					font-size:0.9em;
-					color:#333;
-				">
-			`;
-
-
-			// ========================================================
-			// 10. RENDER LOG
-			// ========================================================
-
-			myLogs.forEach(log => {
-
-				const logDateObj =
-					log.timestamp &&
-					typeof log.timestamp.toDate === "function"
-						? log.timestamp.toDate()
-						: new Date(
-							log.timestamp || Date.now()
-						);
-
-
-				const timeStr =
-					logDateObj.toLocaleTimeString(
-						"vi-VN",
-						{
-							hour: "2-digit",
-							minute: "2-digit"
-						}
+				} catch (queryError) {
+					// Một số dữ liệu audit cũ có thể thiếu date hoặc
+					// Firestore có thể yêu cầu index. Fallback đọc audit
+					// logs của module rồi lọc client-side.
+					console.warn(
+						`[PersonalStatus] Fallback auditLogs module ${moduleId}:`,
+						queryError
 					);
 
+					const auditRef = db
+						.collection("organizations")
+						.doc(orgId)
+						.collection("academicYears")
+						.doc(academicId)
+						.collection("modulesData")
+						.doc(moduleId)
+						.collection("auditLogs");
 
-				const actionTitle =
-					log.action ||
-					"Cập nhật dữ liệu";
-
-
-				const entityId =
-					log.entityId ||
-					"Không rõ";
-
-
-				// ====================================================
-				// TÌM NHÂN SỰ TỪ GLOBAL STATE
-				// ====================================================
-
-				const entities =
-					Array.isArray(
-						window.currentEmployeeEntitiesGlobal
-					)
-						? window.currentEmployeeEntitiesGlobal
-						: [];
-
-
-				const entityInfo =
-					entities.find(e =>
-						e.code === entityId ||
-						e.id === entityId ||
-						e.entityId === entityId
-					) || {};
-
-
-				const entityName =
-					entityInfo.fullName ||
-					entityInfo.name ||
-					entityId;
-
-
-				// ====================================================
-				// CHI TIẾT THAY ĐỔI
-				// ====================================================
-
-				let changeDetailsStr = "";
-
-
-				if (
-					log.changes &&
-					typeof log.changes === "object"
-				) {
-
-					const changedFields =
-						Object.keys(log.changes);
-
-
-					changeDetailsStr =
-						changedFields
-							.map(
-								field =>
-									`<b>${field}</b>: "${log.changes[field]}"`
-							)
-							.join("; ");
+					auditSnapshot = await auditRef.get();
 				}
 
+				if (!auditSnapshot) continue;
 
-				// ====================================================
-				// HTML LOG
-				// ====================================================
+				auditSnapshot.forEach(auditDoc => {
+					const auditData = auditDoc.data() || {};
 
-				logsHtml += `
-					<li style="
-						margin-bottom:8px;
-						padding-bottom:6px;
-						border-bottom:1px dashed #f1f1f1;
-					">
+					const entityId =
+						String(
+							auditData.entityId ||
+							auditData.memberId ||
+							""
+						).trim();
 
-						<span style="
-							color:#198754;
-							font-weight:bold;
-						">
-							[${actionTitle}]
-						</span>
+					const auditEmail =
+						String(
+							auditData.updaterEmail ||
+							auditData.email ||
+							auditData.by ||
+							""
+						).trim().toLowerCase();
 
-						Lúc
-						<b>${timeStr}</b>
+					// ------------------------------------------------
+					// Nhận diện đúng người:
+					// CODE là khóa chính.
+					// UID/email chỉ fallback cho dữ liệu cũ.
+					// ------------------------------------------------
+					const matchByCode =
+						currentCode &&
+						entityId &&
+						entityId === currentCode;
 
-						cho học sinh/nhân sự:
+					const matchByUid =
+						!matchByCode &&
+						currentUid &&
+						entityId &&
+						entityId === currentUid;
 
-						<b style="
-							color:#0d6efd;
-						">
-							${entityName}
-							(Mã: ${entityId})
-						</b>
+					const matchByEmail =
+						!matchByCode &&
+						!matchByUid &&
+						currentEmail &&
+						auditEmail &&
+						auditEmail === currentEmail;
 
-						${
-							changeDetailsStr
-								? `
-									<br>
-									<span style="
-										color:#666;
-										font-size:0.95em;
-										padding-left:15px;
-									">
-										👉 Nội dung:
-										${changeDetailsStr}
-									</span>
-								`
-								: ""
+					if (
+						!matchByCode &&
+						!matchByUid &&
+						!matchByEmail
+					) {
+						return;
+					}
+
+					// ------------------------------------------------
+					// Lọc chính xác theo khoảng thời gian.
+					// Query date đã lọc nhưng fallback có thể chưa.
+					// ------------------------------------------------
+					let auditDate = null;
+
+					if (auditData.timestamp) {
+						auditDate = toDate(auditData.timestamp);
+					}
+
+					if (!auditDate && auditData.time) {
+						auditDate = toDate(auditData.time);
+					}
+
+					if (!auditDate && auditData.date) {
+						auditDate = toDate(
+							`${auditData.date}T00:00:00`
+						);
+					}
+
+					if (auditDate) {
+						if (
+							auditDate < period.start ||
+							auditDate >= period.end
+						) {
+							return;
 						}
+					}
 
-					</li>
-				`;
+					const detailItems =
+						buildKpiDetailsFromAudit(
+							auditData,
+							moduleConfig
+						);
+
+					if (detailItems.length === 0) {
+						return;
+					}
+
+					const auditKey =
+						`${moduleId}__${auditDoc.id}`;
+
+					if (seenAuditIds.has(auditKey)) {
+						return;
+					}
+
+					seenAuditIds.add(auditKey);
+
+					const recorderName =
+						String(
+							auditData.updaterName ||
+							auditData.recorderName ||
+							auditData.byName ||
+							auditData.updaterEmail ||
+							auditData.by ||
+							"Không xác định"
+						).trim();
+
+					const timestamp =
+						auditData.timestamp ||
+						auditData.time ||
+						auditData.date ||
+						"";
+
+					detailItems.forEach(detail => {
+						auditRows.push({
+							moduleId,
+							moduleName:
+								String(
+									moduleConfig.name ||
+									moduleConfig.title ||
+									moduleId
+								).trim(),
+							auditId: auditDoc.id,
+							timestamp,
+							timestampDate: auditDate,
+							recorderName,
+							recorderEmail:
+								String(
+									auditData.updaterEmail ||
+									auditData.email ||
+									""
+								).trim(),
+							detail: detail.detail,
+							fieldKey: detail.fieldKey,
+							fieldLabel: detail.fieldLabel,
+							optionValue: detail.optionValue,
+							optionLabel: detail.optionLabel
+						});
+					});
+				});
+			}
+
+			// --------------------------------------------------------
+			// 5. SẮP XẾP MỚI NHẤT TRƯỚC
+			// --------------------------------------------------------
+			auditRows.sort((a, b) => {
+				const da =
+					a.timestampDate?.getTime?.() || 0;
+
+				const dbTime =
+					b.timestampDate?.getTime?.() || 0;
+
+				return dbTime - da;
 			});
 
+			// --------------------------------------------------------
+			// 6. TỔNG HỢP
+			// --------------------------------------------------------
+			if (errorCountEl) {
+				errorCountEl.textContent =
+					String(auditRows.length);
+			}
 
-			// ========================================================
-			// 11. HOÀN THIỆN CARD
-			// ========================================================
+			if (statusEl) {
+				if (auditRows.length > 0) {
+					statusEl.textContent =
+						`Có ${auditRows.length} lỗi ghi nhận`;
+					statusEl.style.color = "#dc3545";
+				} else {
+					statusEl.textContent =
+						"Không có lỗi ghi nhận";
+					statusEl.style.color = "#198754";
+				}
+			}
 
-			logsHtml += "</ul>";
+			// --------------------------------------------------------
+			// 7. RENDER
+			// --------------------------------------------------------
+			if (auditRows.length === 0) {
+				listEl.innerHTML = `
+					<div style="
+						text-align:center;
+						color:#198754;
+						padding:25px 15px;
+						border:1px dashed #a3cfbb;
+						border-radius:6px;
+						background:#f6fffa;
+					">
+						<div style="
+							font-size:1.6em;
+							margin-bottom:6px;
+						">
+							<i class="fa-solid fa-circle-check"></i>
+						</div>
 
-			cardDiv.innerHTML =
-				logsHtml;
+						<strong>Không có lỗi KPI</strong>
 
-			container.appendChild(
-				cardDiv
+						<div style="
+							margin-top:5px;
+							font-size:0.9em;
+							color:#6c757d;
+						">
+							${escapeHtml(period.label)}
+						</div>
+					</div>
+				`;
+
+				return;
+			}
+
+			// Bảng đúng 3 cột theo yêu cầu:
+			// Thời gian | Người ghi nhận | Lỗi ghi nhận
+			const rowsHtml = auditRows.map(row => {
+				const timeText =
+					formatDateTime(row.timestamp);
+
+				return `
+					<tr>
+						<td style="
+							padding:9px 8px;
+							border-bottom:1px solid #eee;
+							white-space:nowrap;
+							vertical-align:top;
+						">
+							${escapeHtml(timeText)}
+						</td>
+
+						<td style="
+							padding:9px 8px;
+							border-bottom:1px solid #eee;
+							vertical-align:top;
+						">
+							<div style="font-weight:600;">
+								${escapeHtml(row.recorderName)}
+							</div>
+
+							${
+								row.recorderEmail
+									? `
+										<div style="
+											font-size:0.78em;
+											color:#6c757d;
+											margin-top:2px;
+										">
+											${escapeHtml(row.recorderEmail)}
+										</div>
+									  `
+									: ""
+							}
+						</td>
+
+						<td style="
+							padding:9px 8px;
+							border-bottom:1px solid #eee;
+							vertical-align:top;
+						">
+							<div style="
+								font-weight:600;
+								color:#dc3545;
+							">
+								${escapeHtml(row.detail)}
+							</div>
+
+							<div style="
+								font-size:0.78em;
+								color:#6c757d;
+								margin-top:3px;
+							">
+								${escapeHtml(row.moduleName)}
+							</div>
+						</td>
+					</tr>
+				`;
+			}).join("");
+
+			listEl.innerHTML = `
+				<div style="
+					margin-bottom:8px;
+					font-size:0.85em;
+					color:#6c757d;
+				">
+					${escapeHtml(period.label)}
+				</div>
+
+				<div style="
+					overflow-x:auto;
+					border:1px solid #dee2e6;
+					border-radius:6px;
+				">
+					<table style="
+						width:100%;
+						border-collapse:collapse;
+						background:#fff;
+						font-size:0.9em;
+					">
+						<thead>
+							<tr style="
+								background:#f8f9fa;
+							">
+								<th style="
+									padding:10px 8px;
+									text-align:left;
+									border-bottom:2px solid #dee2e6;
+									white-space:nowrap;
+								">
+									Thời gian
+								</th>
+
+								<th style="
+									padding:10px 8px;
+									text-align:left;
+									border-bottom:2px solid #dee2e6;
+									white-space:nowrap;
+								">
+									Người ghi nhận
+								</th>
+
+								<th style="
+									padding:10px 8px;
+									text-align:left;
+									border-bottom:2px solid #dee2e6;
+								">
+									Lỗi ghi nhận
+								</th>
+							</tr>
+						</thead>
+
+						<tbody>
+							${rowsHtml}
+						</tbody>
+					</table>
+				</div>
+			`;
+
+			console.log(
+				"[PersonalStatus] Đã tải dữ liệu:",
+				{
+					periodType,
+					period,
+					user: {
+						uid: currentUid,
+						code: currentCode,
+						email: currentEmail
+					},
+					kpiModules: kpiModules.length,
+					auditRows: auditRows.length,
+					forceRefresh
+				}
 			);
 
-
 		} catch (error) {
-
 			console.error(
-				"Lỗi nạp nhật ký cá nhân:",
+				"[PersonalStatus] Lỗi tải trạng thái cá nhân:",
 				error
 			);
 
+			if (moduleCountEl) moduleCountEl.textContent = "0";
+			if (errorCountEl) errorCountEl.textContent = "0";
 
-			container.innerHTML =
-				`<p style="
-					color:red;
-					text-align:center;
+			if (statusEl) {
+				statusEl.textContent = "Lỗi tải dữ liệu";
+				statusEl.style.color = "#dc3545";
+			}
+
+			listEl.innerHTML = `
+				<div style="
 					padding:15px;
+					color:#842029;
+					background:#f8d7da;
+					border:1px solid #f5c2c7;
+					border-radius:6px;
 				">
-					Lỗi tải nhật ký cá nhân:
-					${error.message}
-				</p>`;
+					<strong>Không thể tải dữ liệu theo dõi cá nhân.</strong>
+
+					<div style="
+						margin-top:5px;
+						font-size:0.9em;
+					">
+						${escapeHtml(error.message)}
+					</div>
+				</div>
+			`;
 		}
 	}
+
+	// Đảm bảo onclick="loadPersonalStatusData()" trong HTML
+	// có thể gọi được ngay cả khi JS đang chạy ở module scope.
+	window.loadPersonalStatusData = loadPersonalStatusData;
+
+
+
 	//	EMPLOYEE PANEL - THẺ 3
 	async function loadAuditLogsTimeline() {
 		const container = document.getElementById('audit-logs-timeline');
