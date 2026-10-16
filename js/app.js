@@ -95,15 +95,20 @@ document.addEventListener("DOMContentLoaded", () => {
         await user.updatePassword(newPass);
 
         // 3. Cập nhật trạng thái trong Firestore (tắt cờ bắt buộc đổi mật khẩu nếu có)
-        if (typeof currentOrgIdGlobal !== 'undefined' && currentOrgIdGlobal) {
-          const db = firebase.firestore();
-          const staffQuery = await db.collection("organizations").doc(currentOrgIdGlobal).collection("users")
-            .where("email", "==", user.email).get();
-            
-          if (!staffQuery.empty) {
-            await staffQuery.docs[0].ref.update({ mustChangePassword: false });
-          }
-        }
+        if (window.currentOrgIdGlobal) {
+		  const db = firebase.firestore();
+		  const staffQuery = await db.collection("organizations")
+			.doc(window.currentOrgIdGlobal)
+			.collection("users")
+			.where("email", "==", user.email)
+			.get();
+
+		  if (!staffQuery.empty) {
+			await staffQuery.docs[0].ref.update({
+			  mustChangePassword: false
+			});
+		  }
+		}
 
         alert("Đổi mật khẩu thành công!");
         closeChangePasswordModal();
@@ -9673,12 +9678,7 @@ async function initGridCard5() {
 
 			tableBody.innerHTML = `
 				<tr>
-					<td colspan="30"
-						style="
-							text-align:center;
-							color:red;
-							padding:20px;
-						">
+					<td>
 						Chưa xác định được năm học.
 					</td>
 				</tr>
@@ -9731,12 +9731,7 @@ async function initGridCard5() {
 
 		tableBody.innerHTML = `
 			<tr>
-				<td colspan="30"
-					style="
-						text-align:center;
-						color:#6c757d;
-						padding:20px;
-					">
+				<td>
 					⏳ Đang tổng hợp dữ liệu tuần
 					${mondayStr} → ${sundayStr}...
 				</td>
@@ -9981,12 +9976,7 @@ async function initGridCard5() {
 
 				tableBody.innerHTML = `
 					<tr>
-						<td colspan="30"
-							style="
-								text-align:center;
-								color:#6c757d;
-								padding:20px;
-							">
+						<td >
 							Không tìm thấy module cho
 							${
 								targetType === "TEACHER"
@@ -10111,11 +10101,11 @@ async function initGridCard5() {
 
 			let headerHtml = `
 
-				<th style="width:90px;">
+				<th>
 					Mã định danh
 				</th>
 
-				<th style="width:170px;">
+				<th>
 					Họ và tên
 				</th>
 
@@ -10134,10 +10124,7 @@ async function initGridCard5() {
 
 					headerHtml += `
 
-						<th style="
-							text-align:center;
-							min-width:105px;
-						">
+						<th>
 							${field.name}
 						</th>
 					`;
@@ -10147,17 +10134,11 @@ async function initGridCard5() {
 
 			headerHtml += `
 
-				<th style="
-					width:110px;
-					text-align:center;
-				">
+				<th>
 					Tổng điểm trừ
 				</th>
 
-				<th style="
-					width:130px;
-					text-align:center;
-				">
+				<th>
 					Cảnh báo Tuần
 				</th>
 			`;
@@ -14678,6 +14659,7 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 		const teacherEmail = authUser.email.toLowerCase().trim();
 
 		let academicYearId = currentAcademicYear || "";
+		console.log("nam hien tai",academicYearId);
 		const yearsArr = window.currentAcademicYearsGlobal;
 		if (!academicYearId && Array.isArray(yearsArr) && yearsArr.length > 0) {
 			const lastYearItem = yearsArr[yearsArr.length - 1];
@@ -14827,9 +14809,7 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 		}
 
 
-		console.log(
-			`Đã chọn module ID: [${selectedModuleId}] trong năm học [${selectedAcademicYear}]`
-		);
+		
 
 
 		// ============================================================
@@ -16134,78 +16114,363 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 			bodyHtml;
 	}
 
-	async function clearSingleLogEntry(entityId, moduleId, fieldId) {
+	async function clearSingleLogEntry(entityId, fieldId, logEntryId) {
 		try {
-			const orgId = document.getElementById("orgSelect")?.value;
-			const academicId = document.getElementById("academicYearSelect")?.value;
+			// ============================================================
+			// 1. LẤY CONTEXT HIỆN TẠI
+			// ============================================================
+			const orgId =
+				window.currentEmployeeOrgIdGlobal ||
+				window.currentOrgIdGlobal ||
+				"";
 
-			if (!orgId || !academicId || !moduleId || !entityId) {
-				console.warn("Thiếu thông tin để xóa dữ liệu.");
+			const academicId =
+				window.currentEmployeeAcademicIdGlobal ||
+				document.getElementById("emp-academic-year-select")?.value ||
+				"";
+
+			const moduleId =
+				window.currentEmployeeModuleIdGlobal ||
+				document.getElementById("emp-module-select")?.value ||
+				"";
+
+			const todayStr =
+				window.currentTodayStrGlobal ||
+				window.employeeDataCache?.todayStr ||
+				new Date().toLocaleDateString("en-CA");
+
+			const updaterName =
+				window.currentUserNameGlobal ||
+				"Giáo viên";
+
+			const updaterEmail =
+				(
+					window.currentUserEmailGlobal ||
+					firebase.auth().currentUser?.email ||
+					"unknown@school.edu.vn"
+				).toLowerCase().trim();
+
+			// ============================================================
+			// 2. KIỂM TRA THAM SỐ
+			// ============================================================
+			if (!orgId || !academicId || !moduleId) {
+				console.warn(
+					"[clearSingleLogEntry] Thiếu context:",
+					{
+						orgId,
+						academicId,
+						moduleId,
+						entityId,
+						fieldId,
+						logEntryId
+					}
+				);
 				return;
 			}
 
-			const todayStr = new Date().toISOString().split("T")[0];
-			const dailyDocId = `${entityId}_${todayStr}`;
+			if (!entityId || !fieldId || !logEntryId) {
+				console.warn(
+					"[clearSingleLogEntry] Thiếu tham số:",
+					{
+						entityId,
+						fieldId,
+						logEntryId
+					}
+				);
+				return;
+			}
 
-			// Lấy record từ CACHE — không đọc Firestore
-			const cachedRecord = getCachedEmployeeRecord(moduleId, dailyDocId);
+			// ============================================================
+			// 3. XÁC ĐỊNH DOCUMENT ID
+			// ============================================================
+			const dailyDocId =
+				`${entityId}_${todayStr}`;
+
+			// ============================================================
+			// 4. LẤY RECORD TỪ CACHE
+			// ============================================================
+			const cachedRecord =
+				getCachedEmployeeRecord(
+					moduleId,
+					dailyDocId
+				);
 
 			if (!cachedRecord) {
-				console.warn("Không tìm thấy record trong cache:", dailyDocId);
+				const moduleRecords =
+					window.employeeDataCache?.records?.[moduleId] || {};
+
+				console.warn(
+					"[clearSingleLogEntry] Không tìm thấy record trong cache:",
+					{
+						orgId,
+						academicId,
+						moduleId,
+						entityId,
+						fieldId,
+						logEntryId,
+						dailyDocId,
+						cacheOrgId:
+							window.employeeDataCache?.orgId,
+						cacheAcademicId:
+							window.employeeDataCache?.academicId,
+						cacheTodayStr:
+							window.employeeDataCache?.todayStr,
+						availableRecordIds:
+							Object.keys(moduleRecords)
+					}
+				);
+
 				return;
 			}
 
-			// Clone để không sửa trực tiếp object trong cache
-			const updatedData = JSON.parse(JSON.stringify(cachedRecord));
+			// ============================================================
+			// 5. COPY RECORD TRƯỚC KHI SỬA
+			// ============================================================
+			const updatedData =
+				JSON.parse(
+					JSON.stringify(cachedRecord)
+				);
 
-			// Tìm field cần xóa
-			if (updatedData[fieldId]) {
-				if (Array.isArray(updatedData[fieldId])) {
-					// Xóa dữ liệu của đúng MemberId
-					updatedData[fieldId] = updatedData[fieldId].filter(
-						item => item?.entityId !== entityId
-					);
+			const fieldData =
+				updatedData[fieldId];
 
-					// Nếu không còn dữ liệu thì xóa luôn field
-					if (updatedData[fieldId].length === 0) {
-						delete updatedData[fieldId];
+			if (!Array.isArray(fieldData)) {
+				console.warn(
+					"[clearSingleLogEntry] Field không phải mảng log:",
+					{
+						entityId,
+						moduleId,
+						fieldId,
+						logEntryId,
+						fieldData
 					}
-				}
+				);
+				return;
 			}
 
-			// Giữ entityId của document
-			updatedData.entityId = entityId;
+			// ============================================================
+			// 6. TÌM LOG CẦN XÓA
+			// ============================================================
+			const logToDelete =
+				fieldData.find(
+					item => item?.id === logEntryId
+				);
 
-			const docRef = db
-				.collection("organizations")
-				.doc(orgId)
-				.collection("academicYears")
-				.doc(academicId)
-				.collection("records")
-				.doc(dailyDocId);
+			if (!logToDelete) {
+				console.warn(
+					"[clearSingleLogEntry] Không tìm thấy logEntryId trong field:",
+					{
+						entityId,
+						moduleId,
+						fieldId,
+						logEntryId,
+						availableLogIds:
+							fieldData
+								.map(item => item?.id)
+								.filter(Boolean)
+					}
+				);
+				return;
+			}
 
-			// Ghi Firestore
-			await docRef.set(updatedData, { merge: false });
+			// ============================================================
+			// 7. XÓA ĐÚNG LOG THEO ID
+			// ============================================================
+			updatedData[fieldId] =
+				fieldData.filter(
+					item => item?.id !== logEntryId
+				);
 
-			// Cập nhật CACHE sau khi Firestore thành công
+			// Nếu field không còn log nào thì xóa field
+			if (updatedData[fieldId].length === 0) {
+				delete updatedData[fieldId];
+			}
+
+			// ============================================================
+			// 8. GIỮ THÔNG TIN GỐC CỦA RECORD
+			// ============================================================
+			updatedData.entityId =
+				cachedRecord.entityId ||
+				entityId;
+
+			updatedData.date =
+				cachedRecord.date ||
+				todayStr;
+
+			updatedData.updatedAt =
+				typeof getVietnamTimestamp === "function"
+					? getVietnamTimestamp()
+					: new Date();
+
+			// ============================================================
+			// 9. TẠO AUDIT CHANGES
+			// ============================================================
+			const auditChanges = {};
+
+			const deletedContent =
+				logToDelete?.content ??
+				logToDelete?.value ??
+				"";
+
+			const deletedBy =
+				logToDelete?.by ||
+				logToDelete?.email ||
+				"";
+
+			auditChanges[fieldId] =
+				`Xóa mốc ghi: "${deletedContent}"` +
+				(deletedBy ? ` (${deletedBy})` : "");
+
+			// ============================================================
+			// 10. TẠO FIRESTORE REFERENCES
+			// ============================================================
+
+			// Record chính
+			const docRef =
+				db.collection("organizations")
+					.doc(orgId)
+					.collection("academicYears")
+					.doc(academicId)
+					.collection("modulesData")
+					.doc(moduleId)
+					.collection("records")
+					.doc(dailyDocId);
+
+			// Audit log
+			const auditLogsRef =
+				db.collection("organizations")
+					.doc(orgId)
+					.collection("academicYears")
+					.doc(academicId)
+					.collection("modulesData")
+					.doc(moduleId)
+					.collection("auditLogs");
+
+			const newLogRef =
+				auditLogsRef.doc();
+
+			// ============================================================
+			// 11. GHI RECORD + AUDIT LOG TRONG CÙNG MỘT BATCH
+			// ============================================================
+			const batch =
+				db.batch();
+
+			// Record chính
+			batch.set(
+				docRef,
+				updatedData,
+				{ merge: false }
+			);
+
+			// Audit log
+			batch.set(
+				newLogRef,
+				{
+					entityId: entityId,
+
+					updaterEmail: updaterEmail,
+
+					updaterName: updaterName,
+
+					action:
+						"Xóa mốc ghi dữ liệu trong ngày",
+
+					changes: auditChanges,
+
+					date: todayStr,
+
+					timestamp:
+						typeof getVietnamTimestamp === "function"
+							? getVietnamTimestamp()
+							: new Date()
+				}
+			);
+
+			// ============================================================
+			// 12. COMMIT FIRESTORE
+			// ============================================================
+			await batch.commit();
+
+			// ============================================================
+			// 13. CHỈ CẬP NHẬT CACHE SAU KHI COMMIT THÀNH CÔNG
+			// ============================================================
 			setCachedEmployeeRecord(
 				moduleId,
 				dailyDocId,
 				updatedData
 			);
 
-			// Render lại từ cache — KHÔNG đọc Firestore
-			await renderEmployeeTable();
+			// ============================================================
+			// 14. CẬP NHẬT STATE ĐANG HIỂN THỊ
+			// ============================================================
+			if (
+				Array.isArray(
+					window.currentEmployeeEntitiesGlobal
+				)
+			) {
+				const entity =
+					window.currentEmployeeEntitiesGlobal.find(
+						item =>
+							String(
+								item?.code ??
+								item?.MemberId ??
+								item?.id ??
+								""
+							) ===
+							String(entityId)
+					);
+
+				if (entity) {
+					entity.savedRecord = {
+						...updatedData
+					};
+				}
+			}
+
+			// ============================================================
+			// 15. RENDER LẠI TỪ CACHE
+			// ============================================================
+			renderEmployeeTable(
+				window.currentEmployeeEntitiesGlobal || [],
+				window.currentEmployeeModuleConfigGlobal || {}
+			);
 
 			console.log(
-				`Đã xóa ${fieldId} của ${entityId} và cập nhật cache.`
+				"[clearSingleLogEntry] Đã xóa log và ghi audit:",
+				{
+					orgId,
+					academicId,
+					moduleId,
+					entityId,
+					fieldId,
+					logEntryId,
+					dailyDocId,
+					auditLogId: newLogRef.id,
+					auditChanges
+				}
 			);
 
 		} catch (error) {
-			console.error("Lỗi clearSingleLogEntry:", error);
-			alert("Không thể xóa dữ liệu. Vui lòng thử lại.");
+			console.error(
+				"[clearSingleLogEntry] Lỗi:",
+				error
+			);
+
+			if (
+				typeof showToast === "function"
+			) {
+				showToast(
+					"Không thể xóa mốc đã ghi. Vui lòng thử lại.",
+					"error"
+				);
+			} else {
+				alert(
+					"Không thể xóa mốc đã ghi. Vui lòng thử lại."
+				);
+			}
 		}
 	}
+
 	
 	//Hàm cho phép người nhập liệu xóa dữ liệu nhập sai trong ngày
 	async function clearSingleCellData(entityId, fieldKey) {
@@ -16252,14 +16517,12 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 		const input =
 			document.getElementById("emp-live-search-input");
 
-		const keyword =
-			(input?.value || "")
-				.toLowerCase()
-				.trim();
+		const rawKeyword =
+			(input?.value || "").trim();
 
 		console.log(
-			"[EmployeeSearch] keyword:",
-			keyword
+			"[EmployeeSearch] rawKeyword:",
+			rawKeyword
 		);
 
 		// ============================================================
@@ -16274,12 +16537,11 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 		const moduleConfig =
 			window.currentEmployeeModuleConfigGlobal || {};
 
-
 		// ============================================================
 		// KHÔNG NHẬP TỪ KHÓA → RENDER TOÀN BỘ
 		// ============================================================
 
-		if (!keyword) {
+		if (!rawKeyword) {
 
 			renderEmployeeTable(
 				entities,
@@ -16289,36 +16551,87 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 			return;
 		}
 
+		// ============================================================
+		// CHUẨN HÓA CHUỖI TÌM KIẾM
+		//
+		// Ví dụ:
+		// "nguyễn văn a, 12a1"
+		//
+		// sẽ trở thành:
+		// [
+		//     "nguyễn văn a",
+		//     "12a1"
+		// ]
+		//
+		// Các điều kiện ngăn bởi dấu phẩy = AND
+		// Trong từng điều kiện:
+		// mã / tên / lớp-tổ = OR
+		// ============================================================
+
+		const searchParts =
+			rawKeyword
+				.toLowerCase()
+				.split(",")
+				.map(part => part.trim())
+				.filter(Boolean);
+
+		console.log(
+			"[EmployeeSearch] searchParts:",
+			searchParts
+		);
+
+		// ============================================================
+		// HÀM CHUẨN HÓA GIÁ TRỊ
+		// ============================================================
+
+		const normalizeValue = value =>
+			String(value ?? "")
+				.toLowerCase()
+				.trim();
 
 		// ============================================================
 		// LỌC NHÂN SỰ
+		//
+		// Mỗi phần tìm kiếm phải khớp ít nhất một trong:
+		// - mã nhân sự
+		// - họ tên
+		// - lớp / tổ
+		//
+		// Và TẤT CẢ các phần ngăn bởi dấu phẩy đều phải đúng.
 		// ============================================================
 
 		const filtered =
 			entities.filter(item => {
 
 				const id =
-					(item.code || "")
-						.toLowerCase();
+					normalizeValue(item.code);
 
 				const name =
-					(item.fullName || "")
-						.toLowerCase();
+					normalizeValue(item.fullName);
 
 				const category =
-					(
+					normalizeValue(
 						item.category ||
-						item.classOrGroup ||
-						""
-					).toLowerCase();
+						item.classOrGroup
+					);
 
-				return (
-					id.includes(keyword) ||
-					name.includes(keyword) ||
-					category.includes(keyword)
-				);
+				return searchParts.every(part => {
+
+					return (
+						id.includes(part) ||
+						name.includes(part) ||
+						category.includes(part)
+					);
+
+				});
+
 			});
 
+		console.log(
+			"[EmployeeSearch] filtered:",
+			filtered.length,
+			filtered
+		);
 
 		// ============================================================
 		// RENDER KẾT QUẢ
@@ -16329,6 +16642,7 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 			moduleConfig
 		);
 	}
+
 
 	// 4. Hàm lưu TẤT CẢ thay đổi trên bảng (Nút "LƯU TẤT CẢ THAY ĐỔI")
 	async function saveAllEmployeeEntries() {
@@ -17952,10 +18266,7 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 
 	async function getEmployeeAuditMonitorContext() {
 
-		let orgId =
-			window.currentEmployeeOrgIdGlobal ||
-			window.currentOrgIdGlobal ||
-			"";
+		let orgId =window.currentOrgIdGlobal;
 
 		if (!orgId && typeof ensureOrgId === "function") {
 			orgId = await ensureOrgId();
@@ -26919,9 +27230,7 @@ async function loadPotentialAssistantsForHelp(orgId, academicYearId, moduleId, c
 			// Ví dụ startDay = 21:
 			// Tháng 10/2026 = 21/09/2026 -> 20/10/2026
 			// --------------------------------------------------------
-			const orgId =
-				window.currentEmployeeOrgIdGlobal ||
-				window.currentOrgIdGlobal;
+			const orgId = window.currentOrgIdGlobal;
 
 			let startDay = 1;
 
@@ -27352,9 +27661,7 @@ async function loadPotentialAssistantsForHelp(orgId, academicYearId, moduleId, c
 				);
 			}
 
-			const orgId =
-				window.currentEmployeeOrgIdGlobal ||
-				window.currentOrgIdGlobal;
+			const orgId =window.currentOrgIdGlobal;
 
 			if (!orgId) {
 				throw new Error(
