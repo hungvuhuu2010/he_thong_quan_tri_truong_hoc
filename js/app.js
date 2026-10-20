@@ -17238,6 +17238,36 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 					item.payload
 				);
 			});
+			
+			// ============================================================
+			// 17A. ĐỒNG BỘ ENTITY VÀ RENDER LẠI BẢNG NGAY SAU KHI LƯU
+			// ============================================================
+
+			if (Array.isArray(window.currentEmployeeEntitiesGlobal)) {
+
+				pendingCacheUpdates.forEach(item => {
+
+					const entityId =
+						item.payload.entityId;
+
+					const currentEntity =
+						window.currentEmployeeEntitiesGlobal.find(
+							entity =>
+								(entity.code || entity.id || "") === entityId
+						);
+
+					if (currentEntity) {
+						currentEntity.savedRecord = {
+							...item.payload
+						};
+					}
+				});
+
+				renderEmployeeTable(
+					window.currentEmployeeEntitiesGlobal,
+					window.currentEmployeeModuleConfigGlobal || {}
+				);
+			}
 
 
 			// ========================================================
@@ -17826,6 +17856,29 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 				payload
 			);
 
+			// ============================================================
+			// 15A. ĐỒNG BỘ ENTITY HIỆN TẠI VÀ RENDER NGAY
+			// ============================================================
+
+			if (Array.isArray(window.currentEmployeeEntitiesGlobal)) {
+
+				const currentEntity =
+					window.currentEmployeeEntitiesGlobal.find(
+						item => (item.code || item.id || "") === entityId
+					);
+
+				if (currentEntity) {
+
+					currentEntity.savedRecord = {
+						...payload
+					};
+
+					renderEmployeeTable(
+						window.currentEmployeeEntitiesGlobal,
+						window.currentEmployeeModuleConfigGlobal || {}
+					);
+				}
+			}
 
 			// ========================================================
 			// 16. THÔNG BÁO
