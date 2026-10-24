@@ -2962,31 +2962,107 @@ async function handleCreateSchoolAdmin(event) {
 	}
 	// Tìm kiếm lọc cục bộ trên danh sách đang hiển thị
 	function filterEntityListLocal() {
-		const searchInput = document.getElementById("entity-search-input");
-		const keyword = searchInput ? searchInput.value.toLowerCase().trim() : "";
-		
-		// Lấy danh sách từ RAM thông qua biến toàn cục trên window để tránh lỗi undefined
-		const sourceList = window.currentLoadedEntities || [];
 
-		// Nếu không nhập từ khóa, hiển thị lại toàn bộ danh sách hiện có
+		const searchInput =
+			document.getElementById("entity-search-input");
+
+		const keyword =
+			searchInput
+				? searchInput.value.toLowerCase().trim()
+				: "";
+
+		// Lấy danh sách từ RAM thông qua biến toàn cục trên window
+		// GIỮ NGUYÊN đối tượng của bảng Admin
+		const sourceList =
+			window.currentLoadedEntities || [];
+
+
+		// ============================================================
+		// NẾU KHÔNG NHẬP TỪ KHÓA
+		// ============================================================
+
 		if (!keyword) {
+
 			if (typeof renderEntityTableRows === 'function') {
 				renderEntityTableRows(sourceList);
 			}
+
 			return;
 		}
 
-		// Thực hiện lọc theo các trường: Mã ID, Họ tên, Tổ/Lớp (category), và Email
-		const filtered = sourceList.filter(item => {
-			const idMatch = item.id && String(item.id).toLowerCase().includes(keyword);
-			const nameMatch = item.fullName && String(item.fullName).toLowerCase().includes(keyword);
-			const catMatch = item.category && String(item.category).toLowerCase().includes(keyword);
-			const emailMatch = item.email && String(item.email).toLowerCase().includes(keyword);
-			
-			return idMatch || nameMatch || catMatch || emailMatch;
-		});
 
-		// Render kết quả đã lọc thẳng vào tbody của bảng quản trị
+		// ============================================================
+		// TÁCH CÁC ĐIỀU KIỆN BẰNG DẤU PHẨY
+		//
+		// Ví dụ:
+		// Nguyễn Văn A
+		//
+		// hoặc:
+		// Nguyễn Văn A, 12A1
+		//
+		// Mỗi phần sau dấu phẩy là một điều kiện AND.
+		// ============================================================
+
+		const searchParts =
+			keyword
+				.split(",")
+				.map(part => part.trim())
+				.filter(Boolean);
+
+
+		// ============================================================
+		// THỰC HIỆN LỌC
+		//
+		// Trong mỗi điều kiện:
+		// ID OR Họ tên OR Tổ/Lớp OR Email
+		//
+		// Giữa các điều kiện:
+		// AND
+		// ============================================================
+
+		const filtered =
+			sourceList.filter(item => {
+
+				const id =
+					item.id
+						? String(item.id).toLowerCase()
+						: "";
+
+				const name =
+					item.fullName
+						? String(item.fullName).toLowerCase()
+						: "";
+
+				const category =
+					item.category
+						? String(item.category).toLowerCase()
+						: "";
+
+				const email =
+					item.email
+						? String(item.email).toLowerCase()
+						: "";
+
+
+				return searchParts.every(part => {
+
+					return (
+						id.includes(part) ||
+						name.includes(part) ||
+						category.includes(part) ||
+						email.includes(part)
+					);
+
+				});
+
+			});
+
+
+		// ============================================================
+		// RENDER KẾT QUẢ
+		// GIỮ NGUYÊN bảng Admin
+		// ============================================================
+
 		if (typeof renderEntityTableRows === 'function') {
 			renderEntityTableRows(filtered);
 		}
@@ -11586,56 +11662,135 @@ async function loadGridSection3Monthly(forceRefresh = false) {
 
 
         // =====================================================
-        // 11. LẤY FIELD KPI TRỰC TIẾP TỪ CÁC MODULE CỦA TARGET TYPE
-        // =====================================================
-        const kpiFieldsMap = {};
+		// 11. LẤY FIELD KPI TỪ COLLECTION FIELDS TRUNG TÂM
+		//    - Module chỉ xác định field nào được sử dụng.
+		//    - Cấu hình KPI lấy từ organizations/{orgId}/fields/{fieldKey}.
+		//    - fieldKey chính là documentId của field.
+		//    - Không phụ thuộc targetType trong document fields.
+		// =====================================================
 
-        const modulesSnapshot = await db
-            .collection("organizations")
-            .doc(orgId)
-            .collection("modules")
-            .where("targetType", "==", targetType) // Lọc đúng TEACHER hoặc STUDENT
-            .get();
+		// -----------------------------------------------------
+		// 11.1. Đọc toàn bộ field definitions từ collection fields
+		// -----------------------------------------------------
+		const fieldsSnapshot = await db
+			.collection("organizations")
+			.doc(orgId)
+			.collection("fields")
+			.get();
 
-        // Duyệt qua từng module của đối tượng này để bóc tách mảng fields đã được gán lúc tạo module
-        modulesSnapshot.forEach(modDoc => {
-            const modData = modDoc.data() || {};
-            const fieldsArr = Array.isArray(modData.fields) ? modData.fields : [];
+		// Map theo documentId.
+		// Đây là định danh ổn định của field và cũng chính là
+		// giá trị key được lưu trong module.fields[] và records.
+		const fieldsDefinitionMap = {};
 
-            fieldsArr.forEach(fieldObj => {
-                if (!fieldObj) return;
+		fieldsSnapshot.forEach(fieldDoc => {
+			const fieldData = fieldDoc.data() || {};
+			const fieldKey = String(fieldDoc.id || "").trim();
 
-                const fieldKey = String(
-                    fieldObj.key ||
-                    fieldObj.id ||
-                    fieldObj.fieldKey ||
-                    ""
-                ).trim();
+			if (!fieldKey) return;
 
-                if (!fieldKey) return;
+			fieldsDefinitionMap[fieldKey] = {
+				id: fieldKey,
+				key: fieldKey,
 
-                // Đưa vào map để gom nhóm và lấy đúng cấu hình KPI chi tiết của trường đó
-                kpiFieldsMap[fieldKey] = {
-                    id: fieldKey,
-                    key: fieldKey,
-                    name: fieldObj.label || fieldObj.name || fieldKey,
-                    label: fieldObj.label || fieldObj.name || fieldKey,
-                    type: fieldObj.type || "text",
-                    scoreWeight: Number(fieldObj.scoreWeight ?? 0),
-                    kpiWeekly: Number(fieldObj.kpiWeekly ?? 0),
-                    kpiMonthly: Number(fieldObj.kpiMonthly ?? 0),
-                    kpiOptions: (fieldObj.kpiOptions && typeof fieldObj.kpiOptions === "object") ? fieldObj.kpiOptions : {},
-                    options: Array.isArray(fieldObj.options) ? fieldObj.options : []
-                };
-            });
-        });
+				// Thông tin hiển thị
+				name: fieldData.label || fieldData.name || fieldKey,
+				label: fieldData.label || fieldData.name || fieldKey,
 
-        const kpiFieldsList = Object.values(kpiFieldsMap);
+				// Kiểu dữ liệu
+				type: fieldData.type || "text",
 
-        console.log(
-            "📊 [DEBUG] KPI fields chính thức lấy trực tiếp từ module cho " + targetType + ":",
-            kpiFieldsList
-        );
+				// Cấu hình KPI lấy từ field trung tâm
+				isKpi: fieldData.isKpi === true,
+				scoreWeight: Number(fieldData.scoreWeight ?? 0),
+				kpiWeekly: Number(fieldData.kpiWeekly ?? 0),
+				kpiMonthly: Number(fieldData.kpiMonthly ?? 0),
+
+				// Cấu hình options/KPI options
+				kpiOptions:
+					(fieldData.kpiOptions &&
+					 typeof fieldData.kpiOptions === "object")
+						? fieldData.kpiOptions
+						: {},
+
+				options:
+					Array.isArray(fieldData.options)
+						? fieldData.options
+						: []
+			};
+		});
+
+		console.log(
+			"📚 [DEBUG] Đã tải field definitions trung tâm:",
+			Object.values(fieldsDefinitionMap)
+		);
+
+		// -----------------------------------------------------
+		// 11.2. Lấy các module thuộc đúng targetType
+		// -----------------------------------------------------
+		const modulesSnapshot = await db
+			.collection("organizations")
+			.doc(orgId)
+			.collection("modules")
+			.where("targetType", "==", targetType)
+			.get();
+
+		// -----------------------------------------------------
+		// 11.3. Duyệt các field được sử dụng bởi các module
+		//      và nối bằng module.fields[].key -> fields/{key}
+		// -----------------------------------------------------
+		const kpiFieldsMap = {};
+
+		modulesSnapshot.forEach(modDoc => {
+			const modData = modDoc.data() || {};
+			const fieldsArr = Array.isArray(modData.fields)
+				? modData.fields
+				: [];
+
+			fieldsArr.forEach(moduleField => {
+				if (!moduleField) return;
+
+				// key trong module chính là documentId của field
+				const fieldKey = String(
+					moduleField.key ||
+					""
+				).trim();
+
+				if (!fieldKey) return;
+
+				// Không tìm thấy field tương ứng trong collection fields
+				// thì không thể lấy cấu hình KPI trung tâm.
+				const fieldDefinition = fieldsDefinitionMap[fieldKey];
+
+				if (!fieldDefinition) {
+					console.warn(
+						"⚠️ [DEBUG] Module sử dụng field nhưng không tìm thấy document fields tương ứng:",
+						{
+							moduleId: modDoc.id,
+							fieldKey: fieldKey
+						}
+					);
+					return;
+				}
+
+				// Chỉ lấy field được đánh dấu KPI ở cấu hình trung tâm.
+//				if (fieldDefinition.isKpi !== true) return;
+
+				// Một field có thể xuất hiện trong nhiều module,
+				// nhưng chỉ đưa vào danh sách KPI một lần.
+				kpiFieldsMap[fieldKey] = {
+					...fieldDefinition
+				};
+			});
+		});
+
+		const kpiFieldsList = Object.values(kpiFieldsMap);
+
+		console.log(
+			"📊 [DEBUG] KPI fields chính thức cho " + targetType +
+			" (cấu hình lấy từ collection fields):",
+			kpiFieldsList
+		);
 
 
         // =====================================================
@@ -11813,436 +11968,471 @@ async function loadGridSection3Monthly(forceRefresh = false) {
 
 
         // =====================================================
-        // 15. ĐỌC RECORDS CỦA TỪNG MODULE
-        //
-        // Đường dẫn thực tế:
-        //
-        // academicYears/{year}/modulesData/{moduleId}/records
-        //
-        // Record:
-        //
-        // {
-        //     entityId: "KL001",
-        //     date: "2026-09-17",
-        //     KetQuaKiemTraKhaoSat: [
-        //         {
-        //             value: "...",
-        //             email: "...",
-        //             by: "...",
-        //             time: "..."
-        //         }
-        //     ]
-        // }
-        // =====================================================
-
-        for (
-            const moduleDoc
-            of moduleDocs
-        ) {
-
-            const recordsSnapshot =
-                await db
-                    .collection("organizations")
-                    .doc(orgId)
-                    .collection("academicYears")
-                    .doc(academicYearId)
-                    .collection("modulesData")
-                    .doc(moduleDoc.id)
-                    .collection("records")
-                    .get();
-
-
-            recordsSnapshot.forEach(recordDoc => {
-
-                const data =
-                    recordDoc.data() || {};
-
-
-                // -------------------------------------------------
-                // XÁC ĐỊNH ENTITY ID
-                // -------------------------------------------------
-
-                let entityId =
-                    data.entityId ||
-                    data.targetId ||
-                    "";
-
-
-                if (!entityId) {
-
-                    const recordId =
-                        String(
-                            recordDoc.id || ""
-                        );
-
-                    // Ví dụ:
-                    // KL001_2026-09-17
-                    entityId =
-                        recordId.split("_")[0];
-                }
-
-
-                entityId =
-                    String(
-                        entityId || ""
-                    ).trim();
-
-                // Record mới lưu entityId = code.
-                // Record cũ có thể vẫn lưu UID -> đổi UID về code.
-                if (!summaryMap[entityId] && usersByUid[entityId]) {
-                    entityId = usersByUid[entityId];
-                }
-
-                if (
-                    !entityId ||
-                    !summaryMap[entityId]
-                ) {
-                    return;
-                }
-
-
-                // -------------------------------------------------
-                // CHỈ LẤY RECORD TRONG THÁNG
-                // -------------------------------------------------
-
-                const recordDate =
-                    String(
-                        data.date || ""
-                    ).trim();
-
-
-                if (
-                    !recordDate ||
-                    recordDate < firstDayStr ||
-                    recordDate > lastDayStr
-                ) {
-                    return;
-                }
-
-
-                // -------------------------------------------------
-                // TÍNH TUẦN THỨ HAI -> CHỦ NHẬT
-                //
-                // Chỉ thêm tuần khi tuần đó có KPI âm.
-                // -------------------------------------------------
-
-                function getMondayKey(dateString) {
-
-                    const d =
-                        new Date(
-                            `${dateString}T00:00:00`
-                        );
-
-                    if (
-                        isNaN(
-                            d.getTime()
-                        )
-                    ) {
-                        return "";
-                    }
-
-                    const day =
-                        d.getDay();
-
-                    const diff =
-                        day === 0
-                            ? -6
-                            : 1 - day;
-
-                    d.setDate(
-                        d.getDate() + diff
-                    );
-
-                    return [
-                        d.getFullYear(),
-                        String(
-                            d.getMonth() + 1
-                        ).padStart(2, "0"),
-                        String(
-                            d.getDate()
-                        ).padStart(2, "0")
-                    ].join("-");
-                }
-
-
-                const weekKey =
-                    getMondayKey(recordDate);
-
-
-                // -------------------------------------------------
-                // TỪNG FIELD KPI
-                // -------------------------------------------------
+		// 15. ĐỌC RECORDS CỦA TỪNG MODULE
+		//
+		// Đường dẫn:
+		// organizations/{orgId}/academicYears/{academicYearId}
+		//     /modulesData/{moduleId}/records
+		//
+		// Mục tiêu:
+		// 1. Đọc toàn bộ records của từng module.
+		// 2. Xác định đúng entity từ:
+		//    - data.entityId
+		//    - data.targetId
+		//    - phần đầu recordDoc.id
+		// 3. Hỗ trợ cả record lưu CODE và record lưu UID.
+		// 4. Chỉ xử lý các record xác định được đúng entity.
+		// 5. Đọc đúng giá trị của field KPI:
+		//    - options: item.value
+		//    - text/field thường: item.content
+		//    - vẫn hỗ trợ item.label / item.name / primitive.
+		// 6. Giữ nguyên thuật toán tính điểm hiện tại.
+		//
+		// LƯU Ý:
+		// - Không thay đổi phần tính totalCount, totalScore,
+		//   totalPenalty, totalBonus, negativeCount...
+		// - Không phụ thuộc vào tên document để đọc field KPI nếu
+		//   record đã có data.entityId.
+		// =====================================================
+
+		for (const moduleDoc of moduleDocs) {
+
+			const moduleId = String(moduleDoc.id || "").trim();
+
+			if (!moduleId) {
+				console.warn("⚠️ [MONTHLY RECORD] Bỏ qua module không có ID.");
+				continue;
+			}
+
+			const recordsRef = db
+				.collection("organizations")
+				.doc(orgId)
+				.collection("academicYears")
+				.doc(academicYearId)
+				.collection("modulesData")
+				.doc(moduleId)
+				.collection("records");
+
+			const recordsSnapshot = await recordsRef.get();
+
+			console.log("📦 [MONTHLY RECORDS]", {
+				moduleId,
+				recordCount: recordsSnapshot.size
+			});
+
+			recordsSnapshot.forEach(recordDoc => {
+
+				const data = recordDoc.data() || {};
+				const recordId = String(recordDoc.id || "").trim();
+
+				// -------------------------------------------------
+				// 1. XÁC ĐỊNH ENTITY ID
+				//
+				// Ưu tiên entityId trong dữ liệu record.
+				// Nếu record cũ không có entityId thì thử targetId.
+				// Cuối cùng mới lấy phần trước dấu "_" của document ID.
+				//
+				// Ví dụ:
+				// KL001_2026-09-17
+				// UID001_2026-09-17
+				// -------------------------------------------------
+
+				let rawEntityId = String(
+					data.entityId ||
+					data.targetId ||
+					""
+				).trim();
+
+				if (!rawEntityId && recordId) {
+					rawEntityId = recordId.split("_")[0].trim();
+				}
+
+				if (!rawEntityId) {
+					console.warn("⚠️ [MONTHLY RECORD - BỎ QUA]", {
+						moduleId,
+						recordId,
+						reason: "Không xác định được entityId"
+					});
+					return;
+				}
+
+				// -------------------------------------------------
+				// 2. CHUYỂN UID -> CODE NẾU CẦN
+				//
+				// summaryMap được lập theo entityId chính của user
+				// (thông thường là code).
+				//
+				// Nếu rawEntityId đã là code thì giữ nguyên.
+				// Nếu rawEntityId là UID thì usersByUid sẽ đổi
+				// UID về entityId/code tương ứng.
+				// -------------------------------------------------
+
+				let entityId = rawEntityId;
+
+				if (!summaryMap[entityId] && usersByUid[entityId]) {
+					entityId = String(
+						usersByUid[entityId] || ""
+					).trim();
+				}
+
+				// -------------------------------------------------
+				// 3. RECORD PHẢI THUỘC MỘT ENTITY ĐANG CÓ TRONG
+				//    summaryMap
+				// -------------------------------------------------
+
+				if (!entityId || !summaryMap[entityId]) {
+					console.warn("⚠️ [MONTHLY RECORD - BỎ QUA]", {
+						moduleId,
+						recordId,
+						rawEntityId,
+						resolvedEntityId: entityId,
+						reason: "Không tìm thấy entity trong summaryMap"
+					});
+					return;
+				}
+
+				console.log("📥 [MONTHLY RECORD]", {
+					moduleId,
+					recordId,
+					rawEntityId,
+					entityId
+				});
+
+				// -------------------------------------------------
+				// 4. CHỈ LẤY RECORD TRONG THÁNG
+				// -------------------------------------------------
+
+				const recordDate = String(
+					data.date || ""
+				).trim();
+
+				if (
+					!recordDate ||
+					recordDate < firstDayStr ||
+					recordDate > lastDayStr
+				) {
+					return;
+				}
+
+				// -------------------------------------------------
+				// 5. TÍNH TUẦN
+				// -------------------------------------------------
+
+				function getMondayKey(dateString) {
+
+					const d = new Date(
+						`${dateString}T00:00:00`
+					);
+
+					if (isNaN(d.getTime())) {
+						return "";
+					}
+
+					const day = d.getDay();
+
+					const diff =
+						day === 0
+							? -6
+							: 1 - day;
+
+					d.setDate(
+						d.getDate() + diff
+					);
+
+					return [
+						d.getFullYear(),
+						String(
+							d.getMonth() + 1
+						).padStart(2, "0"),
+						String(
+							d.getDate()
+						).padStart(2, "0")
+					].join("-");
+				}
+
+				const weekKey =
+					getMondayKey(recordDate);
+
+				// -------------------------------------------------
+				// 6. ĐỌC TỪNG FIELD KPI
+				// -------------------------------------------------
+
+				kpiFieldsList.forEach(kpiField => {
+
+					if (!kpiField) {
+						return;
+					}
+
+					const fieldKey = String(
+						kpiField.key || ""
+					).trim();
+
+					if (!fieldKey) {
+						return;
+					}
+
+					// Chỉ đọc dữ liệu của chính field KPI.
+					let value = data[fieldKey];
+
+					// Fallback nếu record có changes.
+					if (
+						value === undefined &&
+						data.changes &&
+						data.changes[fieldKey] !== undefined
+					) {
+						value =
+							data.changes[fieldKey];
+					}
+
+					if (
+						value === undefined ||
+						value === null ||
+						value === ""
+					) {
+						return;
+					}
+
+					// =================================================
+					// A. FIELD CÓ GIÁ TRỊ DẠNG ARRAY
+					//
+					// options được save:
+					// [
+					//   {
+					//      value: "...",
+					//      email: "...",
+					//      by: "...",
+					//      time: "..."
+					//   }
+					// ]
+					//
+					// text được save:
+					// [
+					//   {
+					//      id: "...",
+					//      content: "...",
+					//      email: "...",
+					//      by: "...",
+					//      time: "..."
+					//   }
+					// ]
+					//
+					// Vì vậy phải ưu tiên:
+					// item.value
+					// item.content
+					//
+					// Sau đó mới fallback label/name/primitive.
+					// =================================================
+
+					if (Array.isArray(value)) {
+
+						value.forEach(item => {
+
+							let fieldValue = item;
+
+							if (
+								item &&
+								typeof item === "object"
+							) {
+								if (
+									item.value !== undefined
+								) {
+									fieldValue =
+										item.value;
+
+								} else if (
+									item.content !== undefined
+								) {
+									fieldValue =
+										item.content;
+
+								} else if (
+									item.label !== undefined
+								) {
+									fieldValue =
+										item.label;
+
+								} else if (
+									item.name !== undefined
+								) {
+									fieldValue =
+										item.name;
+
+								} else {
+									fieldValue = "";
+								}
+							}
+
+							fieldValue = String(
+								fieldValue ?? ""
+							).trim();
+
+							if (!fieldValue) {
+								return;
+							}
+
+							// -----------------------------------------
+							// LẤY CẤU HÌNH OPTION
+							//
+							// Nếu field là options và có cấu hình
+							// kpiOptions thì lấy trọng số riêng của option.
+							// -----------------------------------------
+
+							const optionConfig =
+								kpiField.kpiOptions &&
+								typeof kpiField.kpiOptions === "object"
+									? kpiField.kpiOptions[fieldValue]
+									: null;
+
+							let scoreWeight = 0;
+
+							if (
+								optionConfig &&
+								optionConfig.scoreWeight !== undefined
+							) {
+								scoreWeight =
+									Number(
+										optionConfig.scoreWeight
+									);
+
+							} else {
+								scoreWeight =
+									Number(
+										kpiField.scoreWeight || 0
+									);
+							}
+
+							if (
+								!Number.isFinite(
+									scoreWeight
+								)
+							) {
+								scoreWeight = 0;
+							}
+
+							// -----------------------------------------
+							// MỖI GIÁ TRỊ KPI = 1 LƯỢT
+							// -----------------------------------------
+
+							summaryMap[entityId]
+								.totalCount++;
+
+							summaryMap[entityId]
+								.kpiCounts[fieldKey] =
+								(
+									summaryMap[entityId]
+										.kpiCounts[fieldKey] || 0
+								) + 1;
+
+							// -----------------------------------------
+							// ĐIỂM ÂM
+							// -----------------------------------------
+
+							if (
+								scoreWeight < 0
+							) {
+
+								summaryMap[entityId]
+									.totalPenalty +=
+									Math.abs(
+										scoreWeight
+									);
+
+								summaryMap[entityId]
+									.negativeCount++;
+
+								if (weekKey) {
+									summaryMap[entityId]
+										.negativeWeeks
+										.add(weekKey);
+								}
+
+							// -----------------------------------------
+							// ĐIỂM DƯƠNG
+							// -----------------------------------------
+
+							} else if (
+								scoreWeight > 0
+							) {
+
+								summaryMap[entityId]
+									.totalBonus +=
+									scoreWeight;
+							}
+
+							// -----------------------------------------
+							// ĐIỂM RÒNG
+							// -----------------------------------------
+
+							summaryMap[entityId]
+								.totalScore +=
+								scoreWeight;
+						});
+
+						return;
+					}
+
+					// =================================================
+					// B. FIELD KPI THƯỜNG
+					//
+					// Không phải array.
+					// Mỗi giá trị = 1 lượt.
+					// =================================================
+
+					const scoreWeight =
+						Number(
+							kpiField.scoreWeight || 0
+						);
+
+					const safeScore =
+						Number.isFinite(scoreWeight)
+							? scoreWeight
+							: 0;
+
+					summaryMap[entityId]
+						.totalCount++;
+
+					summaryMap[entityId]
+						.kpiCounts[fieldKey] =
+						(
+							summaryMap[entityId]
+								.kpiCounts[fieldKey] || 0
+						) + 1;
+
+					summaryMap[entityId]
+						.totalScore +=
+						safeScore;
+
+					if (
+						safeScore < 0
+					) {
+
+						summaryMap[entityId]
+							.totalPenalty +=
+							Math.abs(
+								safeScore
+							);
+
+						summaryMap[entityId]
+							.negativeCount++;
+
+						if (weekKey) {
+							summaryMap[entityId]
+								.negativeWeeks
+								.add(weekKey);
+						}
+
+					} else if (
+						safeScore > 0
+					) {
+
+						summaryMap[entityId]
+							.totalBonus +=
+							safeScore;
+					}
+				});
+			});
+		}
 
-                kpiFieldsList.forEach(kpiField => {
-
-                    const fieldKey =
-                        kpiField.key;
-
-
-                    let value =
-                        data[fieldKey];
-
-
-                    // Fallback nếu record có changes
-                    if (
-                        value === undefined &&
-                        data.changes &&
-                        data.changes[fieldKey] !== undefined
-                    ) {
-                        value =
-                            data.changes[fieldKey];
-                    }
-
-
-                    if (
-                        value === undefined ||
-                        value === null ||
-                        value === ""
-                    ) {
-                        return;
-                    }
-
-
-                    // =================================================
-                    // A. FIELD OPTIONS
-                    //
-                    // Record thực tế:
-                    //
-                    // [
-                    //   {
-                    //      value: "Chất lượng...",
-                    //      email: "...",
-                    //      by: "...",
-                    //      time: "..."
-                    //   }
-                    // ]
-                    // =================================================
-
-                    if (
-                        Array.isArray(value)
-                    ) {
-
-                        value.forEach(item => {
-
-                            let optionValue =
-                                item;
-
-
-                            if (
-                                item &&
-                                typeof item === "object"
-                            ) {
-
-                                optionValue =
-                                    item.value !== undefined
-                                        ? item.value
-                                        : item.label !== undefined
-                                            ? item.label
-                                            : item.name !== undefined
-                                                ? item.name
-                                                : "";
-                            }
-
-
-                            optionValue =
-                                String(
-                                    optionValue || ""
-                                ).trim();
-
-
-                            if (!optionValue) {
-                                return;
-                            }
-
-
-                            // -----------------------------------------
-                            // LẤY CẤU HÌNH OPTION
-                            // -----------------------------------------
-
-                            const optionConfig =
-                                kpiField.kpiOptions &&
-                                typeof kpiField.kpiOptions === "object"
-                                    ? kpiField.kpiOptions[optionValue]
-                                    : null;
-
-
-                            let scoreWeight =
-                                0;
-
-
-                            if (
-                                optionConfig &&
-                                optionConfig.scoreWeight !== undefined
-                            ) {
-
-                                scoreWeight =
-                                    Number(
-                                        optionConfig.scoreWeight
-                                    );
-
-                            } else {
-
-                                // fallback
-                                scoreWeight =
-                                    Number(
-                                        kpiField.scoreWeight || 0
-                                    );
-                            }
-
-
-                            if (
-                                !Number.isFinite(
-                                    scoreWeight
-                                )
-                            ) {
-                                scoreWeight = 0;
-                            }
-
-
-                            // -----------------------------------------
-                            // MỖI OPTION = 1 LƯỢT
-                            // -----------------------------------------
-
-                            summaryMap[entityId]
-                                .totalCount++;
-
-
-                            summaryMap[entityId]
-                                .kpiCounts[fieldKey] =
-                                (
-                                    summaryMap[entityId]
-                                        .kpiCounts[fieldKey] || 0
-                                ) + 1;
-
-
-                            // -----------------------------------------
-                            // ĐIỂM ÂM
-                            // -----------------------------------------
-
-                            if (
-                                scoreWeight < 0
-                            ) {
-
-                                summaryMap[entityId]
-                                    .totalPenalty +=
-                                    Math.abs(
-                                        scoreWeight
-                                    );
-
-
-                                summaryMap[entityId]
-                                    .negativeCount++;
-
-
-                                if (weekKey) {
-
-                                    summaryMap[entityId]
-                                        .negativeWeeks
-                                        .add(weekKey);
-                                }
-                            }
-
-
-                            // -----------------------------------------
-                            // ĐIỂM DƯƠNG
-                            // -----------------------------------------
-
-                            else if (
-                                scoreWeight > 0
-                            ) {
-
-                                summaryMap[entityId]
-                                    .totalBonus +=
-                                    scoreWeight;
-                            }
-
-
-                            // -----------------------------------------
-                            // ĐIỂM RÒNG
-                            // -----------------------------------------
-
-                            summaryMap[entityId]
-                                .totalScore +=
-                                scoreWeight;
-                        });
-
-
-                        return;
-                    }
-
-
-                    // =================================================
-                    // B. FIELD KPI THƯỜNG
-                    //
-                    // Không phải options.
-                    //
-                    // Mỗi giá trị = 1 lượt.
-                    // =================================================
-
-                    const scoreWeight =
-                        Number(
-                            kpiField.scoreWeight || 0
-                        );
-
-
-                    const safeScore =
-                        Number.isFinite(scoreWeight)
-                            ? scoreWeight
-                            : 0;
-
-
-                    summaryMap[entityId]
-                        .totalCount++;
-
-
-                    summaryMap[entityId]
-                        .kpiCounts[fieldKey] =
-                        (
-                            summaryMap[entityId]
-                                .kpiCounts[fieldKey] || 0
-                        ) + 1;
-
-
-                    summaryMap[entityId]
-                        .totalScore +=
-                        safeScore;
-
-
-                    if (
-                        safeScore < 0
-                    ) {
-
-                        summaryMap[entityId]
-                            .totalPenalty +=
-                            Math.abs(
-                                safeScore
-                            );
-
-
-                        summaryMap[entityId]
-                            .negativeCount++;
-
-
-                        if (weekKey) {
-
-                            summaryMap[entityId]
-                                .negativeWeeks
-                                .add(weekKey);
-                        }
-
-                    } else if (
-                        safeScore > 0
-                    ) {
-
-                        summaryMap[entityId]
-                            .totalBonus +=
-                            safeScore;
-                    }
-
-                });
-
-            });
-        }
 
 
         // =====================================================
@@ -12644,10 +12834,6 @@ async function loadGridSection3Monthly(forceRefresh = false) {
         `;
     }
 }
-
-
-
-	
 	
 	
 
@@ -14276,34 +14462,221 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 	// 7. TIỆN ÍCH XUẤT EXCEL (CSV)
 	// ==========================================
 	function exportGridTableToExcel(sectionKey) {
-	  let tableId = "grid-sec1-table";
-	  if (sectionKey === 'sec2') tableId = "grid-sec2-table";
-	  if (sectionKey === 'sec3') tableId = "grid-sec3-table";
 
-	  const table = document.getElementById(tableId);
-	  if (!table) {
-		alert("Không tìm thấy dữ liệu bảng để xuất!");
-		return;
-	  }
+		// ----------------------------------------------------------
+		// 1. XÁC ĐỊNH TABLE
+		// ----------------------------------------------------------
 
-	  let csv = [];
-	  const rows = table.querySelectorAll("tr");
-	  
-	  rows.forEach(row => {
-		let cols = row.querySelectorAll("th, td");
-		let data = [];
-		cols.forEach(col => data.push('"' + col.innerText.replace(/"/g, '""') + '"'));
-		csv.push(data.join(","));
-	  });
+		let tableId = "grid-sec1-table";
 
-	  const csvFile = new Blob(["\ufeff" + csv.join("\n")], { type: "text/csv;charset=utf-8;" });
-	  const downloadLink = document.createElement("a");
-	  downloadLink.href = URL.createObjectURL(csvFile);
-	  downloadLink.download = `Bao_Cao_KPI_${sectionKey.toUpperCase()}_${new Date().toISOString().split('T')[0]}.csv`;
-	  document.body.appendChild(downloadLink);
-	  downloadLink.click();
-	  document.body.removeChild(downloadLink);
+		if (sectionKey === "sec2") {
+			tableId = "grid-sec2-table";
+		}
+
+		if (sectionKey === "sec3") {
+			tableId = "grid-sec3-table";
+		}
+
+		const table =
+			document.getElementById(tableId);
+
+		if (!table) {
+			alert("Không tìm thấy dữ liệu bảng để xuất!");
+			return;
+		}
+
+		// ----------------------------------------------------------
+		// 2. KIỂM TRA SHEETJS
+		// ----------------------------------------------------------
+
+		if (
+			typeof XLSX === "undefined" ||
+			!XLSX.utils ||
+			!XLSX.writeFile
+		) {
+			alert(
+				"Chưa tải được thư viện Excel (SheetJS/XLSX). " +
+				"Vui lòng kiểm tra phần khai báo thư viện trong index.html."
+			);
+			console.error(
+				"[EXPORT EXCEL] Không tìm thấy thư viện XLSX."
+			);
+			return;
+		}
+
+		try {
+
+			// ------------------------------------------------------
+			// 3. ĐỌC TRỰC TIẾP TABLE HTML
+			//
+			// table_to_sheet giúp lấy nội dung hiện đang hiển thị
+			// trong bảng, bao gồm cả th và td.
+			// ------------------------------------------------------
+
+			const worksheet =
+				XLSX.utils.table_to_sheet(
+					table,
+					{
+						raw: false
+					}
+				);
+
+			// ------------------------------------------------------
+			// 4. XÁC ĐỊNH VÙNG DỮ LIỆU
+			// ------------------------------------------------------
+
+			const range =
+				XLSX.utils.decode_range(
+					worksheet["!ref"] || "A1"
+				);
+
+			// ------------------------------------------------------
+			// 5. TỰ ĐỘNG ĐIỀU CHỈNH ĐỘ RỘNG CỘT
+			//
+			// Không để các cột bị quá hẹp khi mở bằng Excel.
+			// Giới hạn tối đa 50 ký tự để tránh cột quá rộng.
+			// ------------------------------------------------------
+
+			const columnWidths = [];
+
+			for (
+				let c = range.s.c;
+				c <= range.e.c;
+				c++
+			) {
+
+				let maxLength = 10;
+
+				for (
+					let r = range.s.r;
+					r <= range.e.r;
+					r++
+				) {
+
+					const cellAddress =
+						XLSX.utils.encode_cell({
+							r: r,
+							c: c
+						});
+
+					const cell =
+						worksheet[cellAddress];
+
+					if (!cell) {
+						continue;
+					}
+
+					const text =
+						String(
+							cell.w !== undefined
+								? cell.w
+								: cell.v !== undefined
+									? cell.v
+									: ""
+						);
+
+					// Lấy dòng dài nhất.
+					const lines =
+						text.split(/\r?\n/);
+
+					for (const line of lines) {
+
+						maxLength =
+							Math.max(
+								maxLength,
+								line.length
+							);
+					}
+				}
+
+				columnWidths.push({
+					wch: Math.min(
+						maxLength + 2,
+						50
+					)
+				});
+			}
+
+			worksheet["!cols"] =
+				columnWidths;
+
+			// ------------------------------------------------------
+			// 6. TẠO WORKBOOK
+			// ------------------------------------------------------
+
+			const workbook =
+				XLSX.utils.book_new();
+
+			const sheetName =
+				sectionKey === "sec1"
+					? "KPI"
+					: sectionKey === "sec2"
+						? "Thống kê"
+						: "Báo cáo";
+
+			XLSX.utils.book_append_sheet(
+				workbook,
+				worksheet,
+				sheetName
+			);
+
+			// ------------------------------------------------------
+			// 7. TÊN FILE
+			// ------------------------------------------------------
+
+			const today =
+				new Date();
+
+			const yyyy =
+				today.getFullYear();
+
+			const mm =
+				String(
+					today.getMonth() + 1
+				).padStart(2, "0");
+
+			const dd =
+				String(
+					today.getDate()
+				).padStart(2, "0");
+
+			const fileName =
+				`Bao_Cao_KPI_${String(sectionKey || "")
+					.toUpperCase()}_${yyyy}-${mm}-${dd}.xlsx`;
+
+			// ------------------------------------------------------
+			// 8. XUẤT FILE EXCEL THẬT
+			// ------------------------------------------------------
+
+			XLSX.writeFile(
+				workbook,
+				fileName,
+				{
+					bookType: "xlsx",
+					compression: true
+				}
+			);
+
+			console.log(
+				"✅ [EXPORT EXCEL] Đã xuất:",
+				fileName
+			);
+
+		} catch (error) {
+
+			console.error(
+				"❌ [EXPORT EXCEL] Lỗi:",
+				error
+			);
+
+			alert(
+				"Không thể xuất file Excel. " +
+				"Vui lòng mở Console để kiểm tra lỗi."
+			);
+		}
 	}
+
+
 	
 	
 	//=========================================
@@ -15301,818 +15674,175 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 
 	window.currentDynamicFieldsGlobal = null;
 
-	async function renderEmployeeTable(listToRender, moduleConfig) {
-
-		const tableBody =
-			document.getElementById("emp-entry-table-body");
-
-		const tableHeader =
-			document.getElementById("emp-entry-table-header");
-
+	async function renderEmployeeTable(listToRender, moduleConfig, fieldKeyword = "") {
+		const tableBody = document.getElementById("emp-entry-table-body");
+		const tableHeader = document.getElementById("emp-entry-table-header");
 		if (!tableBody || !tableHeader) return;
 
-
-		// ============================================================
-		// 1. ĐẢM BẢO SCHEMA ĐÃ ĐƯỢC LOAD
-		// ============================================================
-
-		if (
-			(!window.cachedSchemaFields ||
-				window.cachedSchemaFields.length === 0) &&
-			typeof loadSchemaFields === "function"
-		) {
+		// 1. Kiểm tra Schema
+		if ((!window.cachedSchemaFields || window.cachedSchemaFields.length === 0) && typeof loadSchemaFields === "function") {
 			await loadSchemaFields(false);
 		}
 
+		window.currentDynamicFieldsGlobal = moduleConfig?.fields;
 
-		window.currentDynamicFieldsGlobal =
-			moduleConfig?.fields;
-
-		let rawFields =
-		Array.isArray(window.currentEmployeeDynamicFieldsGlobal) &&
-		window.currentEmployeeDynamicFieldsGlobal.length > 0
+		let rawFields = Array.isArray(window.currentEmployeeDynamicFieldsGlobal) && window.currentEmployeeDynamicFieldsGlobal.length > 0
 			? [...window.currentEmployeeDynamicFieldsGlobal]
-			: (
-				Array.isArray(moduleConfig?.fields)
-					? [...moduleConfig.fields]
-					: []
-			);
+			: (Array.isArray(moduleConfig?.fields) ? [...moduleConfig.fields] : []);
 
-
-		if (
-			!Array.isArray(rawFields) ||
-			rawFields.length === 0
-		) {
-			rawFields = [
-				{
-					key: "value",
-					label: "Giá trị / Đánh giá"
-				}
-			];
+		if (!Array.isArray(rawFields) || rawFields.length === 0) {
+			rawFields = [{ key: "value", label: "Giá trị / Đánh giá" }];
 		}
 
+		// 2. Chuẩn hóa danh sách Dynamic Fields
+		let dynamicFields = rawFields.map(f => {
+			let fieldKey = typeof f === "string" ? f : f.key;
+			let fieldObj = typeof f === "string" ? { key: f, label: f, type: "text" } : { ...f };
 
-		// ============================================================
-		// 2. CHUẨN HÓA DYNAMIC FIELDS
-		// ============================================================
-
-		let dynamicFields =
-			rawFields.map(f => {
-
-				let fieldKey = "";
-				let fieldObj = {};
-
-
-				if (typeof f === "string") {
-
-					fieldKey = f;
-
-					fieldObj = {
-						key: f,
-						label: f,
-						type: "text"
-					};
-
-				} else if (
-					typeof f === "object" &&
-					f !== null
-				) {
-
-					fieldKey = f.key;
-
-					fieldObj = {
-						...f
-					};
+			if (fieldKey && window.cachedSchemaFields) {
+				const schemaMatch = window.cachedSchemaFields.find(s => s.key === fieldKey);
+				if (schemaMatch) {
+					fieldObj.type = fieldObj.type || schemaMatch.type || "text";
+					fieldObj.options = fieldObj.options || schemaMatch.options || [];
+					fieldObj.label = fieldObj.label || schemaMatch.label || fieldKey;
 				}
+			}
+			fieldObj.type = fieldObj.type || "text";
+			return fieldObj;
+		});
 
+		window.currentDynamicFieldsGlobal = dynamicFields;
+		window.currentEmployeeDynamicFieldsGlobal = [...dynamicFields];
 
-				if (
-					fieldKey &&
-					window.cachedSchemaFields
-				) {
+		// 🌟 3. LỌC CỘT THEO TỪ KHÓA (KHỚP LABEL HOẶC KHỚP BẤT KỲ OPTION NÀO)
+		const normalizedFieldKw = fieldKeyword.toLowerCase().trim();
+		const fieldKwParts = normalizedFieldKw.split(",").map(p => p.trim()).filter(Boolean);
 
-					const schemaMatch =
-						window.cachedSchemaFields.find(
-							s => s.key === fieldKey
-						);
+		let fieldsToRender = dynamicFields;
 
+		if (fieldKwParts.length > 0) {
+			fieldsToRender = dynamicFields.filter(field => {
+				const fKey = String(field.key || "").toLowerCase();
+				const fLabel = String(field.label || "").toLowerCase();
+				const fOpts = Array.isArray(field.options) ? field.options.map(o => String(o).toLowerCase()) : [];
 
-					if (schemaMatch) {
-
-						fieldObj.type =
-							fieldObj.type ||
-							schemaMatch.type ||
-							"text";
-
-						fieldObj.options =
-							fieldObj.options ||
-							schemaMatch.options ||
-							[];
-
-						fieldObj.label =
-							fieldObj.label ||
-							schemaMatch.label ||
-							fieldKey;
-					}
-				}
-
-
-				fieldObj.type =
-					fieldObj.type ||
-					"text";
-
-
-				return fieldObj;
+				// Khớp nếu từ khóa xuất hiện trong Label, Key HOẶC nằm trong bất kỳ Option nào
+				return fieldKwParts.some(kw => {
+					const matchLabel = fKey.includes(kw) || fLabel.includes(kw);
+					const matchOption = fOpts.some(opt => opt.includes(kw));
+					return matchLabel || matchOption;
+				});
 			});
+		}
 
-
-		window.currentDynamicFieldsGlobal =
-			dynamicFields;
-		window.currentEmployeeDynamicFieldsGlobal =
-			[...dynamicFields];
-
-		window.currentDynamicFieldsGlobal = 
-			[...dynamicFields];
-
-		// ============================================================
-		// 3. HEADER
-		// ============================================================
-
+		// 4. RENDER HEADER (Chỉ dựng các cột thỏa mãn điều kiện tìm kiếm)
 		let headerHtml = `
-			<th style="width: 100px; text-align: center;">
-				Mã ID
-			</th>
-
-			<th style="width: 180px;">
-				Họ và Tên
-			</th>
-
-			<th style="width: 100px; text-align: center;">
-				Tổ / Lớp
-			</th>
+			<th style="width: 100px; text-align: center;">Mã ID</th>
+			<th style="width: 180px;">Họ và Tên</th>
+			<th style="width: 100px; text-align: center;">Tổ / Lớp</th>
 		`;
 
-
-		dynamicFields.forEach(field => {
-
-			const headerText =
-				field.label ||
-				field.key ||
-				"Trường dữ liệu";
-
-
+		fieldsToRender.forEach(field => {
+			const headerText = field.label || field.key || "Trường dữ liệu";
+			const isFiltered = normalizedFieldKw.length > 0;
+			
 			headerHtml += `
-				<th style="min-width: 180px; text-align: center;">
+				<th style="min-width: 220px; text-align: center; ${isFiltered ? 'background-color: #e7f1ff; border: 2px solid #0d6efd;' : ''}">
 					${headerText}
 				</th>
 			`;
 		});
 
+		headerHtml += `<th style="width: 110px; text-align: center;">Thao tác</th>`;
+		tableHeader.innerHTML = headerHtml;
 
-		headerHtml += `
-			<th style="width: 110px; text-align: center;">
-				Thao tác
-			</th>
-		`;
-
-
-		tableHeader.innerHTML =
-			headerHtml;
-
-
-		// ============================================================
-		// 4. KHÔNG CÓ DỮ LIỆU
-		// ============================================================
-
-		if (listToRender.length === 0) {
-
-			const totalCols =
-				4 + dynamicFields.length;
-
+		// 5. TRƯỜNG HỢP KHÔNG TÌM THẤY ĐỐI TƯỢNG HOẶC KHÔNG TÌM THẤY CỘT LỖI
+		if (listToRender.length === 0 || fieldsToRender.length === 0) {
+			const totalCols = 4 + fieldsToRender.length;
+			const msg = fieldsToRender.length === 0 
+				? `Không tìm thấy trường lỗi/options nào khớp với từ khóa "${fieldKeyword}".`
+				: "Không tìm thấy nhân sự nào phù hợp.";
 
 			tableBody.innerHTML = `
 				<tr>
-					<td
-						colspan="${totalCols}"
-						style="
-							text-align: center;
-							color: #6c757d;
-							padding: 20px;
-						"
-					>
-						Không tìm thấy đối tượng nào phù hợp.
+					<td colspan="${totalCols}" style="text-align: center; color: #6c757d; padding: 20px;">
+						${msg}
 					</td>
 				</tr>
 			`;
-
 			return;
 		}
 
-
-		// ============================================================
-		// 5. RENDER BODY
-		// ============================================================
-
+		// 6. RENDER BODY
 		let bodyHtml = "";
-
-
-		const myEmail =
-			(
-				window.currentUserEmailGlobal ||
-				firebase.auth().currentUser?.email ||
-				""
-			)
-			.toLowerCase()
-			.trim();
-
+		const myEmail = (window.currentUserEmailGlobal || firebase.auth().currentUser?.email || "").toLowerCase().trim();
 
 		listToRender.forEach(item => {
-
-			const savedData =
-				item.savedRecord || {};
-
-
-			// ========================================================
-			// QUAN TRỌNG
-			//
-			// item.id   = Firebase UID
-			// item.code = MemberId
-			//
-			// Record nghiệp vụ sử dụng MemberId.
-			// ========================================================
-
-			const memberId =
-				item.code || "";
-
-
-			const firebaseUid =
-				item.id || "";
-
-
-			// Nếu không có MemberId thì không render row
-			// để tránh tạo record sai ID.
-			if (!memberId) {
-
-				console.warn(
-					"[EmployeeTable] Không có MemberId:",
-					item
-				);
-
-				return;
-			}
-
-
-			// ========================================================
-			// ROW
-			//
-			// data-id = MemberId
-			// ========================================================
+			const savedData = item.savedRecord || {};
+			const memberId = item.code || "";
+			if (!memberId) return;
 
 			bodyHtml += `
 				<tr data-id="${memberId}">
-
-					<td
-						style="
-							font-weight: bold;
-							text-align: center;
-							vertical-align: middle;
-						"
-					>
-						${memberId}
-					</td>
-
-					<td
-						style="
-							vertical-align: middle;
-						"
-					>
-						${item.fullName || "Chưa cập nhật"}
-					</td>
-
-					<td
-						style="
-							text-align: center;
-							vertical-align: middle;
-						"
-					>
-						${
-							item.category ||
-							item.classOrGroup ||
-							"-"
-						}
-					</td>
+					<td style="font-weight: bold; text-align: center; vertical-align: middle;">${memberId}</td>
+					<td style="vertical-align: middle;">${item.fullName || "Chưa cập nhật"}</td>
+					<td style="text-align: center; vertical-align: middle;">${item.category || item.classOrGroup || "-"}</td>
 			`;
 
+			fieldsToRender.forEach(field => {
+				const fieldType = field.type;
+				const fieldKey = field.key;
+				const storedValue = savedData[fieldKey] !== undefined ? savedData[fieldKey] : "";
+				const fieldEmail = (savedData[`${fieldKey}_email`] || "").toLowerCase().trim();
+				const fieldLabelBy = savedData[`${fieldKey}_by`] || "";
 
-			// ========================================================
-			// 6. DYNAMIC FIELDS
-			// ========================================================
+				let cellHtml = `<div style="display: flex; flex-direction: column; gap: 6px;">`;
 
-			dynamicFields.forEach(field => {
+				// Render Checkbox / Options
+				if (fieldType === "options" && Array.isArray(field.options) && field.options.length > 0) {
+					let storedOptionsList = Array.isArray(storedValue)
+						? storedValue.map(optItem => typeof optItem === "object" && optItem !== null ? optItem : { value: optItem, email: fieldEmail, by: fieldLabelBy })
+						: (storedValue ? [{ value: storedValue, email: fieldEmail, by: fieldLabelBy }] : []);
 
-				const fieldType =
-					field.type;
-
-				const fieldKey =
-					field.key;
-
-
-				const storedValue =
-					savedData[fieldKey] !== undefined
-						? savedData[fieldKey]
-						: "";
-
-
-				const fieldEmail =
-					(
-						savedData[`${fieldKey}_email`] ||
-						""
-					)
-					.toLowerCase()
-					.trim();
-
-
-				const fieldLabelBy =
-					savedData[`${fieldKey}_by`] ||
-					"";
-
-
-				let cellHtml = `
-					<div
-						style="
-							display: flex;
-							flex-direction: column;
-							gap: 6px;
-							align-items: stretch;
-							text-align: left;
-						"
-					>
-				`;
-
-
-				// ====================================================
-				// 6A. OPTIONS / CHECKBOX
-				// ====================================================
-
-				if (
-					fieldType === "options" &&
-					Array.isArray(field.options) &&
-					field.options.length > 0
-				) {
-
-					const storedValueRaw =
-						storedValue;
-
-
-					let storedOptionsList = [];
-
-
-					if (
-						Array.isArray(
-							storedValueRaw
-						)
-					) {
-
-						storedOptionsList =
-							storedValueRaw.map(
-								optItem => {
-
-									if (
-										typeof optItem === "object" &&
-										optItem !== null
-									) {
-										return optItem;
-									}
-
-
-									return {
-										value: optItem,
-										email: fieldEmail,
-										by: fieldLabelBy
-									};
-								}
-							);
-
-					} else if (storedValueRaw) {
-
-						storedOptionsList = [
-							{
-								value: storedValueRaw,
-								email: fieldEmail,
-								by: fieldLabelBy
-							}
-						];
-					}
-
-
-					cellHtml += `
-						<div
-							style="
-								display: flex;
-								flex-direction: column;
-								gap: 4px;
-								background: #f8f9fa;
-								padding: 6px;
-								border-radius: 4px;
-								border: 1px solid #dee2e6;
-							"
-						>
-					`;
-
+					cellHtml += `<div style="display: flex; flex-direction: column; gap: 4px; background: #f8f9fa; padding: 6px; border-radius: 4px; border: 1px solid #dee2e6;">`;
 
 					field.options.forEach(opt => {
-
-						const matchRecord =
-							storedOptionsList.find(
-								x => x.value === opt
-							);
-
-
-						const isChecked =
-							!!matchRecord;
-
-
-						const recordEmail =
-							matchRecord
-								? (
-									matchRecord.email ||
-									""
-								)
-								.toLowerCase()
-								.trim()
-								: "";
-
-
-						const isMyOptToday =
-							isChecked &&
-							recordEmail === myEmail;
-
-
-						const isDisabled =
-							isChecked &&
-							!isMyOptToday;
-
-
-						const disabledAttr =
-							isDisabled
-								? "disabled"
-								: "";
-
-
-						const opacityStyle =
-							isDisabled
-								? "opacity: 0.6; cursor: not-allowed;"
-								: "cursor: pointer;";
-
+						const matchRecord = storedOptionsList.find(x => x.value === opt);
+						const isChecked = !!matchRecord;
+						const recordEmail = matchRecord ? (matchRecord.email || "").toLowerCase().trim() : "";
+						const isMyOptToday = isChecked && recordEmail === myEmail;
+						const isDisabled = isChecked && !isMyOptToday;
 
 						cellHtml += `
-							<label
-								style="
-									font-size: 0.85em;
-									display: flex;
-									align-items: center;
-									gap: 5px;
-									${opacityStyle}
-								"
-								title="${
-									isDisabled
-										? "Đã tích bởi: " +
-										  (
-											  matchRecord.by ||
-											  recordEmail
-										  )
-										: ""
-								}"
-							>
-
-								<input
-									type="checkbox"
-									class="emp-dynamic-checkbox"
-
-									data-id="${memberId}"
-
-									data-field="${fieldKey}"
-
-									value="${opt}"
-
-									${
-										isChecked
-											? "checked"
-											: ""
-									}
-
-									${disabledAttr}
-								>
-
-								<span
-									${
-										isDisabled
-											? 'style="color: #6c757d; text-decoration: line-through;"'
-											: ""
-									}
-								>
-									${opt}
-								</span>
-
-								${
-									isDisabled
-										? `
-											<small
-												style="
-													font-size: 0.75em;
-													color: #dc3545;
-													margin-left: auto;
-												"
-											>
-												${
-													matchRecord.by ||
-													"Khác"
-												}
-											</small>
-										`
-										: ""
-								}
-
+							<label style="font-size: 0.85em; display: flex; align-items: center; gap: 5px; ${isDisabled ? 'opacity: 0.6; cursor: not-allowed;' : 'cursor: pointer;'}"
+								   title="${isDisabled ? 'Đã tích bởi: ' + (matchRecord.by || recordEmail) : ''}">
+								<input type="checkbox" class="emp-dynamic-checkbox" data-id="${memberId}" data-field="${fieldKey}" value="${opt}" ${isChecked ? "checked" : ""} ${isDisabled ? "disabled" : ""}>
+								<span ${isDisabled ? 'style="color: #6c757d; text-decoration: line-through;"' : ''}>${opt}</span>
+								${isDisabled ? `<small style="font-size: 0.75em; color: #dc3545; margin-left: auto;">${matchRecord.by || recordEmail}</small>` : ''}
 							</label>
 						`;
 					});
-
-
-					cellHtml += `
-						</div>
-					`;
-
-
-				// ====================================================
-				// 6B. TEXT / NUMBER
-				// ====================================================
-
+					cellHtml += `</div>`;
 				} else {
-
-					let logsArray =
-						Array.isArray(storedValue)
-							? storedValue
-							: (
-								storedValue
-									? [
-										{
-											id: "legacy",
-											content: storedValue,
-											email: fieldEmail,
-											by: fieldLabelBy,
-											time: "Hôm nay"
-										}
-									]
-									: []
-							);
-
-
-					if (logsArray.length > 0) {
-
-						logsArray.forEach(logItem => {
-
-							const isMyLog =
-								(
-									logItem.email &&
-									logItem.email
-										.toLowerCase() ===
-									myEmail
-								);
-
-
-							if (isMyLog) {
-
-								cellHtml += `
-									<div
-										style="
-											background: #e7f1ff;
-											padding: 6px;
-											border-radius: 4px;
-											border: 1px solid #b6d4fe;
-											margin-bottom: 4px;
-										"
-									>
-
-										<div
-											style="
-												display: flex;
-												justify-content: space-between;
-												align-items: center;
-												margin-bottom: 2px;
-											"
-										>
-
-											<small
-												style="
-													color: #0d6efd;
-													font-weight: bold;
-												"
-											>
-												Do bạn ghi
-												(
-													${
-														logItem.time ||
-														"Hôm nay"
-													}
-												)
-											</small>
-
-
-											<button
-												type="button"
-
-												onclick="
-													clearSingleLogEntry(
-														'${memberId}',
-														'${fieldKey}',
-														'${logItem.id}'
-													)
-												"
-
-												style="
-													color: red;
-													background: none;
-													border: none;
-													cursor: pointer;
-													font-size: 0.85em;
-													font-weight: bold;
-												"
-
-												title="Xóa mốc này"
-											>
-												<i class="fa-solid fa-trash"></i>
-												Xóa
-											</button>
-
-										</div>
-
-
-										<div
-											style="
-												color: #084298;
-												font-weight: 500;
-												font-size: 0.9em;
-											"
-										>
-											${logItem.content}
-										</div>
-
-									</div>
-								`;
-
-							} else {
-
-								cellHtml += `
-									<div
-										style="
-											background: #e9ecef;
-											padding: 6px;
-											border-radius: 4px;
-											border: 1px solid #ced4da;
-											margin-bottom: 4px;
-											font-size: 0.85em;
-										"
-									>
-
-										<div
-											style="
-												color: #495057;
-											"
-										>
-											🔒
-											<b>
-												${logItem.content}
-											</b>
-										</div>
-
-										<small
-											style="
-												color: #6c757d;
-												display: block;
-												margin-top: 2px;
-											"
-										>
-											<i>
-												${
-													logItem.by ||
-													"Ghi nhận trước đó"
-												}
-											</i>
-										</small>
-
-									</div>
-								`;
-							}
-						});
-					}
-
-
-					// =================================================
-					// INPUT MỚI
-					//
-					// data-id = MemberId
-					// =================================================
-
 					cellHtml += `
-						<input
-							type="text"
-							class="emp-dynamic-input"
-
-							data-id="${memberId}"
-
-							data-field="${fieldKey}"
-
-							value=""
-
-							placeholder="+ Nhập bổ sung (tiết mới)..."
-
-							style="
-								width: 100%;
-								padding: 5px 6px;
-								border: 1px solid #ccc;
-								border-radius: 4px;
-								box-sizing: border-box;
-								font-size: 0.9em;
-								margin-top: 4px;
-							"
-						>
+						<input type="text" class="emp-dynamic-input" data-id="${memberId}" data-field="${fieldKey}" placeholder="Nhập ghi chú..." style="width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 4px;">
 					`;
 				}
 
-
-				cellHtml += `
-					</div>
-				`;
-
-
-				bodyHtml += `
-					<td
-						style="
-							vertical-align: middle;
-							padding: 6px;
-						"
-					>
-						${cellHtml}
-					</td>
-				`;
+				cellHtml += `</div>`;
+				bodyHtml += `<td style="vertical-align: middle;">${cellHtml}</td>`;
 			});
 
-
-			// ========================================================
-			// 7. NÚT SAVE TỪNG DÒNG
-			//
-			// QUAN TRỌNG:
-			// Truyền MemberId, KHÔNG truyền Firebase UID.
-			// ========================================================
-
 			bodyHtml += `
-				<td
-					style="
-						text-align: center;
-						vertical-align: middle;
-					"
-				>
-
-					<button
-						type="button"
-
-						onclick="
-							saveSingleEmployeeEntry('${memberId}')
-						"
-
-						style="
-							padding: 6px 12px;
-							background: #198754;
-							color: white;
-							border: none;
-							border-radius: 4px;
-							cursor: pointer;
-							font-weight: bold;
-						"
-
-						title="Lưu dòng này"
-					>
-						<i class="fa-solid fa-floppy-disk"></i>
-						Lưu
-					</button>
-
+				<td style="text-align: center; vertical-align: middle;">
+					<button type="button" style="padding: 6px 12px; background: #198754; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;" onclick="saveSingleEmployeeEntry('${memberId}')">Lưu</button>
 				</td>
-			`;
-
-
-			bodyHtml += `
-				</tr>
-			`;
+			</tr>`;
 		});
 
-
-		// ============================================================
-		// 8. ĐƯA HTML VÀO BẢNG
-		// ============================================================
-
-		tableBody.innerHTML =
-			bodyHtml;
+		tableBody.innerHTML = bodyHtml;
 	}
+
 
 	async function clearSingleLogEntry(entityId, fieldId, logEntryId) {
 		try {
@@ -16513,134 +16243,47 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 
 	// 3. Hàm tìm kiếm trực tiếp trên bảng (Live Search)
 	function searchAndRenderTodayPersonnelRecords() {
+		const personnelInput = document.getElementById("emp-live-search-input");
+		const fieldInput = document.getElementById("emp-field-filter-input");
 
-		const input =
-			document.getElementById("emp-live-search-input");
+		const rawPersonnelKeyword = (personnelInput?.value || "").trim();
+		const rawFieldKeyword = (fieldInput?.value || "").trim();
 
-		const rawKeyword =
-			(input?.value || "").trim();
+		const entities = Array.isArray(window.currentEmployeeEntitiesGlobal)
+			? window.currentEmployeeEntitiesGlobal
+			: [];
 
-		console.log(
-			"[EmployeeSearch] rawKeyword:",
-			rawKeyword
-		);
+		const moduleConfig = window.currentEmployeeModuleConfigGlobal || {};
 
-		// ============================================================
-		// LẤY STATE ĐÃ ĐƯỢC refreshAndRenderEmployeeData() LƯU
-		// ============================================================
+		// 1. Lọc danh sách nhân sự/học sinh theo Tên, Mã, Lớp
+		let filteredEntities = entities;
 
-		const entities =
-			Array.isArray(window.currentEmployeeEntitiesGlobal)
-				? window.currentEmployeeEntitiesGlobal
-				: [];
-
-		const moduleConfig =
-			window.currentEmployeeModuleConfigGlobal || {};
-
-		// ============================================================
-		// KHÔNG NHẬP TỪ KHÓA → RENDER TOÀN BỘ
-		// ============================================================
-
-		if (!rawKeyword) {
-
-			renderEmployeeTable(
-				entities,
-				moduleConfig
-			);
-
-			return;
-		}
-
-		// ============================================================
-		// CHUẨN HÓA CHUỖI TÌM KIẾM
-		//
-		// Ví dụ:
-		// "nguyễn văn a, 12a1"
-		//
-		// sẽ trở thành:
-		// [
-		//     "nguyễn văn a",
-		//     "12a1"
-		// ]
-		//
-		// Các điều kiện ngăn bởi dấu phẩy = AND
-		// Trong từng điều kiện:
-		// mã / tên / lớp-tổ = OR
-		// ============================================================
-
-		const searchParts =
-			rawKeyword
+		if (rawPersonnelKeyword) {
+			const searchParts = rawPersonnelKeyword
 				.toLowerCase()
 				.split(",")
 				.map(part => part.trim())
 				.filter(Boolean);
 
-		console.log(
-			"[EmployeeSearch] searchParts:",
-			searchParts
-		);
+			const normalizeValue = value => String(value ?? "").toLowerCase().trim();
 
-		// ============================================================
-		// HÀM CHUẨN HÓA GIÁ TRỊ
-		// ============================================================
-
-		const normalizeValue = value =>
-			String(value ?? "")
-				.toLowerCase()
-				.trim();
-
-		// ============================================================
-		// LỌC NHÂN SỰ
-		//
-		// Mỗi phần tìm kiếm phải khớp ít nhất một trong:
-		// - mã nhân sự
-		// - họ tên
-		// - lớp / tổ
-		//
-		// Và TẤT CẢ các phần ngăn bởi dấu phẩy đều phải đúng.
-		// ============================================================
-
-		const filtered =
-			entities.filter(item => {
-
-				const id =
-					normalizeValue(item.code);
-
-				const name =
-					normalizeValue(item.fullName);
-
-				const category =
-					normalizeValue(
-						item.category ||
-						item.classOrGroup
-					);
+			filteredEntities = entities.filter(item => {
+				const id = normalizeValue(item.code);
+				const name = normalizeValue(item.fullName);
+				const category = normalizeValue(item.category || item.classOrGroup);
 
 				return searchParts.every(part => {
-
 					return (
 						id.includes(part) ||
 						name.includes(part) ||
 						category.includes(part)
 					);
-
 				});
-
 			});
+		}
 
-		console.log(
-			"[EmployeeSearch] filtered:",
-			filtered.length,
-			filtered
-		);
-
-		// ============================================================
-		// RENDER KẾT QUẢ
-		// ============================================================
-
-		renderEmployeeTable(
-			filtered,
-			moduleConfig
-		);
+		// 2. Render kết quả đã lọc nhân sự và đúng cột trường lỗi theo từ khóa
+		renderEmployeeTable(filteredEntities, moduleConfig, rawFieldKeyword);
 	}
 
 
@@ -17238,7 +16881,7 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 					item.payload
 				);
 			});
-			
+
 			// ============================================================
 			// 17A. ĐỒNG BỘ ENTITY VÀ RENDER LẠI BẢNG NGAY SAU KHI LƯU
 			// ============================================================
@@ -17263,12 +16906,15 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 					}
 				});
 
-				renderEmployeeTable(
-					window.currentEmployeeEntitiesGlobal,
-					window.currentEmployeeModuleConfigGlobal || {}
-				);
+				if (typeof searchAndRenderTodayPersonnelRecords === "function") {
+					searchAndRenderTodayPersonnelRecords();
+				} else {
+					renderEmployeeTable(
+						window.currentEmployeeEntitiesGlobal,
+						window.currentEmployeeModuleConfigGlobal || {}
+					);
+				}
 			}
-
 
 			// ========================================================
 			// 18. THÔNG BÁO
@@ -17287,12 +16933,6 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 
 				}, 3000);
 			}
-
-
-			console.log(
-				`[EmployeeCache] Save All hoàn tất. ` +
-				`Đã ghi ${totalUpdatedRows} records thay đổi.`
-			);
 
 
 		} catch (err) {
@@ -17873,12 +17513,17 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 						...payload
 					};
 
-					renderEmployeeTable(
-						window.currentEmployeeEntitiesGlobal,
-						window.currentEmployeeModuleConfigGlobal || {}
-					);
+					if (typeof searchAndRenderTodayPersonnelRecords === "function") {
+						searchAndRenderTodayPersonnelRecords();
+					} else {
+						renderEmployeeTable(
+							window.currentEmployeeEntitiesGlobal,
+							window.currentEmployeeModuleConfigGlobal || {}
+						);
+					}
 				}
 			}
+
 
 			// ========================================================
 			// 16. THÔNG BÁO

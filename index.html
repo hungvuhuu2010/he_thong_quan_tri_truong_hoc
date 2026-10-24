@@ -274,9 +274,7 @@
 
 					<!-- TÌM KIẾM THỰC THỂ & NÚT KÍCH HOẠT TÀI KHOẢN DANH SÁCH LỌC -->
 					<div style="margin-bottom: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-					  <input type="text" id="entity-search-input" placeholder="Tìm kiếm theo Mã, Tên, Tổ/Lớp..." style="padding: 6px 10px; width: 250px; border: 1px solid #ccc; border-radius: 4px;">
-					  <button type="button" onclick="filterEntityListLocal()" style="padding: 6px 14px; background: #0d6efd; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
-						<i class="fa-solid fa-magnifying-glass"></i> Tìm
+					  <input type="text" id="entity-search-input" oninput="filterEntityListLocal()" placeholder="Tìm kiếm theo Mã, Tên, Tổ/Lớp..." style="padding: 6px 10px; width: 250px; border: 1px solid #ccc; border-radius: 4px;">
 					  </button>
 					  <button type="button" onclick="resetAndReloadAdminEntityList()" style="padding: 6px 12px; cursor: pointer; border-radius: 4px; border: 1px solid #ccc; background: #f8f9fa;">
 						<i class="fa-solid fa-rotate"></i> Làm mới
@@ -1273,10 +1271,16 @@
 						<input type="text" 
 							   id="emp-live-search-input" 
 							   oninput="searchAndRenderTodayPersonnelRecords()" 
-							   placeholder="Gõ Tên, mã HS/GV hoặc Lớp/Tổ (VD: 10A1)..."
+							   placeholder="Tên, mã HS/GV hoặc Lớp/Tổ; kết hợp bằng dấu phẩy (VD: Nguyễn Văn A, 12A1)"
 							   style="flex: 1; min-width: 250px; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 1em;">
 					  
-
+						
+						<input type="text" 
+							   id="emp-field-filter-input" 
+							   oninput="searchAndRenderTodayPersonnelRecords()" 
+							   placeholder="Gõ từ khóa để tìm trường dữ liệu hoặc lỗi cụ thể"
+							   style="flex: 1; min-width: 230px; padding: 8px 12px; border: 1px solid #0d6efd; border-radius: 4px; font-size: 0.95em; background-color: #f8f9fa;">
+	
 						<!-- Nút Làm Mới -->
 						<button type="button" 
 								onclick="refreshAndRenderEmployeeData()" 
