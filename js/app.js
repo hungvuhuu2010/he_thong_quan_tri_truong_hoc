@@ -14477,8 +14477,7 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 			tableId = "grid-sec3-table";
 		}
 
-		const table =
-			document.getElementById(tableId);
+		const table = document.getElementById(tableId);
 
 		if (!table) {
 			alert("Không tìm thấy dữ liệu bảng để xuất!");
@@ -14498,183 +14497,673 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 				"Chưa tải được thư viện Excel (SheetJS/XLSX). " +
 				"Vui lòng kiểm tra phần khai báo thư viện trong index.html."
 			);
+
 			console.error(
 				"[EXPORT EXCEL] Không tìm thấy thư viện XLSX."
 			);
+
 			return;
 		}
 
-		try {
+		// ----------------------------------------------------------
+		// 3. ĐỌC CÁC CỘT TRỰC TIẾP TỪ HTML TABLE
+		//
+		// Ưu tiên đọc <thead>.
+		// Nếu table không có <thead>, lấy dòng đầu tiên có <th>.
+		// ----------------------------------------------------------
 
-			// ------------------------------------------------------
-			// 3. ĐỌC TRỰC TIẾP TABLE HTML
-			//
-			// table_to_sheet giúp lấy nội dung hiện đang hiển thị
-			// trong bảng, bao gồm cả th và td.
-			// ------------------------------------------------------
+		let headerRow = null;
 
-			const worksheet =
-				XLSX.utils.table_to_sheet(
-					table,
-					{
-						raw: false
-					}
-				);
+		if (table.tHead && table.tHead.rows.length > 0) {
+			headerRow = table.tHead.rows[table.tHead.rows.length - 1];
+		}
 
-			// ------------------------------------------------------
-			// 4. XÁC ĐỊNH VÙNG DỮ LIỆU
-			// ------------------------------------------------------
+		if (!headerRow) {
+			const rows = table.querySelectorAll("tr");
 
-			const range =
-				XLSX.utils.decode_range(
-					worksheet["!ref"] || "A1"
-				);
-
-			// ------------------------------------------------------
-			// 5. TỰ ĐỘNG ĐIỀU CHỈNH ĐỘ RỘNG CỘT
-			//
-			// Không để các cột bị quá hẹp khi mở bằng Excel.
-			// Giới hạn tối đa 50 ký tự để tránh cột quá rộng.
-			// ------------------------------------------------------
-
-			const columnWidths = [];
-
-			for (
-				let c = range.s.c;
-				c <= range.e.c;
-				c++
-			) {
-
-				let maxLength = 10;
-
-				for (
-					let r = range.s.r;
-					r <= range.e.r;
-					r++
-				) {
-
-					const cellAddress =
-						XLSX.utils.encode_cell({
-							r: r,
-							c: c
-						});
-
-					const cell =
-						worksheet[cellAddress];
-
-					if (!cell) {
-						continue;
-					}
-
-					const text =
-						String(
-							cell.w !== undefined
-								? cell.w
-								: cell.v !== undefined
-									? cell.v
-									: ""
-						);
-
-					// Lấy dòng dài nhất.
-					const lines =
-						text.split(/\r?\n/);
-
-					for (const line of lines) {
-
-						maxLength =
-							Math.max(
-								maxLength,
-								line.length
-							);
-					}
+			for (const row of rows) {
+				if (row.querySelector("th")) {
+					headerRow = row;
+					break;
 				}
+			}
+		}
 
-				columnWidths.push({
-					wch: Math.min(
-						maxLength + 2,
-						50
-					)
-				});
+		if (!headerRow) {
+			alert("Không tìm thấy tiêu đề cột trong bảng để lựa chọn!");
+			return;
+		}
+
+		const headerCells = Array.from(headerRow.cells);
+
+		if (headerCells.length === 0) {
+			alert("Bảng hiện tại không có cột để xuất!");
+			return;
+		}
+
+		// ----------------------------------------------------------
+		// 4. TẠO DANH SÁCH CỘT
+		//
+		// Lấy text trực tiếp từ <th> hiện đang hiển thị trên HTML.
+		// Không đọc lại cấu hình Firestore.
+		// ----------------------------------------------------------
+
+		const columns = headerCells.map((cell, index) => {
+
+			const label = String(
+				cell.innerText ||
+				cell.textContent ||
+				""
+			)
+				.replace(/\s+/g, " ")
+				.trim();
+
+			return {
+				index: index,
+				label: label || `Cột ${index + 1}`
+			};
+		});
+
+		// ----------------------------------------------------------
+		// 5. TẠO HỘP THOẠI CHỌN CỘT
+		// ----------------------------------------------------------
+
+		const oldDialog = document.getElementById(
+			"export-grid-column-dialog"
+		);
+
+		if (oldDialog) {
+			oldDialog.remove();
+		}
+
+		const overlay = document.createElement("div");
+
+		overlay.id = "export-grid-column-dialog";
+
+		Object.assign(overlay.style, {
+			position: "fixed",
+			inset: "0",
+			background: "rgba(0, 0, 0, 0.45)",
+			zIndex: "999999",
+			display: "flex",
+			alignItems: "center",
+			justifyContent: "center",
+			padding: "20px",
+			boxSizing: "border-box"
+		});
+
+		const dialog = document.createElement("div");
+
+		Object.assign(dialog.style, {
+			width: "min(720px, 95vw)",
+			maxHeight: "85vh",
+			background: "#fff",
+			borderRadius: "10px",
+			boxShadow: "0 10px 35px rgba(0,0,0,.25)",
+			display: "flex",
+			flexDirection: "column",
+			overflow: "hidden",
+			fontFamily: "Arial, sans-serif"
+		});
+
+		// ----------------------------------------------------------
+		// 5.1 HEADER DIALOG
+		// ----------------------------------------------------------
+
+		const dialogHeader = document.createElement("div");
+
+		Object.assign(dialogHeader.style, {
+			padding: "16px 20px",
+			borderBottom: "1px solid #ddd",
+			display: "flex",
+			alignItems: "center",
+			justifyContent: "space-between",
+			gap: "12px"
+		});
+
+		const title = document.createElement("div");
+
+		title.textContent = "Chọn trường dữ liệu xuất Excel";
+
+		Object.assign(title.style, {
+			fontSize: "18px",
+			fontWeight: "700",
+			color: "#222"
+		});
+
+		const closeButton = document.createElement("button");
+
+		closeButton.type = "button";
+		closeButton.textContent = "×";
+		closeButton.title = "Đóng";
+
+		Object.assign(closeButton.style, {
+			border: "none",
+			background: "transparent",
+			fontSize: "28px",
+			lineHeight: "1",
+			cursor: "pointer",
+			color: "#666",
+			padding: "0 4px"
+		});
+
+		dialogHeader.appendChild(title);
+		dialogHeader.appendChild(closeButton);
+
+		// ----------------------------------------------------------
+		// 5.2 TOOLBAR: CHỌN TẤT CẢ / BỎ CHỌN TẤT CẢ
+		// ----------------------------------------------------------
+
+		const toolbar = document.createElement("div");
+
+		Object.assign(toolbar.style, {
+			padding: "10px 20px",
+			borderBottom: "1px solid #eee",
+			display: "flex",
+			alignItems: "center",
+			gap: "8px",
+			flexWrap: "wrap"
+		});
+
+		const selectAllButton = document.createElement("button");
+
+		selectAllButton.type = "button";
+		selectAllButton.textContent = "Chọn tất cả";
+
+		Object.assign(selectAllButton.style, {
+			border: "1px solid #0d6efd",
+			background: "#0d6efd",
+			color: "#fff",
+			borderRadius: "5px",
+			padding: "6px 12px",
+			cursor: "pointer"
+		});
+
+		const deselectAllButton = document.createElement("button");
+
+		deselectAllButton.type = "button";
+		deselectAllButton.textContent = "Bỏ chọn tất cả";
+
+		Object.assign(deselectAllButton.style, {
+			border: "1px solid #6c757d",
+			background: "#fff",
+			color: "#333",
+			borderRadius: "5px",
+			padding: "6px 12px",
+			cursor: "pointer"
+		});
+
+		const countText = document.createElement("span");
+
+		Object.assign(countText.style, {
+			marginLeft: "auto",
+			color: "#666",
+			fontSize: "13px"
+		});
+
+		toolbar.appendChild(selectAllButton);
+		toolbar.appendChild(deselectAllButton);
+		toolbar.appendChild(countText);
+
+		// ----------------------------------------------------------
+		// 5.3 DANH SÁCH CHECKBOX
+		// ----------------------------------------------------------
+
+		const list = document.createElement("div");
+
+		Object.assign(list.style, {
+			padding: "12px 20px",
+			overflowY: "auto",
+			flex: "1",
+			minHeight: "120px"
+		});
+
+		const checkboxItems = [];
+
+		columns.forEach((column) => {
+
+			const label = document.createElement("label");
+
+			Object.assign(label.style, {
+				display: "flex",
+				alignItems: "center",
+				gap: "10px",
+				padding: "9px 8px",
+				borderBottom: "1px solid #f0f0f0",
+				cursor: "pointer",
+				lineHeight: "1.4"
+			});
+
+			const checkbox = document.createElement("input");
+
+			checkbox.type = "checkbox";
+			checkbox.checked = true;
+			checkbox.dataset.columnIndex = String(column.index);
+
+			Object.assign(checkbox.style, {
+				width: "17px",
+				height: "17px",
+				flex: "0 0 auto"
+			});
+
+			const text = document.createElement("span");
+
+			text.textContent = column.label;
+
+			Object.assign(text.style, {
+				wordBreak: "break-word"
+			});
+
+			label.appendChild(checkbox);
+			label.appendChild(text);
+			list.appendChild(label);
+
+			checkboxItems.push(checkbox);
+		});
+
+		// ----------------------------------------------------------
+		// 5.4 FOOTER DIALOG
+		// ----------------------------------------------------------
+
+		const dialogFooter = document.createElement("div");
+
+		Object.assign(dialogFooter.style, {
+			padding: "12px 20px",
+			borderTop: "1px solid #ddd",
+			display: "flex",
+			justifyContent: "flex-end",
+			gap: "8px"
+		});
+
+		const cancelButton = document.createElement("button");
+
+		cancelButton.type = "button";
+		cancelButton.textContent = "Hủy";
+
+		Object.assign(cancelButton.style, {
+			border: "1px solid #6c757d",
+			background: "#fff",
+			color: "#333",
+			borderRadius: "5px",
+			padding: "8px 16px",
+			cursor: "pointer"
+		});
+
+		const exportButton = document.createElement("button");
+
+		exportButton.type = "button";
+		exportButton.textContent = "Xuất Excel";
+
+		Object.assign(exportButton.style, {
+			border: "1px solid #198754",
+			background: "#198754",
+			color: "#fff",
+			borderRadius: "5px",
+			padding: "8px 16px",
+			cursor: "pointer",
+			fontWeight: "600"
+		});
+
+		dialogFooter.appendChild(cancelButton);
+		dialogFooter.appendChild(exportButton);
+
+		// ----------------------------------------------------------
+		// 5.5 GHÉP DIALOG
+		// ----------------------------------------------------------
+
+		dialog.appendChild(dialogHeader);
+		dialog.appendChild(toolbar);
+		dialog.appendChild(list);
+		dialog.appendChild(dialogFooter);
+
+		overlay.appendChild(dialog);
+		document.body.appendChild(overlay);
+
+		// ----------------------------------------------------------
+		// 6. CÁC HÀM HỖ TRỢ CHO DIALOG
+		// ----------------------------------------------------------
+
+		const updateCount = () => {
+
+			const selectedCount =
+				checkboxItems.filter(cb => cb.checked).length;
+
+			countText.textContent =
+				`Đã chọn ${selectedCount}/${checkboxItems.length} cột`;
+		};
+
+		const closeDialog = () => {
+
+			if (overlay && overlay.parentNode) {
+				overlay.parentNode.removeChild(overlay);
+			}
+		};
+
+		const getSelectedIndexes = () => {
+
+			return checkboxItems
+				.filter(cb => cb.checked)
+				.map(cb => Number(cb.dataset.columnIndex));
+		};
+
+		selectAllButton.addEventListener("click", () => {
+
+			checkboxItems.forEach(cb => {
+				cb.checked = true;
+			});
+
+			updateCount();
+		});
+
+		deselectAllButton.addEventListener("click", () => {
+
+			checkboxItems.forEach(cb => {
+				cb.checked = false;
+			});
+
+			updateCount();
+		});
+
+		checkboxItems.forEach(cb => {
+			cb.addEventListener("change", updateCount);
+		});
+
+		closeButton.addEventListener("click", closeDialog);
+
+		cancelButton.addEventListener("click", closeDialog);
+
+		overlay.addEventListener("click", (event) => {
+
+			if (event.target === overlay) {
+				closeDialog();
+			}
+		});
+
+		const keydownHandler = (event) => {
+
+			if (event.key === "Escape") {
+				closeDialog();
+				document.removeEventListener(
+					"keydown",
+					keydownHandler
+				);
+			}
+		};
+
+		document.addEventListener(
+			"keydown",
+			keydownHandler
+		);
+
+		updateCount();
+
+		// ----------------------------------------------------------
+		// 7. XỬ LÝ NÚT "XUẤT EXCEL"
+		// ----------------------------------------------------------
+
+		exportButton.addEventListener("click", () => {
+
+			const selectedIndexes =
+				getSelectedIndexes();
+
+			if (selectedIndexes.length === 0) {
+
+				alert(
+					"Vui lòng chọn ít nhất một trường dữ liệu để xuất!"
+				);
+
+				return;
 			}
 
-			worksheet["!cols"] =
-				columnWidths;
+			// Đóng dialog trước khi tạo file.
+			closeDialog();
 
 			// ------------------------------------------------------
-			// 6. TẠO WORKBOOK
+			// 8. TẠO TABLE TẠM CHỈ CHỨA CÁC CỘT ĐƯỢC CHỌN
+			//
+			// Table gốc trên giao diện KHÔNG bị thay đổi.
 			// ------------------------------------------------------
 
-			const workbook =
-				XLSX.utils.book_new();
+			const tempTable =
+				document.createElement("table");
 
-			const sheetName =
-				sectionKey === "sec1"
-					? "KPI"
-					: sectionKey === "sec2"
-						? "Thống kê"
-						: "Báo cáo";
+			const tempThead =
+				document.createElement("thead");
 
-			XLSX.utils.book_append_sheet(
-				workbook,
-				worksheet,
-				sheetName
-			);
+			const tempHeaderRow =
+				document.createElement("tr");
 
-			// ------------------------------------------------------
-			// 7. TÊN FILE
-			// ------------------------------------------------------
+			selectedIndexes.forEach((columnIndex) => {
 
-			const today =
-				new Date();
+				const originalCell =
+					headerCells[columnIndex];
 
-			const yyyy =
-				today.getFullYear();
-
-			const mm =
-				String(
-					today.getMonth() + 1
-				).padStart(2, "0");
-
-			const dd =
-				String(
-					today.getDate()
-				).padStart(2, "0");
-
-			const fileName =
-				`Bao_Cao_KPI_${String(sectionKey || "")
-					.toUpperCase()}_${yyyy}-${mm}-${dd}.xlsx`;
-
-			// ------------------------------------------------------
-			// 8. XUẤT FILE EXCEL THẬT
-			// ------------------------------------------------------
-
-			XLSX.writeFile(
-				workbook,
-				fileName,
-				{
-					bookType: "xlsx",
-					compression: true
+				if (!originalCell) {
+					return;
 				}
-			);
 
-			console.log(
-				"✅ [EXPORT EXCEL] Đã xuất:",
-				fileName
-			);
+				const clonedCell =
+					originalCell.cloneNode(true);
 
-		} catch (error) {
+				tempHeaderRow.appendChild(clonedCell);
+			});
 
-			console.error(
-				"❌ [EXPORT EXCEL] Lỗi:",
-				error
-			);
+			tempThead.appendChild(tempHeaderRow);
+			tempTable.appendChild(tempThead);
 
-			alert(
-				"Không thể xuất file Excel. " +
-				"Vui lòng mở Console để kiểm tra lỗi."
-			);
-		}
+			// ------------------------------------------------------
+			// 9. COPY CÁC DÒNG BODY THEO ĐÚNG INDEX CỘT
+			// ------------------------------------------------------
+
+			const tempTbody =
+				document.createElement("tbody");
+
+			const bodyRows =
+				table.tBodies.length > 0
+					? Array.from(
+						table.tBodies[0].rows
+					)
+					: Array.from(
+						table.querySelectorAll("tr")
+					).filter(row => row !== headerRow);
+
+			bodyRows.forEach((originalRow) => {
+
+				const tempRow =
+					document.createElement("tr");
+
+				selectedIndexes.forEach((columnIndex) => {
+
+					const originalCell =
+						originalRow.cells[columnIndex];
+
+					if (!originalCell) {
+
+						const emptyCell =
+							document.createElement("td");
+
+						tempRow.appendChild(emptyCell);
+
+						return;
+					}
+
+					const clonedCell =
+						originalCell.cloneNode(true);
+
+					tempRow.appendChild(clonedCell);
+				});
+
+				tempTbody.appendChild(tempRow);
+			});
+
+			tempTable.appendChild(tempTbody);
+
+			// ------------------------------------------------------
+			// 10. CHUYỂN TABLE TẠM SANG WORKSHEET
+			// ------------------------------------------------------
+
+			try {
+
+				const worksheet =
+					XLSX.utils.table_to_sheet(
+						tempTable,
+						{
+							raw: false
+						}
+					);
+
+				// --------------------------------------------------
+				// 11. XÁC ĐỊNH VÙNG DỮ LIỆU
+				// --------------------------------------------------
+
+				const range =
+					XLSX.utils.decode_range(
+						worksheet["!ref"] || "A1"
+					);
+
+				// --------------------------------------------------
+				// 12. TỰ ĐỘNG ĐIỀU CHỈNH ĐỘ RỘNG CỘT
+				// --------------------------------------------------
+
+				const columnWidths = [];
+
+				for (
+					let c = range.s.c;
+					c <= range.e.c;
+					c++
+				) {
+
+					let maxLength = 10;
+
+					for (
+						let r = range.s.r;
+						r <= range.e.r;
+						r++
+					) {
+
+						const cellAddress =
+							XLSX.utils.encode_cell({
+								r: r,
+								c: c
+							});
+
+						const cell =
+							worksheet[cellAddress];
+
+						if (!cell) {
+							continue;
+						}
+
+						const text =
+							String(
+								cell.w !== undefined
+									? cell.w
+									: cell.v !== undefined
+										? cell.v
+										: ""
+							);
+
+						const lines =
+							text.split(/\r?\n/);
+
+						for (const line of lines) {
+
+							maxLength =
+								Math.max(
+									maxLength,
+									line.length
+								);
+						}
+					}
+
+					columnWidths.push({
+						wch: Math.min(
+							maxLength + 2,
+							50
+						)
+					});
+				}
+
+				worksheet["!cols"] =
+					columnWidths;
+
+				// --------------------------------------------------
+				// 13. TẠO WORKBOOK
+				// --------------------------------------------------
+
+				const workbook =
+					XLSX.utils.book_new();
+
+				const sheetName =
+					sectionKey === "sec1"
+						? "KPI"
+						: sectionKey === "sec2"
+							? "Thống kê"
+							: "Báo cáo";
+
+				XLSX.utils.book_append_sheet(
+					workbook,
+					worksheet,
+					sheetName
+				);
+
+				// --------------------------------------------------
+				// 14. TÊN FILE
+				// --------------------------------------------------
+
+				const today =
+					new Date();
+
+				const yyyy =
+					today.getFullYear();
+
+				const mm =
+					String(
+						today.getMonth() + 1
+					).padStart(2, "0");
+
+				const dd =
+					String(
+						today.getDate()
+					).padStart(2, "0");
+
+				const fileName =
+					`Bao_Cao_KPI_${String(sectionKey || "")
+						.toUpperCase()}_${yyyy}-${mm}-${dd}.xlsx`;
+
+				// --------------------------------------------------
+				// 15. XUẤT FILE EXCEL
+				// --------------------------------------------------
+
+				XLSX.writeFile(
+					workbook,
+					fileName,
+					{
+						bookType: "xlsx",
+						compression: true
+					}
+				);
+
+				console.log(
+					"✅ [EXPORT EXCEL] Đã xuất:",
+					fileName
+				);
+
+			} catch (error) {
+
+				console.error(
+					"❌ [EXPORT EXCEL] Lỗi:",
+					error
+				);
+
+				alert(
+					"Không thể xuất file Excel. " +
+					"Vui lòng mở Console để kiểm tra lỗi."
+				);
+			}
+		});
 	}
+
 
 
 	
