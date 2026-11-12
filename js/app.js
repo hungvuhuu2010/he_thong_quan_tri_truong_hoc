@@ -21428,1659 +21428,644 @@ window.loadEmployeeAuditMonitorData =
 
 
 	//	THẺ 4 - LỚP CHỦ NHIỆM
-async function loadHomeroomClassData(forceRefresh = false) {
-    const tableBody = document.getElementById("emp-homeroom-body-rows");
-    const headerRow = document.getElementById("emp-homeroom-header-row");
-    const classNameSpan = document.getElementById("emp-homeroom-class-name");
-    const modeSelect = document.getElementById("emp-homeroom-mode-select");
-    const badge = document.getElementById("emp-homeroom-cache-badge");
-
-    if (!tableBody) return;
-
-    const orgId = String(window.currentOrgIdGlobal || "").trim();
-
-    if (!orgId) {
-        tableBody.innerHTML = `
-            <tr>
-                <td colspan="10" style="text-align:center;color:red;">
-                    Chưa xác định được thông tin đơn vị (OrgId).
-                </td>
-            </tr>
-        `;
-        return;
-    }
-
-    // ============================================================
-    // 1. XÁC ĐỊNH NĂM HỌC
-    // ============================================================
-
-    let academicYearId = "";
-    const yearsArr = window.currentAcademicYearsGlobal;
-
-    if (Array.isArray(yearsArr) && yearsArr.length > 0) {
-        const lastYearItem = yearsArr[yearsArr.length - 1];
-
-        academicYearId = String(
-            typeof lastYearItem === "object" && lastYearItem !== null
-                ? (
-                    lastYearItem.id ||
-                    lastYearItem.name ||
-                    lastYearItem.year ||
-                    ""
-                )
-                : lastYearItem
-        ).trim();
-    }
-
-    if (!academicYearId) {
-        academicYearId = String(
-            window.currentAcademicYearIdGlobal || ""
-        ).trim();
-    }
-
-    if (!academicYearId) {
-        tableBody.innerHTML = `
-            <tr>
-                <td colspan="10" style="text-align:center;color:red;">
-                    Chưa xác định được năm học hiện tại.
-                </td>
-            </tr>
-        `;
-        return;
-    }
-
-    // ============================================================
-    // 2. USER ĐĂNG NHẬP
-    // ============================================================
-
-    const authUser = firebase.auth().currentUser;
-
-    if (!authUser) {
-        tableBody.innerHTML = `
-            <tr>
-                <td colspan="10" style="text-align:center;color:red;">
-                    Chưa đăng nhập hệ thống.
-                </td>
-            </tr>
-        `;
-        return;
-    }
-
-    const teacherUid = String(authUser.uid || "").trim();
-
-    const currentEmail = String(
-        window.currentUserEmailGlobal ||
-        authUser.email ||
-        ""
-    ).trim().toLowerCase();
-
-    const mode = modeSelect?.value || "daily";
-
-    tableBody.innerHTML = `
-        <tr>
-            <td colspan="10" style="text-align:center;color:#6c757d;">
-                Đang tải dữ liệu lớp chủ nhiệm theo chế độ
-                ${
-                    mode === "monthly"
-                        ? "Tháng"
-                        : mode === "weekly"
-                            ? "Tuần"
-                            : "Ngày"
-                }...
-            </td>
-        </tr>
-    `;
-
-    try {
-        const db = firebase.firestore();
-
-        // ============================================================
-        // 3. CACHE PHÂN CÔNG LỚP CHỦ NHIỆM
-        // ============================================================
-
-        window._homeroomAssignmentCache =
-            window._homeroomAssignmentCache || {};
-
-        const assignmentCacheKey =
-            `${orgId}__${academicYearId}__${teacherUid}`;
-
-        let assignmentCache =
-            window._homeroomAssignmentCache[assignmentCacheKey];
-
-        let homeroomClasses = [];
-        let teacherDepartments = [];
-
-        if (assignmentCache && !forceRefresh) {
-            homeroomClasses =
-                Array.isArray(assignmentCache.homeroomClasses)
-                    ? [...assignmentCache.homeroomClasses]
-                    : [];
-
-            teacherDepartments =
-                Array.isArray(assignmentCache.departments)
-                    ? [...assignmentCache.departments]
-                    : [];
-        } else {
-            const assignRef = db
-                .collection("organizations")
-                .doc(orgId)
-                .collection("academicYears")
-                .doc(academicYearId)
-                .collection("assignments");
-
-            const allAssigns = await assignRef.get();
-
-            let assignData = null;
-
-            allAssigns.forEach(d => {
-                const data = d.data() || {};
-
-                const dataUid = String(
-                    data.uid ||
-                    data.userId ||
-                    data.memberId ||
-                    ""
-                ).trim();
-
-                const dataEmail = String(
-                    data.email || ""
-                ).trim().toLowerCase();
-
-                if (
-                    d.id === teacherUid ||
-                    dataUid === teacherUid ||
-                    (
-                        currentEmail &&
-                        dataEmail === currentEmail
-                    )
-                ) {
-                    assignData = data;
-                }
-            });
-
-            if (assignData) {
-                const rawData =
-                    assignData.homeroom ||
-                    assignData.homeroomClasses ||
-                    assignData.classes ||
-                    [];
-
-                let itemsList = [];
-
-                if (typeof rawData === "string") {
-                    itemsList = rawData
-                        .split(",")
-                        .map(s => s.trim())
-                        .filter(Boolean);
-                } else if (Array.isArray(rawData)) {
-                    itemsList = rawData;
-                }
-
-                itemsList.forEach(item => {
-                    const val = String(item).trim();
-
-                    if (!val) return;
-
-                    if (/\d/.test(val)) {
-                        homeroomClasses.push(val);
-                    } else {
-                        teacherDepartments.push(val);
-                    }
-                });
-            }
-
-            assignmentCache = {
-                homeroomClasses: [...homeroomClasses],
-                departments: [...teacherDepartments],
-                cachedAt: Date.now()
-            };
-
-            window._homeroomAssignmentCache[assignmentCacheKey] =
-                assignmentCache;
-
-            window.currentTeacherHomerooms = [...homeroomClasses];
-            window.currentTeacherDepartments = [...teacherDepartments];
-        }
-
-        if (homeroomClasses.length === 0) {
-            if (classNameSpan) {
-                classNameSpan.innerText = "Không có lớp chủ nhiệm";
-            }
-
-            tableBody.innerHTML = `
-                <tr>
-                    <td colspan="10" style="
-                        text-align:center;
-                        color:#6c757d;
-                        font-style:italic;
-                    ">
-                        Bạn không được phân công chủ nhiệm lớp nào trong năm học này.
-                    </td>
-                </tr>
-            `;
-            return;
-        }
-
-        if (classNameSpan) {
-            classNameSpan.innerText = homeroomClasses.join(", ");
-        }
-
-        // ============================================================
-        // 4. CACHE USERS
-        // ============================================================
-
-        window._usersCacheByOrg = window._usersCacheByOrg || {};
-
-        let usersCache = window._usersCacheByOrg[orgId];
-
-        let cachedUsersNeedRefresh =
-            !usersCache ||
-            !usersCache.users ||
-            Object.keys(usersCache.users).length === 0;
-
-        if (!cachedUsersNeedRefresh) {
-            const cachedList = Object.values(usersCache.users);
-
-            cachedUsersNeedRefresh = cachedList.some(
-                user => user.code === undefined
-            );
-        }
-
-        if (
-            window.cachedUsersMap &&
-            Object.keys(window.cachedUsersMap).length > 0
-        ) {
-            const globalCachedList =
-                Object.values(window.cachedUsersMap);
-
-            const globalMissingCode =
-                globalCachedList.some(
-                    user => user.code === undefined
-                );
-
-            if (globalMissingCode) {
-                cachedUsersNeedRefresh = true;
-            }
-        }
-
-        if (forceRefresh || cachedUsersNeedRefresh) {
-            const usersSnap = await db
-                .collection("organizations")
-                .doc(orgId)
-                .collection("users")
-                .get();
-
-            const usersMap = {};
-
-            usersSnap.forEach(uDoc => {
-                const uData = uDoc.data() || {};
-
-                const code = String(
-                    uData.code ||
-                    uData.memberId ||
-                    ""
-                ).trim();
-
-                const uid = String(
-                    uData.uid ||
-                    uData.id ||
-                    uDoc.id ||
-                    ""
-                ).trim();
-
-                const fullName =
-                    uData.fullName ||
-                    uData.displayName ||
-                    uData.name ||
-                    uDoc.id;
-
-                const category = String(
-                    uData.category ||
-                    uData.className ||
-                    ""
-                ).trim();
-
-                usersMap[uDoc.id] = {
-                    id: uDoc.id,
-                    uid,
-                    code,
-                    fullName,
-                    category,
-                    email: String(
-                        uData.email || ""
-                    ).trim().toLowerCase(),
-                    role: uData.role || ""
-                };
-            });
-
-            usersCache = {
-                users: usersMap,
-                cachedAt: Date.now()
-            };
-
-            window._usersCacheByOrg[orgId] = usersCache;
-            window.cachedUsersMap = usersMap;
-        } else {
-            window.cachedUsersMap = usersCache.users;
-        }
-
-        const usersMap = window.cachedUsersMap || {};
-
-        // ============================================================
-        // 5. DANH SÁCH HỌC SINH
-        // ============================================================
-
-        const homeroomStudents = [];
-
-        for (const [uId, uInfo] of Object.entries(usersMap)) {
-            if (!uInfo || !uInfo.category) continue;
-
-            if (
-                !homeroomClasses.includes(
-                    String(uInfo.category).trim()
-                )
-            ) {
-                continue;
-            }
-
-            const code = String(uInfo.code || "").trim();
-
-            const uid = String(
-                uInfo.uid ||
-                uInfo.id ||
-                uId ||
-                ""
-            ).trim();
-
-            homeroomStudents.push({
-                id: code || uid,
-                code,
-                uid,
-                name:
-                    uInfo.fullName ||
-                    uInfo.displayName ||
-                    uInfo.name ||
-                    uId,
-                category: String(uInfo.category).trim()
-            });
-        }
-
-        if (homeroomStudents.length === 0) {
-            tableBody.innerHTML = `
-                <tr>
-                    <td colspan="10" style="
-                        text-align:center;
-                        color:#6c757d;
-                        font-style:italic;
-                    ">
-                        Không tìm thấy học sinh nào thuộc lớp chủ nhiệm
-                        (${homeroomClasses.join(", ")}).
-                    </td>
-                </tr>
-            `;
-            return;
-        }
-
-        // ============================================================
-        // 6. CACHE KPI CONFIG - HỌC SINH
-        // ============================================================
-
-        window._homeroomKpiConfigCache =
-            window._homeroomKpiConfigCache || {};
-
-        const kpiCacheKey =
-            `${orgId}__${academicYearId}`;
-
-        let kpiRules =
-            window._homeroomKpiConfigCache[kpiCacheKey];
-
-        if (!kpiRules || forceRefresh) {
-            const kpiConfigDoc = await db
-                .collection("organizations")
-                .doc(orgId)
-                .collection("academicYears")
-                .doc(academicYearId)
-                .collection("KPIconfig")
-                .doc("student")
-                .get();
-
-            kpiRules =
-                kpiConfigDoc.exists
-                    ? (kpiConfigDoc.data() || {})
-                    : {};
-
-            window._homeroomKpiConfigCache[kpiCacheKey] =
-                kpiRules;
-        }
-
-        // ============================================================
-        // 7. ĐIỂM GỐC HỌC SINH
-        // ============================================================
-        //
-        // Ưu tiên tuyệt đối trường BasePoint trong KPIconfig/student.
-        // Không cộng BasePoint lặp lại theo từng record/KPI.
-        //
-        // Công thức tháng:
-        // BasePoint - tổng điểm âm + tổng điểm dương
-        // ============================================================
-
-        const basePointRaw =
-            kpiRules.BasePoint ??
-            kpiRules.basePoint ??
-            90;
-
-        const basePointNumber =
-            Number(basePointRaw);
-
-        const studentBasePoint =
-            Number.isFinite(basePointNumber)
-                ? basePointNumber
-                : 90;
-
-        // ============================================================
-        // 8. CACHE MODULE STUDENT
-        // ============================================================
-
-        window._homeroomStudentModulesCache =
-            window._homeroomStudentModulesCache || {};
-
-        const moduleCacheKey =
-            `${orgId}__${academicYearId}__student`;
-
-        let cachedModules =
-            window._homeroomStudentModulesCache[moduleCacheKey];
-
-        if (
-            !cachedModules ||
-            !Array.isArray(cachedModules.modules) ||
-            forceRefresh
-        ) {
-            const snap = await db
-                .collection("organizations")
-                .doc(orgId)
-                .collection("modules")
-                .where("targetType", "==", "STUDENT")
-                .get();
-
-            cachedModules = {
-                modules: snap.docs.map(doc => ({
-                    id: doc.id,
-                    data: doc.data() || {}
-                })),
-                cachedAt: Date.now()
-            };
-
-            window._homeroomStudentModulesCache[moduleCacheKey] =
-                cachedModules;
-        }
-
-        const studentModules =
-            cachedModules?.modules || [];
-
-        // ============================================================
-        // 9. KPI FIELDS
-        // ============================================================
-
-        const kpiFieldsMap = {};
-
-        studentModules.forEach(mod => {
-            const modData = mod.data || {};
-
-            const fieldsArr =
-                Array.isArray(modData.fields)
-                    ? modData.fields
-                    : [];
-
-            fieldsArr.forEach(fObj => {
-                if (
-                    fObj &&
-                    fObj.isKpi &&
-                    fObj.key
-                ) {
-                    const rawOptions =
-                        fObj.kpiOptions ||
-                        fObj.options ||
-                        {};
-
-                    let optionsMap = {};
-
-                    if (
-                        Array.isArray(rawOptions)
-                    ) {
-                        rawOptions.forEach(opt => {
-                            if (!opt) return;
-
-                            const optionKey = String(
-                                opt.value ??
-                                opt.key ??
-                                opt.id ??
-                                opt.label ??
-                                opt.name ??
-                                ""
-                            ).trim();
-
-                            if (!optionKey) return;
-
-                            optionsMap[optionKey] = opt;
-                        });
-                    } else if (
-                        rawOptions &&
-                        typeof rawOptions === "object"
-                    ) {
-                        optionsMap = rawOptions;
-                    }
-
-                    const fieldWeightRaw =
-                        Number(fObj.scoreWeight);
-
-                    kpiFieldsMap[fObj.key] = {
-                        id: fObj.key,
-                        name:
-                            fObj.label ||
-                            fObj.key,
-                        scoreWeight:
-                            Number.isFinite(fieldWeightRaw)
-                                ? fieldWeightRaw
-                                : -1,
-                        kpiOptions: optionsMap
-                    };
-                }
-            });
-        });
-
-        const kpiFieldsList =
-            Object.values(kpiFieldsMap);
-
-        // ============================================================
-        // 10. HEADER
-        // ============================================================
-
-        let headerHtml = `
-            <th style="
-                width:100px;
-                text-align:center;
-            ">
-                Mã định danh
-            </th>
-
-            <th style="width:170px;">
-                Họ và Tên
-            </th>
-
-            <th style="
-                width:100px;
-                text-align:center;
-            ">
-                Lớp
-            </th>
-        `;
-
-        kpiFieldsList.forEach(field => {
-            headerHtml += `
-                <th style="
-                    text-align:center;
-                    min-width:90px;
-                ">
-                    ${field.name}
-                </th>
-            `;
-        });
-
-        if (mode === "monthly") {
-            headerHtml += `
-                <th style="
-                    width:100px;
-                    text-align:center;
-                ">
-                    Tổng lượt
-                </th>
-
-                <th style="
-                    width:110px;
-                    text-align:center;
-                ">
-                    Điểm trừ
-                </th>
-
-                <th style="
-                    width:110px;
-                    text-align:center;
-                ">
-                    Điểm cộng
-                </th>
-
-                <th style="
-                    width:110px;
-                    text-align:center;
-                ">
-                    Điểm tháng
-                </th>
-
-                <th style="
-                    width:120px;
-                    text-align:center;
-                ">
-                    Xếp loại Tháng
-                </th>
-            `;
-        } else {
-            headerHtml += `
-                <th style="
-                    width:110px;
-                    text-align:center;
-                ">
-                    Tổng lượt vi phạm
-                </th>
-            `;
-        }
-
-        if (headerRow) {
-            headerRow.innerHTML = headerHtml;
-        }
-
-        // ============================================================
-        // 11. KHỞI TẠO THỐNG KÊ
-        // ============================================================
-
-        const studentStatsMap = {};
-
-        homeroomStudents.forEach(student => {
-            const studentKey =
-                student.code ||
-                student.uid;
-
-            studentStatsMap[studentKey] = {
-                id: studentKey,
-                uid: student.uid,
-                code: student.code,
-                name: student.name,
-                className: student.category,
-
-                totalCount: 0,
-
-                // Tổng score ròng, giữ để tương thích.
-                totalScore: 0,
-
-                // Tách riêng giống bảng tổng hợp tháng.
-                totalPenalty: 0,
-                totalBonus: 0,
-
-                kpiCounts: {}
-            };
-        });
-
-        // ============================================================
-        // 12. KHOẢNG THỜI GIAN
-        // ============================================================
-
-        const formatDateLocal = date => {
-            const y = date.getFullYear();
-
-            const m = String(
-                date.getMonth() + 1
-            ).padStart(2, "0");
-
-            const d = String(
-                date.getDate()
-            ).padStart(2, "0");
-
-            return `${y}-${m}-${d}`;
-        };
-
-        const now = new Date();
-
-        const todayStr =
-            formatDateLocal(now);
-
-        let startDateStr = todayStr;
-        let endDateStr = todayStr;
-
-        if (mode === "weekly") {
-            const dayOfWeek = now.getDay();
-
-            const diffToMonday =
-                dayOfWeek === 0
-                    ? -6
-                    : 1 - dayOfWeek;
-
-            const monday = new Date(now);
-
-            monday.setDate(
-                now.getDate() +
-                diffToMonday
-            );
-
-            const sunday = new Date(monday);
-
-            sunday.setDate(
-                monday.getDate() + 6
-            );
-
-            startDateStr =
-                formatDateLocal(monday);
-
-            endDateStr =
-                formatDateLocal(sunday);
-
-        } else if (mode === "monthly") {
-            // ========================================================
-            // KỲ BÁO CÁO THÁNG THEO CẤU HÌNH CỦA TỔ CHỨC
-            //
-            // Đọc trực tiếp:
-            // organizations/{orgId}.reportingPeriod.monthly.startDay
-            //
-            // Ví dụ startDay = 21:
-            // - Nếu hôm nay 04/10/2026
-            //   => kỳ hiện tại: 21/09/2026 -> 20/10/2026
-            // - Nếu hôm nay 25/10/2026
-            //   => kỳ hiện tại: 21/10/2026 -> 20/11/2026
-            //
-            // Nếu startDay = 1:
-            //   => kỳ tháng theo lịch: ngày 01 -> ngày cuối tháng.
-            // ========================================================
-
-            let reportingStartDay = 1;
-
-            try {
-                const orgDoc = await db
-                    .collection("organizations")
-                    .doc(orgId)
-                    .get();
-
-                if (orgDoc.exists) {
-                    const orgData =
-                        orgDoc.data() || {};
-
-                    const configuredStartDay =
-                        orgData?.reportingPeriod?.monthly?.startDay;
-
-                    const parsedStartDay =
-                        Number(configuredStartDay);
-
-                    if (
-                        Number.isFinite(parsedStartDay) &&
-                        parsedStartDay >= 1 &&
-                        parsedStartDay <= 31
-                    ) {
-                        reportingStartDay =
-                            Math.floor(parsedStartDay);
-                    }
-                }
-            } catch (periodConfigError) {
-                console.warn(
-                    "Không đọc được cấu hình kỳ báo cáo tháng, dùng ngày 01:",
-                    periodConfigError
-                );
-
-                reportingStartDay = 1;
-            }
-
-            // Tạo ngày nhưng giới hạn ngày bắt đầu theo số ngày thực tế
-            // của tháng, tránh trường hợp startDay = 31 ở tháng ngắn.
-            const createClampedDate = (
-                year,
-                monthIndex,
-                day
-            ) => {
-                const lastDayOfMonth =
-                    new Date(
-                        year,
-                        monthIndex + 1,
-                        0
-                    ).getDate();
-
-                const safeDay =
-                    Math.min(
-                        Math.max(
-                            Number(day) || 1,
-                            1
-                        ),
-                        lastDayOfMonth
-                    );
-
-                return new Date(
-                    year,
-                    monthIndex,
-                    safeDay
-                );
-            };
-
-            let periodStart;
-
-            if (
-                now.getDate() >=
-                reportingStartDay
-            ) {
-                // Đã đến ngày bắt đầu kỳ của tháng hiện tại.
-                periodStart =
-                    createClampedDate(
-                        now.getFullYear(),
-                        now.getMonth(),
-                        reportingStartDay
-                    );
-            } else {
-                // Chưa đến ngày bắt đầu kỳ:
-                // kỳ hiện tại bắt đầu từ tháng trước.
-                periodStart =
-                    createClampedDate(
-                        now.getFullYear(),
-                        now.getMonth() - 1,
-                        reportingStartDay
-                    );
-            }
-
-            // Kỳ kết thúc vào ngày ngay trước ngày bắt đầu
-            // của kỳ kế tiếp.
-            const nextPeriodStart =
-                createClampedDate(
-                    periodStart.getFullYear(),
-                    periodStart.getMonth() + 1,
-                    reportingStartDay
-                );
-
-            const periodEnd =
-                new Date(nextPeriodStart);
-
-            periodEnd.setDate(
-                periodEnd.getDate() - 1
-            );
-
-            startDateStr =
-                formatDateLocal(periodStart);
-
-            endDateStr =
-                formatDateLocal(periodEnd);
-
-            console.log(
-                "[Homeroom] Kỳ báo cáo tháng:",
-                {
-                    startDay: reportingStartDay,
-                    startDate: startDateStr,
-                    endDate: endDateStr
-                }
-            );
-        }
-
-        // ============================================================
-        // 13. HÀM PHÂN TÍCH ĐIỂM KPI
-        // ============================================================
-        //
-        // Quy tắc:
-        // - Mỗi phần tử có nội dung trong mảng = 1 lượt.
-        // - Nếu option có scoreWeight -> dùng scoreWeight của option.
-        // - Nếu không có option -> dùng scoreWeight của field.
-        // - score < 0 -> totalPenalty += abs(score)
-        // - score > 0 -> totalBonus += score
-        // - score = 0 -> không cộng trừ điểm nhưng vẫn là 1 lượt.
-        //
-        // Các dạng dữ liệu được hỗ trợ:
-        // 1. scalar
-        // 2. object { value, label, name, scoreWeight }
-        // 3. array các scalar/object
-        // ============================================================
-
-        const normalizeOptionKey = value => {
-            if (
-                value === undefined ||
-                value === null
-            ) {
-                return "";
-            }
-
-            if (
-                typeof value === "object"
-            ) {
-                return String(
-                    value.value ??
-                    value.key ??
-                    value.id ??
-                    value.label ??
-                    value.name ??
-                    ""
-                ).trim();
-            }
-
-            return String(value).trim();
-        };
-
-        const findOptionConfig = (
-            field,
-            item
-        ) => {
-            const options =
-                field.kpiOptions || {};
-
-            const candidates = [];
-
-            if (
-                item &&
-                typeof item === "object"
-            ) {
-                candidates.push(
-                    item.value,
-                    item.key,
-                    item.id,
-                    item.label,
-                    item.name
-                );
-            } else {
-                candidates.push(item);
-            }
-
-            for (const candidate of candidates) {
-                const key =
-                    normalizeOptionKey(
-                        candidate
-                    );
-
-                if (!key) continue;
-
-                if (
-                    Object.prototype.hasOwnProperty.call(
-                        options,
-                        key
-                    )
-                ) {
-                    return options[key];
-                }
-
-                const matchedKey =
-                    Object.keys(options).find(
-                        optionKey =>
-                            String(optionKey)
-                                .trim()
-                                .toLowerCase() ===
-                            key.toLowerCase()
-                    );
-
-                if (matchedKey) {
-                    return options[matchedKey];
-                }
-            }
-
-            return null;
-        };
-
-        const getKpiScore = (
-            field,
-            item
-        ) => {
-            const optionConfig =
-                findOptionConfig(
-                    field,
-                    item
-                );
-
-            if (
-                optionConfig &&
-                typeof optionConfig === "object"
-            ) {
-                const optionWeight =
-                    Number(
-                        optionConfig.scoreWeight ??
-                        optionConfig.weight ??
-                        optionConfig.score
-                    );
-
-                if (
-                    Number.isFinite(
-                        optionWeight
-                    )
-                ) {
-                    return optionWeight;
-                }
-            }
-
-            if (
-                item &&
-                typeof item === "object"
-            ) {
-                const itemWeight =
-                    Number(
-                        item.scoreWeight ??
-                        item.weight ??
-                        item.score
-                    );
-
-                if (
-                    Number.isFinite(
-                        itemWeight
-                    )
-                ) {
-                    return itemWeight;
-                }
-            }
-
-            const fieldWeight =
-                Number(field.scoreWeight);
-
-            return Number.isFinite(
-                fieldWeight
-            )
-                ? fieldWeight
-                : -1;
-        };
-
-        const getKpiItems = value => {
-            if (Array.isArray(value)) {
-                return value.filter(item => {
-                    if (
-                        item === undefined ||
-                        item === null
-                    ) {
-                        return false;
-                    }
-
-                    if (
-                        typeof item === "string"
-                    ) {
-                        return item.trim() !== "";
-                    }
-
-                    if (
-                        typeof item === "object"
-                    ) {
-                        return Object.values(item).some(
-                            v =>
-                                v !== undefined &&
-                                v !== null &&
-                                String(v).trim() !== ""
-                        );
-                    }
-
-                    return true;
-                });
-            }
-
-            return [
-                value
-            ];
-        };
-
-        const processKpiValue = (
-            stats,
-            field,
-            value
-        ) => {
-            if (
-                value === undefined ||
-                value === null ||
-                value === ""
-            ) {
-                return;
-            }
-
-            const items =
-                getKpiItems(value);
-
-            for (const item of items) {
-                const score =
-                    getKpiScore(
-                        field,
-                        item
-                    );
-
-                // Mỗi mục KPI là 1 lượt.
-                stats.totalCount += 1;
-
-                stats.kpiCounts[field.id] =
-                    (
-                        stats.kpiCounts[
-                            field.id
-                        ] || 0
-                    ) + 1;
-
-                if (score < 0) {
-                    stats.totalPenalty +=
-                        Math.abs(score);
-                } else if (score > 0) {
-                    stats.totalBonus +=
-                        score;
-                }
-            }
-
-            stats.totalScore =
-                -stats.totalPenalty +
-                stats.totalBonus;
-        };
-
-        // ============================================================
-        // 14. PROCESS RECORD
-        // ============================================================
-
-        const processRecord = recDoc => {
-            const data =
-                recDoc.data() || {};
-
-            const rawEntityId =
-                data.entityId ||
-                data.entityID ||
-                String(recDoc.id)
-                    .split("_")[0];
-
-            const entityId =
-                String(
-                    rawEntityId || ""
-                ).trim();
-
-            if (!entityId) return;
-
-            // CODE trước.
-            let stats =
-                studentStatsMap[
-                    entityId
-                ];
-
-            // UID chỉ fallback dữ liệu cũ.
-            if (!stats) {
-                const student =
-                    homeroomStudents.find(
-                        s =>
-                            s.uid === entityId
-                    );
-
-                if (student) {
-                    stats =
-                        studentStatsMap[
-                            student.code ||
-                            student.uid
-                        ];
-                }
-            }
-
-            if (!stats) return;
-
-            kpiFieldsList.forEach(
-                kpiField => {
-                    const fKey =
-                        kpiField.id;
-
-                    let val =
-                        data[fKey];
-
-                    if (
-                        val === undefined &&
-                        data.changes &&
-                        data.changes[fKey] !== undefined
-                    ) {
-                        val =
-                            data.changes[fKey];
-                    }
-
-                    processKpiValue(
-                        stats,
-                        kpiField,
-                        val
-                    );
-                }
-            );
-        };
-
-        // ============================================================
-        // 15. ĐỌC RECORDS
-        // ============================================================
-
-        for (const mod of studentModules) {
-            const moduleId = mod.id;
-
-            const recordsRef = db
-                .collection("organizations")
-                .doc(orgId)
-                .collection("academicYears")
-                .doc(academicYearId)
-                .collection("modulesData")
-                .doc(moduleId)
-                .collection("records");
-
-            // --------------------------------------------------------
-            // NGÀY
-            // --------------------------------------------------------
-
-            if (mode === "daily") {
-                const dailyPromises =
-                    homeroomStudents.map(
-                        async student => {
-                            const primaryId =
-                                student.code ||
-                                student.uid;
-
-                            const primaryRecordId =
-                                `${primaryId}_${todayStr}`;
-
-                            let recDoc =
-                                await recordsRef
-                                    .doc(
-                                        primaryRecordId
-                                    )
-                                    .get();
-
-                            // Fallback record cũ dùng UID.
-                            if (
-                                !recDoc.exists &&
-                                student.uid &&
-                                student.uid !== student.code
-                            ) {
-                                const oldRecordId =
-                                    `${student.uid}_${todayStr}`;
-
-                                recDoc =
-                                    await recordsRef
-                                        .doc(
-                                            oldRecordId
-                                        )
-                                        .get();
-                            }
-
-                            if (recDoc.exists) {
-                                processRecord(
-                                    recDoc
-                                );
-                            }
-                        }
-                    );
-
-                await Promise.all(
-                    dailyPromises
-                );
-
-            } else {
-                // ----------------------------------------------------
-                // TUẦN / THÁNG
-                // ----------------------------------------------------
-                //
-                // Query cả CODE và UID để không bỏ sót dữ liệu cũ.
-                // ----------------------------------------------------
-
-                const studentIds = [
-                    ...new Set(
-                        homeroomStudents
-                            .flatMap(student => [
-                                student.code,
-                                student.uid
-                            ])
-                            .map(id =>
-                                String(
-                                    id || ""
-                                ).trim()
-                            )
-                            .filter(Boolean)
-                    )
-                ];
-
-                const chunks = [];
-
-                for (
-                    let i = 0;
-                    i < studentIds.length;
-                    i += 30
-                ) {
-                    chunks.push(
-                        studentIds.slice(
-                            i,
-                            i + 30
-                        )
-                    );
-                }
-
-                const queryPromises =
-                    chunks.map(
-                        async ids => {
-                            const snap =
-                                await recordsRef
-                                    .where(
-                                        "entityId",
-                                        "in",
-                                        ids
-                                    )
-                                    .where(
-                                        "date",
-                                        ">=",
-                                        startDateStr
-                                    )
-                                    .where(
-                                        "date",
-                                        "<=",
-                                        endDateStr
-                                    )
-                                    .get();
-
-                            snap.forEach(
-                                recDoc => {
-                                    processRecord(
-                                        recDoc
-                                    );
-                                }
-                            );
-                        }
-                    );
-
-                await Promise.all(
-                    queryPromises
-                );
-            }
-        }
-
-        // ============================================================
-        // 16. TÍNH ĐIỂM THÁNG / XẾP LOẠI
-        // ============================================================
-
-        const processedList =
-            Object.values(
-                studentStatsMap
-            ).map(item => {
-                const totalPenalty =
-                    Number(
-                        item.totalPenalty || 0
-                    );
-
-                const totalBonus =
-                    Number(
-                        item.totalBonus || 0
-                    );
-
-                // ĐIỂM THÁNG:
-                // BasePoint - điểm âm + điểm dương
-                const monthlyScore =
-                    mode === "monthly"
-                        ? (
-                            studentBasePoint -
-                            totalPenalty +
-                            totalBonus
-                        )
-                        : (
-                            -totalPenalty +
-                            totalBonus
-                        );
-
-                let rank = "🟢 Tốt";
-                let badgeStyle =
-                    "background:#d1e7dd;color:#0f5132;";
-
-                if (mode === "monthly") {
-                    const chuadatCount =
-                        Number(
-                            kpiRules.chuadat_count ??
-                            15
-                        );
-
-                    const chuadatScore =
-                        Number(
-                            kpiRules.chuadat_score ??
-                            15
-                        );
-
-                    const datCount =
-                        Number(
-                            kpiRules.dat_count ??
-                            10
-                        );
-
-                    const datScore =
-                        Number(
-                            kpiRules.dat_score ??
-                            10
-                        );
-
-                    const khaCount =
-                        Number(
-                            kpiRules.kha_count ??
-                            5
-                        );
-
-                    const khaScore =
-                        Number(
-                            kpiRules.kha_score ??
-                            5
-                        );
-
-                    // Xếp loại dựa trên mức VI PHẠM:
-                    // - số lượt
-                    // - tổng điểm bị trừ
-                    //
-                    // Không dùng Math.abs(monthlyScore),
-                    // vì điểm cộng không được làm giảm mức vi phạm.
-                    if (
-                        item.totalCount >=
-                            chuadatCount ||
-                        totalPenalty >=
-                            chuadatScore
-                    ) {
-                        rank = "🔴 Chưa đạt";
-                        badgeStyle =
-                            "background:#f8d7da;color:#842029;";
-                    } else if (
-                        item.totalCount >=
-                            datCount ||
-                        totalPenalty >=
-                            datScore
-                    ) {
-                        rank = "🟠 Đạt";
-                        badgeStyle =
-                            "background:#fff3cd;color:#664d03;";
-                    } else if (
-                        item.totalCount >=
-                            khaCount ||
-                        totalPenalty >=
-                            khaScore
-                    ) {
-                        rank = "🔵 Khá";
-                        badgeStyle =
-                            "background:#cff4fc;color:#055160;";
-                    }
-                }
-
-                return {
-                    ...item,
-
-                    totalPenalty,
-                    totalBonus,
-
-                    // Điểm ròng của KPI.
-                    totalScore:
-                        -totalPenalty +
-                        totalBonus,
-
-                    // Điểm cuối tháng.
-                    monthlyScore,
-
-                    rank,
-                    badgeStyle
-                };
-            });
-
-        // ============================================================
-        // 17. RENDER
-        // ============================================================
-
-        if (processedList.length === 0) {
-            tableBody.innerHTML = `
-                <tr>
-                    <td colspan="10" style="
-                        text-align:center;
-                        color:#6c757d;
-                        font-style:italic;
-                    ">
-                        Chưa có dữ liệu vi phạm nào trong lớp chủ nhiệm.
-                    </td>
-                </tr>
-            `;
-            return;
-        }
-
-        let html = "";
-
-        processedList.forEach(item => {
-            html += `
-                <tr style="
-                    border-bottom:1px solid #dee2e6;
-                ">
-                    <td style="
-                        font-family:monospace;
-                        font-weight:bold;
-                        text-align:center;
-                    ">
-                        ${item.code || "--"}
-                    </td>
-
-                    <td>
-                        ${item.name}
-                    </td>
-
-                    <td style="
-                        text-align:center;
-                    ">
-                        <span style="
-                            background:#e9ecef;
-                            padding:2px 6px;
-                            border-radius:4px;
-                            font-size:0.9em;
-                        ">
-                            ${item.className}
-                        </span>
-                    </td>
-            `;
-
-            kpiFieldsList.forEach(
-                field => {
-                    const countVal =
-                        item.kpiCounts[
-                            field.id
-                        ] || 0;
-
-                    html += `
-                        <td style="
-                            text-align:center;
-                        ">
-                            ${
-                                countVal > 0
-                                    ? `
-                                        <span style="
-                                            color:#dc3545;
-                                            font-weight:bold;
-                                        ">
-                                            ${countVal}
-                                        </span>
-                                    `
-                                    : `
-                                        <span style="
-                                            color:#ccc;
-                                        ">
-                                            0
-                                        </span>
-                                    `
-                            }
-                        </td>
-                    `;
-                }
-            );
-
-            if (mode === "monthly") {
-                html += `
-                    <td style="
-                        text-align:center;
-                        font-weight:bold;
-                    ">
-                        ${item.totalCount}
-                    </td>
-
-                    <td style="
-                        text-align:center;
-                        color:#dc3545;
-                        font-weight:bold;
-                    ">
-                        -${item.totalPenalty}
-                    </td>
-
-                    <td style="
-                        text-align:center;
-                        color:#198754;
-                        font-weight:bold;
-                    ">
-                        +${item.totalBonus}
-                    </td>
-
-                    <td style="
-                        text-align:center;
-                        font-weight:bold;
-                        color:${
-                            item.monthlyScore < studentBasePoint
-                                ? "#dc3545"
-                                : "#198754"
-                        };
-                    ">
-                        ${item.monthlyScore}
-                    </td>
-
-                    <td style="
-                        text-align:center;
-                    ">
-                        <span style="
-                            ${item.badgeStyle}
-                            padding:3px 10px;
-                            border-radius:4px;
-                            font-weight:bold;
-                            display:inline-block;
-                        ">
-                            ${item.rank}
-                        </span>
-                    </td>
-                `;
-            } else {
-                html += `
-                    <td style="
-                        text-align:center;
-                        font-weight:bold;
-                        color:#0d6efd;
-                    ">
-                        ${item.totalCount} lượt
-                    </td>
-                `;
-            }
-
-            html += `
-                </tr>
-            `;
-        });
-
-        tableBody.innerHTML = html;
-
-        // ============================================================
-        // 18. CACHE BADGE
-        // ============================================================
-
-        if (badge) {
-            badge.innerText =
-                forceRefresh
-                    ? "🔄 Đã làm mới dữ liệu: " +
-                      new Date().toLocaleTimeString()
-                    : "⚡ Dùng cache: " +
-                      new Date().toLocaleTimeString();
-        }
-
-    } catch (error) {
-        console.error(
-            "Lỗi tải dữ liệu lớp chủ nhiệm:",
-            error
-        );
-
-        tableBody.innerHTML = `
-            <tr>
-                <td colspan="10" style="
-                    text-align:center;
-                    color:red;
-                ">
-                    Lỗi tải dữ liệu lớp chủ nhiệm.
-                    <div style="
-                        margin-top:5px;
-                        font-size:0.85em;
-                    ">
-                        ${error.message || ""}
-                    </div>
-                </td>
-            </tr>
-        `;
-    }
-}
+	async function loadHomeroomClassData(forceRefresh = false) {
+		const tableBody = document.getElementById("emp-homeroom-body-rows");
+		const headerRow = document.getElementById("emp-homeroom-header-row");
+		const classNameSpan = document.getElementById("emp-homeroom-class-name");
+		const modeSelect = document.getElementById("emp-homeroom-mode-select");
+		const badge = document.getElementById("emp-homeroom-cache-badge");
+
+		if (!tableBody) return;
+
+		const orgId = String(window.currentOrgIdGlobal || "").trim();
+
+		if (!orgId) {
+			tableBody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:red;">Chưa xác định được thông tin đơn vị (OrgId).</td></tr>';
+			return;
+		}
+
+		// ============================================================
+		// 1. XÁC ĐỊNH NĂM HỌC
+		// ============================================================
+		let academicYearId = "";
+		const yearsArr = window.currentAcademicYearsGlobal;
+
+		if (Array.isArray(yearsArr) && yearsArr.length > 0) {
+			const lastYearItem = yearsArr[yearsArr.length - 1];
+			academicYearId = String(
+				typeof lastYearItem === "object" && lastYearItem !== null
+					? (lastYearItem.id || lastYearItem.name || lastYearItem.year || "")
+					: lastYearItem
+			).trim();
+		}
+
+		if (!academicYearId) {
+			academicYearId = String(window.currentAcademicYearIdGlobal || "").trim();
+		}
+
+		if (!academicYearId) {
+			tableBody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:red;">Chưa xác định được năm học hiện tại.</td></tr>';
+			return;
+		}
+
+		// ============================================================
+		// 2. USER ĐĂNG NHẬP
+		// ============================================================
+		const authUser = firebase.auth().currentUser;
+		if (!authUser) {
+			tableBody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:red;">Chưa đăng nhập hệ thống.</td></tr>';
+			return;
+		}
+
+		const teacherUid = String(authUser.uid || "").trim();
+		const currentEmail = String(window.currentUserEmailGlobal || authUser.email || "").trim().toLowerCase();
+		const mode = modeSelect?.value || "daily";
+
+		tableBody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:#6c757d;">Đang tải dữ liệu lớp chủ nhiệm theo chế độ ${mode === "monthly" ? "Tháng" : mode === "weekly" ? "Tuần" : "Ngày"}...</td></tr>`;
+
+		try {
+			const db = firebase.firestore();
+
+			// ============================================================
+			// 3. CACHE PHÂN CÔNG LỚP CHỦ NHIỆM
+			// ============================================================
+			window._homeroomAssignmentCache = window._homeroomAssignmentCache || {};
+			const assignmentCacheKey = `${orgId}__${academicYearId}__${teacherUid}`;
+			let assignmentCache = window._homeroomAssignmentCache[assignmentCacheKey];
+
+			let homeroomClasses = [];
+			let teacherDepartments = [];
+
+			if (assignmentCache && !forceRefresh) {
+				homeroomClasses = Array.isArray(assignmentCache.homeroomClasses) ? [...assignmentCache.homeroomClasses] : [];
+				teacherDepartments = Array.isArray(assignmentCache.departments) ? [...assignmentCache.departments] : [];
+			} else {
+				const assignRef = db.collection("organizations").doc(orgId).collection("academicYears").doc(academicYearId).collection("assignments");
+				const allAssigns = await assignRef.get();
+				let assignData = null;
+
+				allAssigns.forEach(d => {
+					const data = d.data() || {};
+					const dataUid = String(data.uid || data.userId || data.memberId || "").trim();
+					const dataEmail = String(data.email || "").trim().toLowerCase();
+
+					if (d.id === teacherUid || dataUid === teacherUid || (currentEmail && dataEmail === currentEmail)) {
+						assignData = data;
+					}
+				});
+
+				if (assignData) {
+					const rawData = assignData.homeroom || assignData.homeroomClasses || assignData.classes || [];
+					let itemsList = typeof rawData === "string" ? rawData.split(",").map(s => s.trim()).filter(Boolean) : (Array.isArray(rawData) ? rawData : []);
+
+					itemsList.forEach(item => {
+						const val = String(item).trim();
+						if (!val) return;
+						if (/\d/.test(val)) {
+							homeroomClasses.push(val);
+						} else {
+							teacherDepartments.push(val);
+						}
+					});
+				}
+
+				assignmentCache = {
+					homeroomClasses: [...homeroomClasses],
+					departments: [...teacherDepartments],
+					cachedAt: Date.now()
+				};
+				window._homeroomAssignmentCache[assignmentCacheKey] = assignmentCache;
+				window.currentTeacherHomerooms = [...homeroomClasses];
+				window.currentTeacherDepartments = [...teacherDepartments];
+			}
+
+			if (homeroomClasses.length === 0) {
+				if (classNameSpan) classNameSpan.innerText = "Không có lớp chủ nhiệm";
+				tableBody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#6c757d;font-style:italic;">Bạn không được phân công chủ nhiệm lớp nào trong năm học này.</td></tr>';
+				return;
+			}
+
+			if (classNameSpan) classNameSpan.innerText = homeroomClasses.join(", ");
+
+			// ============================================================
+			// 4. CACHE USERS
+			// ============================================================
+			window._usersCacheByOrg = window._usersCacheByOrg || {};
+			let usersCache = window._usersCacheByOrg[orgId];
+			let cachedUsersNeedRefresh = !usersCache || !usersCache.users || Object.keys(usersCache.users).length === 0;
+
+			if (!cachedUsersNeedRefresh) {
+				const cachedList = Object.values(usersCache.users);
+				cachedUsersNeedRefresh = cachedList.some(user => user.code === undefined);
+			}
+
+			if (window.cachedUsersMap && Object.keys(window.cachedUsersMap).length > 0) {
+				const globalCachedList = Object.values(window.cachedUsersMap);
+				if (globalCachedList.some(user => user.code === undefined)) {
+					cachedUsersNeedRefresh = true;
+				}
+			}
+
+			if (forceRefresh || cachedUsersNeedRefresh) {
+				const usersSnap = await db.collection("organizations").doc(orgId).collection("users").get();
+				const usersMap = {};
+
+				usersSnap.forEach(uDoc => {
+					const uData = uDoc.data() || {};
+					const code = String(uData.code || uData.memberId || "").trim();
+					const uid = String(uData.uid || uData.id || uDoc.id || "").trim();
+					const fullName = uData.fullName || uData.displayName || uData.name || uDoc.id;
+					const category = String(uData.category || uData.className || "").trim();
+
+					usersMap[uDoc.id] = {
+						id: uDoc.id,
+						uid,
+						code,
+						fullName,
+						category,
+						email: String(uData.email || "").trim().toLowerCase(),
+						role: uData.role || ""
+					};
+				});
+
+				usersCache = { users: usersMap, cachedAt: Date.now() };
+				window._usersCacheByOrg[orgId] = usersCache;
+				window.cachedUsersMap = usersMap;
+			} else {
+				window.cachedUsersMap = usersCache.users;
+			}
+
+			const usersMap = window.cachedUsersMap || {};
+
+			// ============================================================
+			// 5. DANH SÁCH HỌC SINH
+			// ============================================================
+			const homeroomStudents = [];
+			for (const [uId, uInfo] of Object.entries(usersMap)) {
+				if (!uInfo || !uInfo.category) continue;
+				if (!homeroomClasses.includes(String(uInfo.category).trim())) continue;
+
+				const code = String(uInfo.code || "").trim();
+				const uid = String(uInfo.uid || uInfo.id || uId || "").trim();
+
+				homeroomStudents.push({
+					id: code || uid,
+					code,
+					uid,
+					name: uInfo.fullName || uInfo.displayName || uInfo.name || uId,
+					category: String(uInfo.category).trim()
+				});
+			}
+
+			if (homeroomStudents.length === 0) {
+				tableBody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:#6c757d;font-style:italic;">Không tìm thấy học sinh nào thuộc lớp chủ nhiệm (${homeroomClasses.join(", ")}).</td></tr>`;
+				return;
+			}
+
+			// ============================================================
+			// 6. CACHE KPI CONFIG - HỌC SINH
+			// ============================================================
+			window._homeroomKpiConfigCache = window._homeroomKpiConfigCache || {};
+			const kpiCacheKey = `${orgId}__${academicYearId}`;
+			let kpiRules = window._homeroomKpiConfigCache[kpiCacheKey];
+
+			if (!kpiRules || forceRefresh) {
+				const kpiConfigDoc = await db.collection("organizations").doc(orgId).collection("academicYears").doc(academicYearId).collection("KPIconfig").doc("student").get();
+				kpiRules = kpiConfigDoc.exists ? (kpiConfigDoc.data() || {}) : {};
+				window._homeroomKpiConfigCache[kpiCacheKey] = kpiRules;
+			}
+
+			// ============================================================
+			// 7. ĐIỂM GỐC HỌC SINH
+			// ============================================================
+			const basePointRaw = kpiRules.BasePoint ?? kpiRules.basePoint ?? 90;
+			const basePointNumber = Number(basePointRaw);
+			const studentBasePoint = Number.isFinite(basePointNumber) ? basePointNumber : 90;
+
+			// ============================================================
+			// 8. CACHE MODULE STUDENT
+			// ============================================================
+			window._homeroomStudentModulesCache = window._homeroomStudentModulesCache || {};
+			const moduleCacheKey = `${orgId}__${academicYearId}__student`;
+			let cachedModules = window._homeroomStudentModulesCache[moduleCacheKey];
+
+			if (!cachedModules || !Array.isArray(cachedModules.modules) || forceRefresh) {
+				const snap = await db.collection("organizations").doc(orgId).collection("modules").where("targetType", "==", "STUDENT").get();
+				cachedModules = {
+					modules: snap.docs.map(doc => ({ id: doc.id, data: doc.data() || {} })),
+					cachedAt: Date.now()
+				};
+				window._homeroomStudentModulesCache[moduleCacheKey] = cachedModules;
+			}
+
+			const studentModules = cachedModules?.modules || [];
+
+			// ============================================================
+			// 9. KPI FIELDS
+			// ============================================================
+			const kpiFieldsMap = {};
+			studentModules.forEach(mod => {
+				const modData = mod.data || {};
+				const fieldsArr = Array.isArray(modData.fields) ? modData.fields : [];
+
+				fieldsArr.forEach(fObj => {
+					if (fObj && fObj.isKpi && fObj.key) {
+						const rawOptions = fObj.kpiOptions || fObj.options || {};
+						let optionsMap = {};
+
+						if (Array.isArray(rawOptions)) {
+							rawOptions.forEach(opt => {
+								if (!opt) return;
+								const optionKey = String(opt.value ?? opt.key ?? opt.id ?? opt.label ?? opt.name ?? "").trim();
+								if (optionKey) optionsMap[optionKey] = opt;
+							});
+						} else if (rawOptions && typeof rawOptions === "object") {
+							optionsMap = rawOptions;
+						}
+
+						const fieldWeightRaw = Number(fObj.scoreWeight);
+						kpiFieldsMap[fObj.key] = {
+							id: fObj.key,
+							name: fObj.label || fObj.key,
+							scoreWeight: Number.isFinite(fieldWeightRaw) ? fieldWeightRaw : -1,
+							kpiOptions: optionsMap
+						};
+					}
+				});
+			});
+
+			const kpiFieldsList = Object.values(kpiFieldsMap);
+
+			// ============================================================
+			// 11. KHỞI TẠO THỐNG KÊ
+			// ============================================================
+			const studentStatsMap = {};
+			homeroomStudents.forEach(student => {
+				const studentKey = student.code || student.uid;
+				studentStatsMap[studentKey] = {
+					id: studentKey,
+					uid: student.uid,
+					code: student.code,
+					name: student.name,
+					className: student.category,
+					totalCount: 0,
+					totalScore: 0,
+					totalPenalty: 0,
+					totalBonus: 0,
+					kpiCounts: {}
+				};
+			});
+
+			// ============================================================
+			// 12. KHOẢNG THỜI GIAN
+			// ============================================================
+			const formatDateLocal = date => {
+				const y = date.getFullYear();
+				const m = String(date.getMonth() + 1).padStart(2, "0");
+				const d = String(date.getDate()).padStart(2, "0");
+				return `${y}-${m}-${d}`;
+			};
+
+			const now = new Date();
+			const todayStr = formatDateLocal(now);
+			let startDateStr = todayStr;
+			let endDateStr = todayStr;
+
+			if (mode === "weekly") {
+				const dayOfWeek = now.getDay();
+				const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+				const monday = new Date(now);
+				monday.setDate(now.getDate() + diffToMonday);
+				const sunday = new Date(monday);
+				sunday.setDate(monday.getDate() + 6);
+
+				startDateStr = formatDateLocal(monday);
+				endDateStr = formatDateLocal(sunday);
+			} else if (mode === "monthly") {
+				let reportingStartDay = 1;
+				try {
+					const orgDoc = await db.collection("organizations").doc(orgId).get();
+					if (orgDoc.exists) {
+						const orgData = orgDoc.data() || {};
+						const configuredStartDay = orgData?.reportingPeriod?.monthly?.startDay;
+						const parsedStartDay = Number(configuredStartDay);
+						if (Number.isFinite(parsedStartDay) && parsedStartDay >= 1 && parsedStartDay <= 31) {
+							reportingStartDay = Math.floor(parsedStartDay);
+						}
+					}
+				} catch (periodConfigError) {
+					console.warn("Không đọc được cấu hình kỳ báo cáo tháng, dùng ngày 01:", periodConfigError);
+					reportingStartDay = 1;
+				}
+
+				const createClampedDate = (year, monthIndex, day) => {
+					const lastDayOfMonth = new Date(year, monthIndex + 1, 0).getDate();
+					const safeDay = Math.min(Math.max(Number(day) || 1, 1), lastDayOfMonth);
+					return new Date(year, monthIndex, safeDay);
+				};
+
+				let periodStart;
+				if (now.getDate() >= reportingStartDay) {
+					periodStart = createClampedDate(now.getFullYear(), now.getMonth(), reportingStartDay);
+				} else {
+					periodStart = createClampedDate(now.getFullYear(), now.getMonth() - 1, reportingStartDay);
+				}
+
+				const nextPeriodStart = createClampedDate(periodStart.getFullYear(), periodStart.getMonth() + 1, reportingStartDay);
+				const periodEnd = new Date(nextPeriodStart);
+				periodEnd.setDate(periodEnd.getDate() - 1);
+
+				startDateStr = formatDateLocal(periodStart);
+				endDateStr = formatDateLocal(periodEnd);
+			}
+
+			// ============================================================
+			// 13. HÀM PHÂN TÍCH ĐIỂM KPI
+			// ============================================================
+			const normalizeOptionKey = value => {
+				if (value === undefined || value === null) return "";
+				if (typeof value === "object") {
+					return String(value.value ?? value.key ?? value.id ?? value.label ?? value.name ?? "").trim();
+				}
+				return String(value).trim();
+			};
+
+			const findOptionConfig = (field, item) => {
+				const options = field.kpiOptions || {};
+				const candidates = [];
+				if (item && typeof item === "object") {
+					candidates.push(item.value, item.key, item.id, item.label, item.name);
+				} else {
+					candidates.push(item);
+				}
+
+				for (const candidate of candidates) {
+					const key = normalizeOptionKey(candidate);
+					if (!key) continue;
+					if (Object.prototype.hasOwnProperty.call(options, key)) return options[key];
+
+					const matchedKey = Object.keys(options).find(optionKey => String(optionKey).trim().toLowerCase() === key.toLowerCase());
+					if (matchedKey) return options[matchedKey];
+				}
+				return null;
+			};
+
+			const getKpiScore = (field, item) => {
+				const optionConfig = findOptionConfig(field, item);
+				if (optionConfig && typeof optionConfig === "object") {
+					const optionWeight = Number(optionConfig.scoreWeight ?? optionConfig.weight ?? optionConfig.score);
+					if (Number.isFinite(optionWeight)) return optionWeight;
+				}
+				if (item && typeof item === "object") {
+					const itemWeight = Number(item.scoreWeight ?? item.weight ?? item.score);
+					if (Number.isFinite(itemWeight)) return itemWeight;
+				}
+				const fieldWeight = Number(field.scoreWeight);
+				return Number.isFinite(fieldWeight) ? fieldWeight : -1;
+			};
+
+			const getKpiItems = value => {
+				if (Array.isArray(value)) {
+					return value.filter(item => {
+						if (item === undefined || item === null) return false;
+						if (typeof item === "string") return item.trim() !== "";
+						if (typeof item === "object") {
+							return Object.values(item).some(v => v !== undefined && v !== null && String(v).trim() !== "");
+						}
+						return true;
+					});
+				}
+				return [value];
+			};
+
+			const processKpiValue = (stats, field, value) => {
+				if (value === undefined || value === null || value === "") return;
+				const items = getKpiItems(value);
+
+				for (const item of items) {
+					const score = getKpiScore(field, item);
+					stats.totalCount += 1;
+					stats.kpiCounts[field.id] = (stats.kpiCounts[field.id] || 0) + 1;
+
+					if (score < 0) {
+						stats.totalPenalty += Math.abs(score);
+					} else if (score > 0) {
+						stats.totalBonus += score;
+					}
+				}
+				stats.totalScore = -stats.totalPenalty + stats.totalBonus;
+			};
+
+			// ============================================================
+			// 14. PROCESS RECORD
+			// ============================================================
+			const processRecord = recDoc => {
+				const data = recDoc.data() || {};
+				const rawEntityId = data.entityId || data.entityID || String(recDoc.id).split("_")[0];
+				const entityId = String(rawEntityId || "").trim();
+				if (!entityId) return;
+
+				let stats = studentStatsMap[entityId];
+				if (!stats) {
+					const student = homeroomStudents.find(s => s.uid === entityId);
+					if (student) stats = studentStatsMap[student.code || student.uid];
+				}
+				if (!stats) return;
+
+				kpiFieldsList.forEach(kpiField => {
+					const fKey = kpiField.id;
+					let val = data[fKey];
+					if (val === undefined && data.changes && data.changes[fKey] !== undefined) {
+						val = data.changes[fKey];
+					}
+					processKpiValue(stats, kpiField, val);
+				});
+			};
+
+			// ============================================================
+			// 15. ĐỌC RECORDS
+			// ============================================================
+			for (const mod of studentModules) {
+				const moduleId = mod.id;
+				const recordsRef = db.collection("organizations").doc(orgId)
+					.collection("academicYears").doc(academicYearId)
+					.collection("modulesData").doc(moduleId)
+					.collection("records");
+
+				if (mode === "daily") {
+					const dailyPromises = homeroomStudents.map(async student => {
+						const primaryId = student.code || student.uid;
+						const primaryRecordId = `${primaryId}_${todayStr}`;
+						let recDoc = await recordsRef.doc(primaryRecordId).get();
+
+						if (!recDoc.exists && student.uid && student.uid !== student.code) {
+							const oldRecordId = `${student.uid}_${todayStr}`;
+							recDoc = await recordsRef.doc(oldRecordId).get();
+						}
+						if (recDoc.exists) processRecord(recDoc);
+					});
+					await Promise.all(dailyPromises);
+				} else {
+					const studentIds = [...new Set(homeroomStudents.flatMap(s => [s.code, s.uid]).map(id => String(id || "").trim()).filter(Boolean))];
+					const chunks = [];
+					for (let i = 0; i < studentIds.length; i += 30) {
+						chunks.push(studentIds.slice(i, i + 30));
+					}
+
+					const queryPromises = chunks.map(async ids => {
+						const snap = await recordsRef.where("entityId", "in", ids)
+							.where("date", ">=", startDateStr)
+							.where("date", "<=", endDateStr)
+							.get();
+						snap.forEach(recDoc => processRecord(recDoc));
+					});
+					await Promise.all(queryPromises);
+				}
+			}
+
+			// ============================================================
+			// LỌC CÁC TRƯỜNG KPI CÓ VI PHẠM (kpiCounts > 0)
+			// ============================================================
+			const activeKpiFields = kpiFieldsList.filter(field => {
+				return Object.values(studentStatsMap).some(student => (student.kpiCounts[field.id] || 0) > 0);
+			});
+
+			// ============================================================
+			// 16. TÍNH ĐIỂM THÁNG / XẾP LOẠI
+			// ============================================================
+			const processedList = Object.values(studentStatsMap).map(item => {
+				const totalPenalty = Number(item.totalPenalty || 0);
+				const totalBonus = Number(item.totalBonus || 0);
+				const monthlyScore = studentBasePoint - totalPenalty + totalBonus;
+
+				let rank = "🟢 Tốt";
+				let badgeStyle = "background:#d1e7dd;color:#0f5132;";
+
+				if (mode === "monthly") {
+					const chuadatCount = Number(kpiRules.chuadat_count ?? 15);
+					const chuadatScore = Number(kpiRules.chuadat_score ?? 15);
+					const datCount = Number(kpiRules.dat_count ?? 10);
+					const datScore = Number(kpiRules.dat_score ?? 10);
+					const khaCount = Number(kpiRules.kha_count ?? 5);
+					const khaScore = Number(kpiRules.kha_score ?? 5);
+
+					if (item.totalCount >= chuadatCount || totalPenalty >= chuadatScore) {
+						rank = "🔴 Chưa đạt";
+						badgeStyle = "background:#f8d7da;color:#842029;";
+					} else if (item.totalCount >= datCount || totalPenalty >= datScore) {
+						rank = "🟠 Đạt";
+						badgeStyle = "background:#fff3cd;color:#664d03;";
+					} else if (item.totalCount >= khaCount || totalPenalty >= khaScore) {
+						rank = "🔵 Khá";
+						badgeStyle = "background:#cff4fc;color:#055160;";
+					}
+				}
+
+				return {
+					...item,
+					totalPenalty,
+					totalBonus,
+					totalScore: -totalPenalty + totalBonus,
+					monthlyScore,
+					rank,
+					badgeStyle
+				};
+			});
+
+			// ============================================================
+			// 10. DỰNG HEADER (DÙNG activeKpiFields & BỐN CỘT TỔNG HỢP)
+			// ============================================================
+			let headerHtml = `
+				<th style="width:100px;text-align:center;">Mã định danh</th>
+				<th style="width:170px;">Họ và Tên</th>
+				<th style="width:100px;text-align:center;">Lớp</th>
+			`;
+
+			activeKpiFields.forEach(field => {
+				headerHtml += `
+					<th style="text-align:center;min-width:90px;">
+						${field.name}
+					</th>
+				`;
+			});
+
+			headerHtml += `
+				<th style="width:100px;text-align:center;">Tổng lỗi</th>
+				<th style="width:100px;text-align:center;">Điểm trừ</th>
+				<th style="width:100px;text-align:center;">Điểm cộng</th>
+				<th style="width:110px;text-align:center;">Tổng điểm</th>
+			`;
+
+			if (mode === "monthly") {
+				headerHtml += `
+					<th style="width:120px;text-align:center;">Xếp loại Tháng</th>
+				`;
+			}
+
+			if (headerRow) {
+				headerRow.innerHTML = headerHtml;
+			}
+
+			// ============================================================
+			// 17. RENDER BẢNG
+			// ============================================================
+			if (processedList.length === 0) {
+				tableBody.innerHTML = `<tr><td colspan="${3 + activeKpiFields.length + 4 + (mode === 'monthly' ? 1 : 0)}" style="text-align:center;color:#6c757d;font-style:italic;">Chưa có dữ liệu vi phạm nào trong lớp chủ nhiệm.</td></tr>`;
+				return;
+			}
+
+			let html = "";
+			processedList.forEach(item => {
+				html += `
+					<tr style="border-bottom:1px solid #dee2e6;">
+						<td style="font-family:monospace;font-weight:bold;text-align:center;">${item.code || "--"}</td>
+						<td>${item.name}</td>
+						<td style="text-align:center;">
+							<span style="background:#e9ecef;padding:2px 6px;border-radius:4px;font-size:0.9em;">${item.className}</span>
+						</td>
+				`;
+
+				activeKpiFields.forEach(field => {
+					const countVal = item.kpiCounts[field.id] || 0;
+					html += `
+						<td style="text-align:center;">
+							${countVal > 0 ? `<span style="color:#dc3545;font-weight:bold;">${countVal}</span>` : `<span style="color:#ccc;">0</span>`}
+						</td>
+					`;
+				});
+
+				html += `
+					<td style="text-align:center;font-weight:bold;color:${item.totalCount > 0 ? '#dc3545' : '#198754'};">${item.totalCount}</td>
+					<td style="text-align:center;color:${item.totalPenalty > 0 ? '#dc3545' : '#198754'};font-weight:bold;">${item.totalPenalty}</td>
+					<td style="text-align:center;color:${item.totalBonus > 0 ? '#0d6efd' : '#6c757d'};font-weight:bold;">${item.totalBonus}</td>
+					<td style="text-align:center;font-weight:bold;color:${item.monthlyScore < studentBasePoint ? '#dc3545' : '#198754'};">${item.monthlyScore}</td>
+				`;
+
+				if (mode === "monthly") {
+					html += `
+						<td style="text-align:center;">
+							<span style="${item.badgeStyle}padding:3px 10px;border-radius:4px;font-weight:bold;display:inline-block;">${item.rank}</span>
+						</td>
+					`;
+				}
+
+				html += `</tr>`;
+			});
+
+			tableBody.innerHTML = html;
+
+			if (badge) {
+				badge.innerText = forceRefresh
+					? "🔄 Đã làm mới dữ liệu: " + new Date().toLocaleTimeString()
+					: "⚡ Dùng cache: " + new Date().toLocaleTimeString();
+			}
+
+		} catch (error) {
+			console.error("Lỗi tải dữ liệu lớp chủ nhiệm:", error);
+			tableBody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:red;">Lỗi tải dữ liệu lớp chủ nhiệm.<div style="margin-top:5px;font-size:0.85em;">${error.message || ""}</div></td></tr>`;
+		}
+	}
+
 
 async function exportHomeroomMonthlyWord() {
     const btn = document.querySelector(
@@ -25106,1301 +24091,700 @@ function printEmployeeIndividualAuditSheet() {
 
 	
 	//	THẺ 5
-async function loadDepartmentData(forceRefresh = false) {
-	const tableBody = document.getElementById("emp-dept-body-rows");
-	const headerRow = document.getElementById("emp-dept-header-row");
+	async function loadDepartmentData(forceRefresh = false) {
+		const tableBody = document.getElementById("emp-dept-body-rows");
+		const headerRow = document.getElementById("emp-dept-header-row");
 
-	if (!tableBody) return;
+		if (!tableBody) return;
 
-	const orgId = window.currentOrgIdGlobal;
+		const orgId = window.currentOrgIdGlobal;
 
-	if (!orgId) {
-		tableBody.innerHTML =
-			'<tr><td colspan="10" style="text-align: center; color: red;">Chưa xác định được thông tin đơn vị (OrgId).</td></tr>';
-		return;
-	}
-
-	// =========================================================
-	// 1. XÁC ĐỊNH NĂM HỌC
-	// =========================================================
-	let academicYearId = "";
-	const yearsArr = window.currentAcademicYearsGlobal;
-
-	if (Array.isArray(yearsArr) && yearsArr.length > 0) {
-		const lastYearItem = yearsArr[yearsArr.length - 1];
-
-		academicYearId = String(
-			typeof lastYearItem === "object" && lastYearItem !== null
-				? (
-					lastYearItem.id ||
-					lastYearItem.name ||
-					lastYearItem.year ||
-					""
-				)
-				: lastYearItem
-		).trim();
-	} else if (window.currentAcademicYearIdGlobal) {
-		academicYearId = String(
-			window.currentAcademicYearIdGlobal
-		).trim();
-	}
-
-	if (!academicYearId) {
-		tableBody.innerHTML =
-			'<tr><td colspan="10" style="text-align: center; color: red;">Chưa xác định được năm học hiện tại.</td></tr>';
-		return;
-	}
-
-	// =========================================================
-	// 2. XÁC ĐỊNH TÀI KHOẢN ĐANG ĐĂNG NHẬP
-	// =========================================================
-	const authUser = firebase.auth().currentUser;
-
-	if (!authUser) {
-		tableBody.innerHTML =
-			'<tr><td colspan="10" style="text-align: center; color: red;">Chưa đăng nhập hệ thống.</td></tr>';
-		return;
-	}
-
-	const currentUid = String(authUser.uid || "").trim();
-
-	const currentEmail = String(
-		window.currentUserEmailGlobal ||
-		authUser.email ||
-		""
-	).trim().toLowerCase();
-
-	tableBody.innerHTML =
-		'<tr><td colspan="10" style="text-align: center; color: #6c757d;">Đang tải dữ liệu tổ chuyên môn...</td></tr>';
-
-	try {
-		const db = firebase.firestore();
-
-		// =====================================================
-		// 3. TẢI CACHE USERS
-		//    CODE là mã định danh chính.
-		//    UID chỉ dùng để tương thích dữ liệu cũ.
-		// =====================================================
-		let cachedUsers = window.cachedUsersMap || {};
-		const cachedUserList = Object.values(cachedUsers);
-
-		const cacheNeedsCodeRefresh =
-			cachedUserList.length === 0 ||
-			cachedUserList.some(user =>
-				user.code === undefined
-			);
-
-		if (
-			!window.cachedUsersMap ||
-			Object.keys(window.cachedUsersMap).length === 0 ||
-			forceRefresh ||
-			cacheNeedsCodeRefresh
-		) {
-			const usersSnap = await db
-				.collection("organizations")
-				.doc(orgId)
-				.collection("users")
-				.get();
-
-			window.cachedUsersMap = {};
-
-			usersSnap.forEach(uDoc => {
-				const uData = uDoc.data() || {};
-
-				window.cachedUsersMap[uDoc.id] = {
-					uid: String(
-						uData.uid ||
-						uDoc.id ||
-						""
-					).trim(),
-
-					code: String(
-						uData.code ||
-						uData.memberId ||
-						""
-					).trim(),
-
-					fullName:
-						uData.fullName ||
-						uData.displayName ||
-						uData.name ||
-						uDoc.id,
-
-					category: String(
-						uData.category ||
-						""
-					).trim(),
-
-					email: String(
-						uData.email ||
-						""
-					).trim().toLowerCase(),
-
-					role: uData.role || ""
-				};
-			});
-		}
-
-		cachedUsers = window.cachedUsersMap || {};
-
-		// =====================================================
-		// 4. TÌM USER ĐANG ĐĂNG NHẬP
-		// =====================================================
-		let currentUserInfo = null;
-
-		for (const [uId, uInfo] of Object.entries(cachedUsers)) {
-			const cachedUid = String(
-				uInfo.uid ||
-				uId ||
-				""
-			).trim();
-
-			const cachedEmail = String(
-				uInfo.email ||
-				""
-			).trim().toLowerCase();
-
-			if (
-				(currentUid && cachedUid === currentUid) ||
-				(currentEmail && cachedEmail === currentEmail)
-			) {
-				currentUserInfo = {
-					...uInfo,
-					_mapId: uId
-				};
-				break;
-			}
-		}
-
-		// -----------------------------------------------------
-		// 4.1. Fallback Firestore theo UID
-		// -----------------------------------------------------
-		if (!currentUserInfo && currentUid) {
-			const uidSnap = await db
-				.collection("organizations")
-				.doc(orgId)
-				.collection("users")
-				.where("uid", "==", currentUid)
-				.limit(1)
-				.get();
-
-			if (!uidSnap.empty) {
-				const uDoc = uidSnap.docs[0];
-				const uData = uDoc.data() || {};
-
-				currentUserInfo = {
-					uid: String(
-						uData.uid ||
-						uDoc.id ||
-						currentUid
-					).trim(),
-
-					code: String(
-						uData.code ||
-						uData.memberId ||
-						""
-					).trim(),
-
-					fullName:
-						uData.fullName ||
-						uData.displayName ||
-						uData.name ||
-						uData.email ||
-						currentEmail,
-
-					category: String(
-						uData.category ||
-						""
-					).trim(),
-
-					email: String(
-						uData.email ||
-						currentEmail ||
-						""
-					).trim().toLowerCase(),
-
-					role: uData.role || "",
-					_mapId: uDoc.id
-				};
-			}
-		}
-
-		// -----------------------------------------------------
-		// 4.2. Fallback Firestore theo email
-		// -----------------------------------------------------
-		if (!currentUserInfo && currentEmail) {
-			const emailSnap = await db
-				.collection("organizations")
-				.doc(orgId)
-				.collection("users")
-				.where("email", "==", currentEmail)
-				.limit(1)
-				.get();
-
-			if (!emailSnap.empty) {
-				const uDoc = emailSnap.docs[0];
-				const uData = uDoc.data() || {};
-
-				currentUserInfo = {
-					uid: String(
-						uData.uid ||
-						uDoc.id ||
-						currentUid
-					).trim(),
-
-					code: String(
-						uData.code ||
-						uData.memberId ||
-						""
-					).trim(),
-
-					fullName:
-						uData.fullName ||
-						uData.displayName ||
-						uData.name ||
-						uData.email ||
-						currentEmail,
-
-					category: String(
-						uData.category ||
-						""
-					).trim(),
-
-					email: String(
-						uData.email ||
-						currentEmail ||
-						""
-					).trim().toLowerCase(),
-
-					role: uData.role || "",
-					_mapId: uDoc.id
-				};
-			}
-		}
-
-		if (currentUserInfo) {
-			window.cachedUsersMap[
-				currentUserInfo._mapId ||
-				currentUserInfo.uid
-			] = {
-				uid: currentUserInfo.uid,
-				code: currentUserInfo.code || "",
-				fullName: currentUserInfo.fullName,
-				category: currentUserInfo.category,
-				email: currentUserInfo.email,
-				role: currentUserInfo.role
-			};
-		}
-
-		// =====================================================
-		// 5. XÁC ĐỊNH CATEGORY / TỔ CHUYÊN MÔN
-		// =====================================================
-		let myCategory = String(
-			currentUserInfo?.category ||
-			""
-		).trim();
-
-		if (
-			!myCategory &&
-			Array.isArray(window.currentTeacherDepartments) &&
-			window.currentTeacherDepartments.length > 0
-		) {
-			myCategory = String(
-				window.currentTeacherDepartments[0] ||
-				""
-			).trim();
-		}
-
-		if (!currentUserInfo && !myCategory) {
+		if (!orgId) {
 			tableBody.innerHTML =
-				'<tr><td colspan="10" style="text-align: center; color: red;">Không tìm thấy thông tin tài khoản của bạn trong danh sách người dùng.</td></tr>';
+				'<tr><td colspan="10" style="text-align: center; color: red;">Chưa xác định được thông tin đơn vị (OrgId).</td></tr>';
 			return;
 		}
 
-		if (!myCategory) {
-			myCategory = "Chưa xác định";
+		// =========================================================
+		// 1. XÁC ĐỊNH NĂM HỌC
+		// =========================================================
+		let academicYearId = "";
+		const yearsArr = window.currentAcademicYearsGlobal;
+
+		if (Array.isArray(yearsArr) && yearsArr.length > 0) {
+			const lastYearItem = yearsArr[yearsArr.length - 1];
+
+			academicYearId = String(
+				typeof lastYearItem === "object" && lastYearItem !== null
+					? (
+						lastYearItem.id ||
+						lastYearItem.name ||
+						lastYearItem.year ||
+						""
+					)
+					: lastYearItem
+			).trim();
+		} else if (window.currentAcademicYearIdGlobal) {
+			academicYearId = String(
+				window.currentAcademicYearIdGlobal
+			).trim();
 		}
 
-		// =====================================================
-		// 6. LẤY THÀNH VIÊN TRONG TỔ
-		// =====================================================
-		const normalizedMyCategory = myCategory.toLowerCase().trim();
-		const departmentColleagues = [];
+		if (!academicYearId) {
+			tableBody.innerHTML =
+				'<tr><td colspan="10" style="text-align: center; color: red;">Chưa xác định được năm học hiện tại.</td></tr>';
+			return;
+		}
 
-		for (const [uId, uInfo] of Object.entries(
-			window.cachedUsersMap || {}
-		)) {
-			const userUid = String(
-				uInfo.uid ||
-				uId ||
-				""
-			).trim();
+		// =========================================================
+		// 2. XÁC ĐỊNH TÀI KHOẢN ĐANG ĐĂNG NHẬP
+		// =========================================================
+		const authUser = firebase.auth().currentUser;
 
-			const userCode = String(
-				uInfo.code ||
-				""
-			).trim();
+		if (!authUser) {
+			tableBody.innerHTML =
+				'<tr><td colspan="10" style="text-align: center; color: red;">Chưa đăng nhập hệ thống.</td></tr>';
+			return;
+		}
 
-			const userEmail = String(
-				uInfo.email ||
-				""
-			).trim().toLowerCase();
+		const currentUid = String(authUser.uid || "").trim();
 
-			const userCategory = String(
-				uInfo.category ||
-				""
-			).trim();
+		const currentEmail = String(
+			window.currentUserEmailGlobal ||
+			authUser.email ||
+			""
+		).trim().toLowerCase();
 
-			const isCurrentUser =
-				(currentUid && userUid === currentUid) ||
-				(currentEmail && userEmail === currentEmail);
+		tableBody.innerHTML =
+			'<tr><td colspan="10" style="text-align: center; color: #6c757d;">Đang tải dữ liệu tổ chuyên môn...</td></tr>';
 
-			const isSameDepartment =
-				normalizedMyCategory !== "chưa xác định" &&
-				userCategory.toLowerCase().trim() ===
-				normalizedMyCategory;
+		try {
+			const db = firebase.firestore();
 
-			if (isSameDepartment || isCurrentUser) {
-				departmentColleagues.push({
-					id: userCode || userUid || uId,
-					code: userCode,
-					uid: userUid,
-					email: userEmail,
-					name:
-						uInfo.fullName ||
-						uInfo.email ||
-						userCode ||
-						userUid ||
-						uId,
-					department:
-						userCategory ||
-						myCategory,
-					isCurrentUser
+			// =====================================================
+			// 3. TẢI CACHE USERS
+			// =====================================================
+			let cachedUsers = window.cachedUsersMap || {};
+			const cachedUserList = Object.values(cachedUsers);
+
+			const cacheNeedsCodeRefresh =
+				cachedUserList.length === 0 ||
+				cachedUserList.some(user => user.code === undefined);
+
+			if (
+				!window.cachedUsersMap ||
+				Object.keys(window.cachedUsersMap).length === 0 ||
+				forceRefresh ||
+				cacheNeedsCodeRefresh
+			) {
+				const usersSnap = await db
+					.collection("organizations")
+					.doc(orgId)
+					.collection("users")
+					.get();
+
+				window.cachedUsersMap = {};
+
+				usersSnap.forEach(uDoc => {
+					const uData = uDoc.data() || {};
+
+					window.cachedUsersMap[uDoc.id] = {
+						uid: String(uData.uid || uDoc.id || "").trim(),
+						code: String(uData.code || uData.memberId || "").trim(),
+						fullName: uData.fullName || uData.displayName || uData.name || uDoc.id,
+						category: String(uData.category || "").trim(),
+						email: String(uData.email || "").trim().toLowerCase(),
+						role: uData.role || ""
+					};
 				});
 			}
-		}
 
-		// Đảm bảo user hiện tại luôn có trong danh sách.
-		if (currentUserInfo) {
-			const currentCode = String(
-				currentUserInfo.code ||
-				currentUserInfo.memberId ||
-				""
-			).trim();
+			cachedUsers = window.cachedUsersMap || {};
 
-			const alreadyExists = departmentColleagues.some(item => {
-				const itemCode = String(
-					item.code ||
-					""
-				).trim();
+			// =====================================================
+			// 4. TÌM USER ĐANG ĐĂNG NHẬP
+			// =====================================================
+			let currentUserInfo = null;
 
-				const itemUid = String(
-					item.uid ||
-					item.id ||
-					""
-				).trim();
+			for (const [uId, uInfo] of Object.entries(cachedUsers)) {
+				const cachedUid = String(uInfo.uid || uId || "").trim();
+				const cachedEmail = String(uInfo.email || "").trim().toLowerCase();
 
-				return (
-					(currentCode && itemCode === currentCode) ||
-					(!currentCode && currentUid && itemUid === currentUid)
-				);
+				if (
+					(currentUid && cachedUid === currentUid) ||
+					(currentEmail && cachedEmail === currentEmail)
+				) {
+					currentUserInfo = { ...uInfo, _mapId: uId };
+					break;
+				}
+			}
+
+			if (!currentUserInfo && currentUid) {
+				const uidSnap = await db
+					.collection("organizations")
+					.doc(orgId)
+					.collection("users")
+					.where("uid", "==", currentUid)
+					.limit(1)
+					.get();
+
+				if (!uidSnap.empty) {
+					const uDoc = uidSnap.docs[0];
+					const uData = uDoc.data() || {};
+					currentUserInfo = {
+						uid: String(uData.uid || uDoc.id || currentUid).trim(),
+						code: String(uData.code || uData.memberId || "").trim(),
+						fullName: uData.fullName || uData.displayName || uData.name || uData.email || currentEmail,
+						category: String(uData.category || "").trim(),
+						email: String(uData.email || currentEmail || "").trim().toLowerCase(),
+						role: uData.role || "",
+						_mapId: uDoc.id
+					};
+				}
+			}
+
+			if (!currentUserInfo && currentEmail) {
+				const emailSnap = await db
+					.collection("organizations")
+					.doc(orgId)
+					.collection("users")
+					.where("email", "==", currentEmail)
+					.limit(1)
+					.get();
+
+				if (!emailSnap.empty) {
+					const uDoc = emailSnap.docs[0];
+					const uData = uDoc.data() || {};
+					currentUserInfo = {
+						uid: String(uData.uid || uDoc.id || currentUid).trim(),
+						code: String(uData.code || uData.memberId || "").trim(),
+						fullName: uData.fullName || uData.displayName || uData.name || uData.email || currentEmail,
+						category: String(uData.category || "").trim(),
+						email: String(uData.email || currentEmail || "").trim().toLowerCase(),
+						role: uData.role || "",
+						_mapId: uDoc.id
+					};
+				}
+			}
+
+			if (currentUserInfo) {
+				window.cachedUsersMap[currentUserInfo._mapId || currentUserInfo.uid] = {
+					uid: currentUserInfo.uid,
+					code: currentUserInfo.code || "",
+					fullName: currentUserInfo.fullName,
+					category: currentUserInfo.category,
+					email: currentUserInfo.email,
+					role: currentUserInfo.role
+				};
+			}
+
+			// =====================================================
+			// 5. XÁC ĐỊNH CATEGORY / TỔ CHUYÊN MÔN
+			// =====================================================
+			let myCategory = String(currentUserInfo?.category || "").trim();
+
+			if (
+				!myCategory &&
+				Array.isArray(window.currentTeacherDepartments) &&
+				window.currentTeacherDepartments.length > 0
+			) {
+				myCategory = String(window.currentTeacherDepartments[0] || "").trim();
+			}
+
+			if (!currentUserInfo && !myCategory) {
+				tableBody.innerHTML =
+					'<tr><td colspan="10" style="text-align: center; color: red;">Không tìm thấy thông tin tài khoản của bạn trong danh sách người dùng.</td></tr>';
+				return;
+			}
+
+			if (!myCategory) {
+				myCategory = "Chưa xác định";
+			}
+
+			// =====================================================
+			// 6. LẤY THÀNH VIÊN TRONG TỔ
+			// =====================================================
+			const normalizedMyCategory = myCategory.toLowerCase().trim();
+			const departmentColleagues = [];
+
+			for (const [uId, uInfo] of Object.entries(window.cachedUsersMap || {})) {
+				const userUid = String(uInfo.uid || uId || "").trim();
+				const userCode = String(uInfo.code || "").trim();
+				const userEmail = String(uInfo.email || "").trim().toLowerCase();
+				const userCategory = String(uInfo.category || "").trim();
+
+				const isCurrentUser =
+					(currentUid && userUid === currentUid) ||
+					(currentEmail && userEmail === currentEmail);
+
+				const isSameDepartment =
+					normalizedMyCategory !== "chưa xác định" &&
+					userCategory.toLowerCase().trim() === normalizedMyCategory;
+
+				if (isSameDepartment || isCurrentUser) {
+					departmentColleagues.push({
+						id: userCode || userUid || uId,
+						code: userCode,
+						uid: userUid,
+						email: userEmail,
+						name: uInfo.fullName || uInfo.email || userCode || userUid || uId,
+						department: userCategory || myCategory,
+						isCurrentUser
+					});
+				}
+			}
+
+			if (currentUserInfo) {
+				const currentCode = String(currentUserInfo.code || currentUserInfo.memberId || "").trim();
+				const alreadyExists = departmentColleagues.some(item => {
+					const itemCode = String(item.code || "").trim();
+					const itemUid = String(item.uid || item.id || "").trim();
+					return (
+						(currentCode && itemCode === currentCode) ||
+						(!currentCode && currentUid && itemUid === currentUid)
+					);
+				});
+
+				if (!alreadyExists) {
+					departmentColleagues.unshift({
+						id: currentCode || currentUserInfo.uid || currentUid,
+						code: currentCode,
+						uid: currentUserInfo.uid || currentUid,
+						email: currentUserInfo.email || currentEmail,
+						name: currentUserInfo.fullName || currentUserInfo.email || currentCode || currentUid,
+						department: currentUserInfo.category || myCategory || "Chưa xác định",
+						isCurrentUser: true
+					});
+				}
+			}
+
+			const uniqueMap = {};
+			departmentColleagues.forEach(item => {
+				const key = String(item.code || "").trim() || `uid:${String(item.uid || "").trim()}`;
+				if (key && !uniqueMap[key]) {
+					uniqueMap[key] = item;
+				}
 			});
 
-			if (!alreadyExists) {
-				departmentColleagues.unshift({
-					id: currentCode || currentUserInfo.uid || currentUid,
-					code: currentCode,
-					uid: currentUserInfo.uid || currentUid,
-					email: currentUserInfo.email || currentEmail,
-					name:
-						currentUserInfo.fullName ||
-						currentUserInfo.email ||
-						currentCode ||
-						currentUid,
-					department:
-						currentUserInfo.category ||
-						myCategory ||
-						"Chưa xác định",
-					isCurrentUser: true
+			const uniqueDepartmentColleagues = Object.values(uniqueMap);
+
+			// =====================================================
+			// 7. LẤY CÁC MODULE DÀNH CHO GIÁO VIÊN / NHÂN SỰ
+			// =====================================================
+			const modulesSnap = await db
+				.collection("organizations")
+				.doc(orgId)
+				.collection("modules")
+				.where("targetType", "in", ["TEACHER", "EMPLOYEE"])
+				.get();
+
+			// =====================================================
+			// 8. LẤY TOÀN BỘ KPI FIELD
+			// =====================================================
+			const kpiFieldsMap = {};
+
+			modulesSnap.forEach(modDoc => {
+				const modData = modDoc.data() || {};
+				const fieldsArr = Array.isArray(modData.fields) ? modData.fields : [];
+
+				fieldsArr.forEach(fObj => {
+					if (!fObj || !fObj.isKpi || !fObj.key) return;
+
+					const options = fObj.kpiOptions || fObj.options || {};
+					kpiFieldsMap[fObj.key] = {
+						id: fObj.key,
+						name: fObj.label || fObj.name || fObj.key,
+						scoreWeight: Number(fObj.scoreWeight ?? -1),
+						kpiWeekly: fObj.kpiWeekly,
+						kpiMonthly: fObj.kpiMonthly,
+						kpiOptions: options,
+						options
+					};
 				});
-			}
-		}
+			});
 
-		// Loại bỏ trùng: CODE trước, UID là fallback.
-		const uniqueMap = {};
+			const kpiFieldsList = Object.values(kpiFieldsMap);
 
-		departmentColleagues.forEach(item => {
-			const key =
-				String(item.code || "").trim() ||
-				`uid:${String(item.uid || "").trim()}`;
+			// =====================================================
+			// 9. LẤY KPI CONFIG NHÓM TEACHER
+			// =====================================================
+			let kpiRules = {};
+			try {
+				const kpiConfigRef = db
+					.collection("organizations")
+					.doc(orgId)
+					.collection("academicYears")
+					.doc(academicYearId)
+					.collection("KPIconfig")
+					.doc("teacher");
 
-			if (key && !uniqueMap[key]) {
-				uniqueMap[key] = item;
-			}
-		});
-
-		const uniqueDepartmentColleagues =
-			Object.values(uniqueMap);
-
-		// =====================================================
-		// 7. LẤY CÁC MODULE DÀNH CHO GIÁO VIÊN / NHÂN SỰ
-		// =====================================================
-		const modulesSnap = await db
-			.collection("organizations")
-			.doc(orgId)
-			.collection("modules")
-			.where(
-				"targetType",
-				"in",
-				["TEACHER", "EMPLOYEE"]
-			)
-			.get();
-
-		// =====================================================
-		// 8. LẤY TOÀN BỘ KPI FIELD
-		//    Giữ cả kpiOptions để tính điểm âm/dương giống
-		//    phần Tổng hợp tháng của Admin.
-		// =====================================================
-		const kpiFieldsMap = {};
-
-		modulesSnap.forEach(modDoc => {
-			const modData = modDoc.data() || {};
-
-			const fieldsArr =
-				Array.isArray(modData.fields)
-					? modData.fields
-					: [];
-
-			fieldsArr.forEach(fObj => {
-				if (
-					!fObj ||
-					!fObj.isKpi ||
-					!fObj.key
-				) {
-					return;
+				const kpiConfigSnap = await kpiConfigRef.get();
+				if (kpiConfigSnap.exists) {
+					kpiRules = kpiConfigSnap.data() || {};
 				}
+			} catch (configError) {
+				console.warn("Không đọc được KPIconfig/teacher:", configError);
+			}
 
-				const options =
-					fObj.kpiOptions ||
-					fObj.options ||
-					{};
+			const basePointRaw = Number(kpiRules.BasePoint ?? kpiRules.basePoint ?? 90);
+			const basePoint = Number.isFinite(basePointRaw) ? basePointRaw : 90;
 
-				kpiFieldsMap[fObj.key] = {
-					id: fObj.key,
-					name:
-						fObj.label ||
-						fObj.name ||
-						fObj.key,
-					scoreWeight: Number(
-						fObj.scoreWeight ?? -1
-					),
-					kpiWeekly:
-						fObj.kpiWeekly,
-					kpiMonthly:
-						fObj.kpiMonthly,
-					kpiOptions: options,
-					options
+			// =====================================================
+			// 10. XÁC ĐỊNH KHOẢNG THỜI GIAN THÁNG HIỆN TẠI
+			// =====================================================
+			const now = new Date();
+			let reportingStartDay = 1;
+
+			try {
+				const orgConfigSnap = await db.collection("organizations").doc(orgId).get();
+				const orgConfigData = orgConfigSnap.exists ? (orgConfigSnap.data() || {}) : {};
+				const configuredStartDay = orgConfigData?.reportingPeriod?.monthly?.startDay;
+				const parsedStartDay = Number(configuredStartDay);
+
+				if (Number.isFinite(parsedStartDay) && parsedStartDay >= 1 && parsedStartDay <= 31) {
+					reportingStartDay = Math.floor(parsedStartDay);
+				}
+			} catch (periodError) {
+				console.warn("Không đọc được cấu hình kỳ báo cáo tháng, dùng ngày 1:", periodError);
+			}
+
+			let periodStartDate;
+			let periodEndExclusiveDate;
+
+			if (reportingStartDay === 1) {
+				periodStartDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+				periodEndExclusiveDate = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+			} else {
+				const candidateStartThisMonth = new Date(now.getFullYear(), now.getMonth(), reportingStartDay, 0, 0, 0, 0);
+				if (now >= candidateStartThisMonth) {
+					periodStartDate = candidateStartThisMonth;
+				} else {
+					periodStartDate = new Date(now.getFullYear(), now.getMonth() - 1, reportingStartDay, 0, 0, 0, 0);
+				}
+				periodEndExclusiveDate = new Date(periodStartDate);
+				periodEndExclusiveDate.setMonth(periodEndExclusiveDate.getMonth() + 1);
+			}
+
+			const monthStart = periodStartDate;
+			const nextMonthStart = periodEndExclusiveDate;
+
+			const getRecordDate = data => {
+				const candidates = [
+					data.time, data.timestamp, data.createdAt,
+					data.updatedAt, data.date, data.recordDate, data.createdDate
+				];
+				for (const value of candidates) {
+					if (!value) continue;
+					try {
+						if (value && typeof value.toDate === "function") {
+							const d = value.toDate();
+							if (!Number.isNaN(d.getTime())) return d;
+						}
+						if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+						const d = new Date(value);
+						if (!Number.isNaN(d.getTime())) return d;
+					} catch (_) {}
+				}
+				return null;
+			};
+
+			const isInReportingPeriod = data => {
+				const recordDate = getRecordDate(data);
+				if (!recordDate) return true;
+				return recordDate >= monthStart && recordDate < nextMonthStart;
+			};
+
+			// =====================================================
+			// 11. HÀM TÌM USER THEO ENTITY ID
+			// =====================================================
+			const colleagueByCode = {};
+			const colleagueByUid = {};
+
+			uniqueDepartmentColleagues.forEach(colleague => {
+				const code = String(colleague.code || "").trim();
+				const uid = String(colleague.uid || "").trim();
+				if (code) colleagueByCode[code] = colleague;
+				if (uid) colleagueByUid[uid] = colleague;
+			});
+
+			const resolveColleague = entityId => {
+				const key = String(entityId || "").trim();
+				if (!key) return null;
+				return colleagueByCode[key] || colleagueByUid[key] || null;
+			};
+
+			// =====================================================
+			// 12. KHỞI TẠO STATS
+			// =====================================================
+			const statsMap = {};
+
+			uniqueDepartmentColleagues.forEach(c => {
+				const primaryKey = String(c.code || "").trim() || String(c.uid || "").trim();
+				if (!primaryKey) return;
+
+				statsMap[primaryKey] = {
+					id: primaryKey,
+					code: c.code || "",
+					uid: c.uid || "",
+					name: c.name,
+					department: c.department,
+					totalErrors: 0,
+					totalPenalty: 0,
+					totalBonus: 0,
+					negativeCount: 0,
+					positiveCount: 0,
+					kpiCounts: {},
+					negativeWeeks: new Set()
 				};
 			});
-		});
 
-		const kpiFieldsList =
-			Object.values(kpiFieldsMap);
-
-		// =====================================================
-		// 9. LẤY KPI CONFIG NHÓM TEACHER
-		// =====================================================
-		let kpiRules = {};
-
-		try {
-			const kpiConfigRef = db
-				.collection("organizations")
-				.doc(orgId)
-				.collection("academicYears")
-				.doc(academicYearId)
-				.collection("KPIconfig")
-				.doc("teacher");
-
-			const kpiConfigSnap =
-				await kpiConfigRef.get();
-
-			if (kpiConfigSnap.exists) {
-				kpiRules = kpiConfigSnap.data() || {};
-			}
-		} catch (configError) {
-			console.warn(
-				"Không đọc được KPIconfig/teacher:",
-				configError
-			);
-		}
-
-		const basePointRaw = Number(
-			kpiRules.BasePoint ??
-			kpiRules.basePoint ??
-			90
-		);
-
-		const basePoint =
-			Number.isFinite(basePointRaw)
-				? basePointRaw
-				: 90;
-
-		// =====================================================
-		// 10. XÁC ĐỊNH KHOẢNG THỜI GIAN THÁNG HIỆN TẠI
-		//     Cấu trúc theo Tổng hợp tháng Admin.
-		// =====================================================
-		const now = new Date();
-
-		// Đọc cấu hình kỳ báo cáo tháng trực tiếp từ tổ chức.
-		// startDay = 21 => kỳ hiện tại: 21 tháng trước -> 20 tháng này.
-		let reportingStartDay = 1;
-
-		try {
-			const orgConfigSnap = await db
-				.collection("organizations")
-				.doc(orgId)
-				.get();
-
-			const orgConfigData = orgConfigSnap.exists
-				? (orgConfigSnap.data() || {})
-				: {};
-
-			const configuredStartDay =
-				orgConfigData?.reportingPeriod?.monthly?.startDay;
-
-			const parsedStartDay = Number(configuredStartDay);
-
-			if (
-				Number.isFinite(parsedStartDay) &&
-				parsedStartDay >= 1 &&
-				parsedStartDay <= 31
-			) {
-				reportingStartDay = Math.floor(parsedStartDay);
-			}
-		} catch (periodError) {
-			console.warn(
-				"Không đọc được cấu hình kỳ báo cáo tháng, dùng ngày 1:",
-				periodError
-			);
-		}
-
-		let periodStartDate;
-		let periodEndExclusiveDate;
-
-		if (reportingStartDay === 1) {
-			periodStartDate = new Date(
-				now.getFullYear(),
-				now.getMonth(),
-				1,
-				0,
-				0,
-				0,
-				0
-			);
-
-			periodEndExclusiveDate = new Date(
-				now.getFullYear(),
-				now.getMonth() + 1,
-				1,
-				0,
-				0,
-				0,
-				0
-			);
-		} else {
-			// Kỳ được đặt tên theo tháng kết thúc.
-			// Ví dụ ngày bắt đầu = 21, tháng hiện tại = 10/2026:
-			// 21/09/2026 -> 20/10/2026.
-			const candidateStartThisMonth = new Date(
-				now.getFullYear(),
-				now.getMonth(),
-				reportingStartDay,
-				0,
-				0,
-				0,
-				0
-			);
-
-			if (now >= candidateStartThisMonth) {
-				periodStartDate = candidateStartThisMonth;
-			} else {
-				periodStartDate = new Date(
-					now.getFullYear(),
-					now.getMonth() - 1,
-					reportingStartDay,
-					0,
-					0,
-					0,
-					0
-				);
-			}
-
-			periodEndExclusiveDate = new Date(periodStartDate);
-			periodEndExclusiveDate.setMonth(
-				periodEndExclusiveDate.getMonth() + 1
-			);
-		}
-
-		const monthStart = periodStartDate;
-		const nextMonthStart = periodEndExclusiveDate;
-
-
-		const getRecordDate = data => {
-			const candidates = [
-				data.time,
-				data.timestamp,
-				data.createdAt,
-				data.updatedAt,
-				data.date,
-				data.recordDate,
-				data.createdDate
-			];
-
-			for (const value of candidates) {
-				if (!value) continue;
-
-				try {
-					if (
-						value &&
-						typeof value.toDate === "function"
-					) {
-						const d = value.toDate();
-						if (!Number.isNaN(d.getTime())) {
-							return d;
-						}
-					}
-
-					if (value instanceof Date) {
-						if (!Number.isNaN(value.getTime())) {
-							return value;
-						}
-					}
-
-					const d = new Date(value);
-					if (!Number.isNaN(d.getTime())) {
-						return d;
-					}
-				} catch (_) {}
-			}
-
-			return null;
-		};
-
-		const isInReportingPeriod = data => {
-			// Nếu record không có trường ngày,
-			// giữ lại để tương thích dữ liệu cũ.
-			const recordDate = getRecordDate(data);
-
-			if (!recordDate) {
+			// =====================================================
+			// 13. HÀM CHUẨN HÓA GIÁ TRỊ KPI
+			// =====================================================
+			const isMeaningfulKpiItem = item => {
+				if (item === undefined || item === null) return false;
+				if (typeof item === "string") return item.trim() !== "";
+				if (typeof item === "number") return !Number.isNaN(item);
+				if (typeof item === "boolean") return true;
+				if (typeof item === "object") {
+					return Object.values(item).some(value => {
+						if (value === undefined || value === null) return false;
+						if (typeof value === "string") return value.trim() !== "";
+						return true;
+					});
+				}
 				return true;
-			}
-
-			return (
-				recordDate >= monthStart &&
-				recordDate < nextMonthStart
-			);
-		};
-
-		// =====================================================
-		// 11. HÀM TÌM USER THEO ENTITY ID
-		//     CODE là chính; UID chỉ fallback record cũ.
-		// =====================================================
-		const colleagueByCode = {};
-		const colleagueByUid = {};
-
-		uniqueDepartmentColleagues.forEach(colleague => {
-			const code = String(
-				colleague.code || ""
-			).trim();
-
-			const uid = String(
-				colleague.uid ||
-				""
-			).trim();
-
-			if (code) {
-				colleagueByCode[code] = colleague;
-			}
-
-			if (uid) {
-				colleagueByUid[uid] = colleague;
-			}
-		});
-
-		const resolveColleague = entityId => {
-			const key = String(
-				entityId || ""
-			).trim();
-
-			if (!key) return null;
-
-			return (
-				colleagueByCode[key] ||
-				colleagueByUid[key] ||
-				null
-			);
-		};
-
-		// =====================================================
-		// 12. KHỞI TẠO STATS
-		// =====================================================
-		const statsMap = {};
-
-		uniqueDepartmentColleagues.forEach(c => {
-			const primaryKey =
-				String(c.code || "").trim() ||
-				String(c.uid || "").trim();
-
-			if (!primaryKey) return;
-
-			statsMap[primaryKey] = {
-				id: primaryKey,
-				code: c.code || "",
-				uid: c.uid || "",
-				name: c.name,
-				department: c.department,
-
-				totalErrors: 0,
-				totalPenalty: 0,
-				totalBonus: 0,
-				negativeCount: 0,
-				positiveCount: 0,
-
-				kpiCounts: {},
-				negativeWeeks: new Set()
 			};
-		});
 
-		// =====================================================
-		// 13. HÀM CHUẨN HÓA GIÁ TRỊ KPI
-		//     Mỗi item thực sự có nội dung = 1 lượt KPI.
-		//     Item rỗng/null không được tính.
-		// =====================================================
-		const isMeaningfulKpiItem = item => {
-			if (item === undefined || item === null) {
-				return false;
-			}
+			const getKpiItems = value => {
+				if (Array.isArray(value)) return value.filter(isMeaningfulKpiItem);
+				return isMeaningfulKpiItem(value) ? [value] : [];
+			};
 
-			if (typeof item === "string") {
-				return item.trim() !== "";
-			}
+			// =====================================================
+			// 14. LẤY SCORE WEIGHT CỦA TỪNG ITEM KPI
+			// =====================================================
+			const getOptionKey = item => {
+				if (item && typeof item === "object") {
+					return String(item.value ?? item.label ?? item.name ?? item.option ?? item.key ?? "").trim();
+				}
+				return String(item ?? "").trim();
+			};
 
-			if (typeof item === "number") {
-				return !Number.isNaN(item);
-			}
+			const getScoreWeight = (kpiField, item) => {
+				const defaultWeight = Number(kpiField.scoreWeight);
+				const optionKey = getOptionKey(item);
+				const options = kpiField.kpiOptions || kpiField.options || {};
+				let optionConfig = null;
 
-			if (typeof item === "boolean") {
-				return true;
-			}
-
-			if (typeof item === "object") {
-				return Object.values(item).some(value => {
-					if (
-						value === undefined ||
-						value === null
-					) {
-						return false;
-					}
-
-					if (
-						typeof value === "string"
-					) {
-						return value.trim() !== "";
-					}
-
-					return true;
-				});
-			}
-
-			return true;
-		};
-
-		const getKpiItems = value => {
-			if (Array.isArray(value)) {
-				return value.filter(
-					isMeaningfulKpiItem
-				);
-			}
-
-			return isMeaningfulKpiItem(value)
-				? [value]
-				: [];
-		};
-
-		// =====================================================
-		// 14. LẤY SCORE WEIGHT CỦA TỪNG ITEM KPI
-		// =====================================================
-		const getOptionKey = item => {
-			if (
-				item &&
-				typeof item === "object"
-			) {
-				return String(
-					item.value ??
-					item.label ??
-					item.name ??
-					item.option ??
-					item.key ??
-					""
-				).trim();
-			}
-
-			return String(
-				item ?? ""
-			).trim();
-		};
-
-		const getScoreWeight = (
-			kpiField,
-			item
-		) => {
-			const defaultWeight = Number(
-				kpiField.scoreWeight
-			);
-
-			const optionKey = getOptionKey(item);
-
-			const options =
-				kpiField.kpiOptions ||
-				kpiField.options ||
-				{};
-
-			let optionConfig = null;
-
-			if (
-				optionKey &&
-				options &&
-				typeof options === "object"
-			) {
-				optionConfig =
-					options[optionKey];
-
-				if (
-					optionConfig === undefined
-				) {
-					const lowerKey =
-						optionKey.toLowerCase();
-
-					const matchedKey =
-						Object.keys(options).find(
-							key =>
-								String(key)
-									.toLowerCase() ===
-								lowerKey
-						);
-
-					if (matchedKey) {
-						optionConfig =
-							options[matchedKey];
+				if (optionKey && options && typeof options === "object") {
+					optionConfig = options[optionKey];
+					if (optionConfig === undefined) {
+						const lowerKey = optionKey.toLowerCase();
+						const matchedKey = Object.keys(options).find(key => String(key).toLowerCase() === lowerKey);
+						if (matchedKey) optionConfig = options[matchedKey];
 					}
 				}
-			}
 
-			if (
-				optionConfig !== null &&
-				optionConfig !== undefined
-			) {
-				if (
-					typeof optionConfig === "number"
-				) {
-					return Number(
-						optionConfig
-					);
-				}
-
-				if (
-					typeof optionConfig === "object"
-				) {
-					const optionWeight = Number(
-						optionConfig.scoreWeight ??
-						optionConfig.weight ??
-						optionConfig.points ??
-						optionConfig.point
-					);
-
-					if (
-						Number.isFinite(
-							optionWeight
-						)
-					) {
-						return optionWeight;
+				if (optionConfig !== null && optionConfig !== undefined) {
+					if (typeof optionConfig === "number") return Number(optionConfig);
+					if (typeof optionConfig === "object") {
+						const optionWeight = Number(optionConfig.scoreWeight ?? optionConfig.weight ?? optionConfig.points ?? optionConfig.point);
+						if (Number.isFinite(optionWeight)) return optionWeight;
 					}
 				}
-			}
 
-			return Number.isFinite(
-				defaultWeight
-			)
-				? defaultWeight
-				: -1;
-		};
+				return Number.isFinite(defaultWeight) ? defaultWeight : -1;
+			};
 
-		const getWeekKey = data => {
-			const date = getRecordDate(data);
+			const getWeekKey = data => {
+				const date = getRecordDate(data);
+				if (!date) return "";
+				const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
+				const diffDays = Math.floor((date - firstDay) / 86400000);
+				return `W${Math.floor(diffDays / 7) + 1}`;
+			};
 
-			if (!date) return "";
+			// =====================================================
+			// 15. ĐỌC RECORDS CỦA TỪNG MODULE
+			// =====================================================
+			for (const modDoc of modulesSnap.docs) {
+				const recordsSnap = await db
+					.collection("organizations")
+					.doc(orgId)
+					.collection("academicYears")
+					.doc(academicYearId)
+					.collection("modulesData")
+					.doc(modDoc.id)
+					.collection("records")
+					.get();
 
-			const firstDay = new Date(
-				date.getFullYear(),
-				date.getMonth(),
-				1
-			);
+				recordsSnap.forEach(recDoc => {
+					const data = recDoc.data() || {};
+					if (!isInReportingPeriod(data)) return;
 
-			const diffDays = Math.floor(
-				(date - firstDay) /
-				86400000
-			);
+					const entityId = String(data.entityId || recDoc.id || "").trim();
+					const colleague = resolveColleague(entityId);
+					if (!colleague) return;
 
-			return `W${Math.floor(
-				diffDays / 7
-			) + 1}`;
-		};
+					const statsKey = String(colleague.code || colleague.uid || "").trim();
+					const stats = statsMap[statsKey];
+					if (!stats) return;
 
-		// =====================================================
-		// 15. ĐỌC RECORDS CỦA TỪNG MODULE
-		// =====================================================
-		for (const modDoc of modulesSnap.docs) {
-			const recordsSnap = await db
-				.collection("organizations")
-				.doc(orgId)
-				.collection("academicYears")
-				.doc(academicYearId)
-				.collection("modulesData")
-				.doc(modDoc.id)
-				.collection("records")
-				.get();
-
-			recordsSnap.forEach(recDoc => {
-				const data =
-					recDoc.data() || {};
-
-				if (!isInReportingPeriod(data)) {
-					return;
-				}
-
-				const entityId = String(
-					data.entityId ||
-					recDoc.id ||
-					""
-				).trim();
-
-				const colleague =
-					resolveColleague(entityId);
-
-				if (!colleague) {
-					return;
-				}
-
-				const statsKey =
-					String(
-						colleague.code ||
-						colleague.uid ||
-						""
-					).trim();
-
-				const stats =
-					statsMap[statsKey];
-
-				if (!stats) {
-					return;
-				}
-
-				kpiFieldsList.forEach(
-					kpiField => {
-						const fKey =
-							kpiField.id;
-
-						let val =
-							data[fKey];
-
-						if (
-							val === undefined &&
-							data.changes &&
-							data.changes[fKey] !==
-								undefined
-						) {
-							val =
-								data.changes[fKey];
+					kpiFieldsList.forEach(kpiField => {
+						const fKey = kpiField.id;
+						let val = data[fKey];
+						if (val === undefined && data.changes && data.changes[fKey] !== undefined) {
+							val = data.changes[fKey];
 						}
 
-						const items =
-							getKpiItems(val);
+						const items = getKpiItems(val);
+						if (items.length === 0) return;
 
-						if (
-							items.length === 0
-						) {
-							return;
-						}
-
-						// Mỗi item KPI có nội dung
-						// được tính là 1 lượt.
-						stats.totalErrors +=
-							items.length;
-
-						stats.kpiCounts[fKey] =
-							(
-								stats.kpiCounts[fKey] ||
-								0
-							) + items.length;
+						stats.totalErrors += items.length;
+						stats.kpiCounts[fKey] = (stats.kpiCounts[fKey] || 0) + items.length;
 
 						items.forEach(item => {
-							const score =
-								getScoreWeight(
-									kpiField,
-									item
-								);
-
-							if (
-								score < 0
-							) {
-								stats.totalPenalty +=
-									Math.abs(score);
-
+							const score = getScoreWeight(kpiField, item);
+							if (score < 0) {
+								stats.totalPenalty += Math.abs(score);
 								stats.negativeCount++;
-
-								const weekKey =
-									getWeekKey(data);
-
-								if (weekKey) {
-									stats.negativeWeeks.add(
-										weekKey
-									);
-								}
-							} else if (
-								score > 0
-							) {
-								stats.totalBonus +=
-									score;
-
+								const weekKey = getWeekKey(data);
+								if (weekKey) stats.negativeWeeks.add(weekKey);
+							} else if (score > 0) {
+								stats.totalBonus += score;
 								stats.positiveCount++;
 							}
 						});
-					}
-				);
-			});
-		}
+					});
+				});
+			}
 
-		// =====================================================
-		// 16. TÍNH ĐIỂM THÁNG
-		//     BasePoint - điểm KPI âm + điểm KPI dương
-		// =====================================================
-		const processedList =
-			Object.values(statsMap).map(item => {
-				item.negativeWeeks =
-					item.negativeWeeks instanceof Set
-						? item.negativeWeeks.size
-						: Number(
-							item.negativeWeeks || 0
-						);
+			// =====================================================
+			// 16. TÍNH ĐIỂM THÁNG
+			// =====================================================
+			const processedList = Object.values(statsMap).map(item => {
+				item.negativeWeeks = item.negativeWeeks instanceof Set
+					? item.negativeWeeks.size
+					: Number(item.negativeWeeks || 0);
 
-				item.totalPoints =
-					basePoint -
-					Number(
-						item.totalPenalty || 0
-					) +
-					Number(
-						item.totalBonus || 0
-					);
-
+				item.totalPoints = basePoint - Number(item.totalPenalty || 0) + Number(item.totalBonus || 0);
 				return item;
 			});
 
-		// Sắp xếp theo tên để bảng ổn định.
-		processedList.sort(
-			(a, b) =>
-				String(a.name || "")
-					.localeCompare(
-						String(b.name || ""),
-						"vi"
-					)
-		);
+			processedList.sort((a, b) =>
+				String(a.name || "").localeCompare(String(b.name || ""), "vi")
+			);
 
-		// =====================================================
-		// 17. DỰNG HEADER
-		// =====================================================
-		let headerHtml = `
-			<th style="width: 100px;">Mã định danh</th>
-			<th style="width: 180px;">Họ và Tên</th>
-			<th style="width: 120px;">Tổ chuyên môn</th>
-		`;
+			// =====================================================
+			// 17. LỌC CÁC TRƯỜNG KPI CÓ VI PHẠM (Ít nhất 1 lỗi > 0)
+			// =====================================================
+			const activeKpiFields = kpiFieldsList.filter(field =>
+				Object.values(statsMap).some(stats => (stats.kpiCounts[field.id] || 0) > 0)
+			);
 
-		kpiFieldsList.forEach(field => {
-			headerHtml += `
-				<th style="text-align: center; min-width: 90px;">
-					${field.name}
-				</th>
-			`;
-		});
-
-		headerHtml += `
-			<th style="width: 100px; text-align: center;">
-				Tổng lỗi
-			</th>
-			<th style="width: 100px; text-align: center;">
-				Điểm trừ
-			</th>
-			<th style="width: 100px; text-align: center;">
-				Điểm cộng
-			</th>
-			<th style="width: 120px; text-align: center;">
-				Tổng điểm tháng
-			</th>
-		`;
-
-		if (headerRow) {
-			headerRow.innerHTML =
-				headerHtml;
-		}
-
-		// =====================================================
-		// 18. RENDER BẢNG
-		// =====================================================
-		if (processedList.length === 0) {
-			tableBody.innerHTML =
-				`<tr>
-					<td colspan="${3 + kpiFieldsList.length + 4}"
-						style="text-align: center; color: #6c757d; font-style: italic;">
-						Chưa có thành viên trong tổ chuyên môn.
-					</td>
-				</tr>`;
-
-			return;
-		}
-
-		let html = "";
-
-		processedList.forEach(item => {
-			const totalErrors =
-				Number(
-					item.totalErrors || 0
-				);
-
-			const totalPenalty =
-				Number(
-					item.totalPenalty || 0
-				);
-
-			const totalBonus =
-				Number(
-					item.totalBonus || 0
-				);
-
-			const totalPoints =
-				Number(
-					item.totalPoints || 0
-				);
-
-			html += `
-				<tr style="border-bottom: 1px solid #dee2e6;">
-
-					<td style="font-family: monospace; font-weight: bold;">
-						${item.code || item.uid || item.id}
-					</td>
-
-					<td>
-						${item.name || ""}
-					</td>
-
-					<td>
-						<span style="
-							background: #e9ecef;
-							padding: 2px 6px;
-							border-radius: 4px;
-							font-size: 0.9em;
-						">
-							${item.department || ""}
-						</span>
-					</td>
+			// =====================================================
+			// 18. DỰNG HEADER
+			// =====================================================
+			let headerHtml = `
+				<th style="width: 100px;">Mã định danh</th>
+				<th style="width: 180px;">Họ và Tên</th>
+				<th style="width: 120px;">Tổ chuyên môn</th>
 			`;
 
-			kpiFieldsList.forEach(field => {
-				const countVal =
-					Number(
-						item.kpiCounts[field.id] ||
-						0
-					);
-
-				html += `
-					<td style="text-align: center;">
-						${
-							countVal > 0
-								? `<span style="color: #dc3545; font-weight: bold;">
-									${countVal}
-								   </span>`
-								: `<span style="color: #ccc;">
-									0
-								   </span>`
-						}
-					</td>
+			activeKpiFields.forEach(field => {
+				headerHtml += `
+					<th style="text-align: center; min-width: 90px;">
+						${field.name}
+					</th>
 				`;
 			});
 
-			html += `
-					<td style="
-						text-align: center;
-						font-weight: bold;
-						color: ${
-							totalErrors > 0
-								? "#dc3545"
-								: "#198754"
-						};
-					">
-						${totalErrors}
-					</td>
-
-					<td style="
-						text-align: center;
-						font-weight: bold;
-						color: ${
-							totalPenalty > 0
-								? "#dc3545"
-								: "#198754"
-						};
-					">
-						${totalPenalty}
-					</td>
-
-					<td style="
-						text-align: center;
-						font-weight: bold;
-						color: ${
-							totalBonus > 0
-								? "#0d6efd"
-								: "#6c757d"
-						};
-					">
-						${totalBonus}
-					</td>
-
-					<td style="
-						text-align: center;
-						font-weight: bold;
-						font-size: 1.05em;
-						color: ${
-							totalPoints < basePoint
-								? "#dc3545"
-								: "#198754"
-						};
-					">
-						${totalPoints}
-					</td>
-
-				</tr>
+			headerHtml += `
+				<th style="width: 100px; text-align: center;">Tổng lỗi</th>
+				<th style="width: 100px; text-align: center;">Điểm trừ</th>
+				<th style="width: 100px; text-align: center;">Điểm cộng</th>
+				<th style="width: 120px; text-align: center;">Tổng điểm cuối</th>
 			`;
-		});
 
-		tableBody.innerHTML = html;
+			if (headerRow) {
+				headerRow.innerHTML = headerHtml;
+			}
 
-	} catch (error) {
-		console.error(
-			"Lỗi tải dữ liệu tổ chuyên môn:",
-			error
-		);
+			// =====================================================
+			// 19. RENDER BẢNG
+			// =====================================================
+			if (processedList.length === 0) {
+				tableBody.innerHTML =
+					`<tr>
+						<td colspan="${3 + activeKpiFields.length + 4}"
+							style="text-align: center; color: #6c757d; font-style: italic;">
+							Chưa có thành viên trong tổ chuyên môn.
+						</td>
+					</tr>`;
+				return;
+			}
 
-		tableBody.innerHTML =
-			'<tr><td colspan="10" style="text-align: center; color: red;">Lỗi tải dữ liệu tổ chuyên môn.</td></tr>';
+			let html = "";
+
+			processedList.forEach(item => {
+				const totalErrors = Number(item.totalErrors || 0);
+				const totalPenalty = Number(item.totalPenalty || 0);
+				const totalBonus = Number(item.totalBonus || 0);
+				const totalPoints = Number(item.totalPoints || 0);
+
+				html += `
+					<tr style="border-bottom: 1px solid #dee2e6;">
+						<td style="font-family: monospace; font-weight: bold;">
+							${item.code || item.uid || item.id}
+						</td>
+						<td>${item.name || ""}</td>
+						<td>
+							<span style="background: #e9ecef; padding: 2px 6px; border-radius: 4px; font-size: 0.9em;">
+								${item.department || ""}
+							</span>
+						</td>
+				`;
+
+				activeKpiFields.forEach(field => {
+					const countVal = Number(item.kpiCounts[field.id] || 0);
+					html += `
+						<td style="text-align: center;">
+							${
+								countVal > 0
+									? `<span style="color: #dc3545; font-weight: bold;">${countVal}</span>`
+									: `<span style="color: #ccc;">0</span>`
+							}
+						</td>
+					`;
+				});
+
+				html += `
+						<td style="text-align: center; font-weight: bold; color: ${totalErrors > 0 ? "#dc3545" : "#198754"};">
+							${totalErrors}
+						</td>
+						<td style="text-align: center; font-weight: bold; color: ${totalPenalty > 0 ? "#dc3545" : "#198754"};">
+							${totalPenalty}
+						</td>
+						<td style="text-align: center; font-weight: bold; color: ${totalBonus > 0 ? "#0d6efd" : "#6c757d"};">
+							${totalBonus}
+						</td>
+						<td style="text-align: center; font-weight: bold; font-size: 1.05em; color: ${totalPoints < basePoint ? "#dc3545" : "#198754"};">
+							${totalPoints}
+						</td>
+					</tr>
+				`;
+			});
+
+			tableBody.innerHTML = html;
+
+		} catch (error) {
+			console.error("Lỗi tải dữ liệu tổ chuyên môn:", error);
+			tableBody.innerHTML =
+				'<tr><td colspan="10" style="text-align: center; color: red;">Lỗi tải dữ liệu tổ chuyên môn.</td></tr>';
+		}
 	}
-}
+
 
 	
 	//	GỌI HỖ TRỢ
