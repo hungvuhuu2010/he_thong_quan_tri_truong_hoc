@@ -294,10 +294,14 @@ async function handleLogin(e) {
 					usersSnap.forEach(uDoc => {
 						const uData = uDoc.data();
 						window.cachedUsersMap[uDoc.id] = {
+							id: uDoc.id,
+							code: uData.code || uData.memberId || uDoc.id, // Ưu tiên code -> memberId -> doc.id
 							fullName: uData.fullName || uDoc.id,
-							category: uData.category || uData.className || ""
+							category: uData.category || uData.className || "",
+							role: uData.role || "STUDENT" // 🌟 Bổ sung role (mặc định STUDENT nếu trống)
 						};
 					});
+
 				} catch (err) {
 					console.warn("⚠️ [DEBUG LOGIN] Lỗi khi cache bảng users:", err);
 				}
@@ -15186,6 +15190,10 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 	// 🌟 1. Chuyển đổi qua lại giữa các Tab của Nhân viên (Từ 1 đến 5)
 	async function switchEmpTab(tabIndex) {
 
+		const orgId = window.currentOrgIdGlobal;
+		if (orgId) ensureUsersCacheLoaded(orgId);
+		
+
 		// ============================================================
 		// 1. ĐÓNG TẤT CẢ CÁC TAB
 		// ============================================================
@@ -15502,6 +15510,79 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 
 		delete cache.records[moduleId][dailyDocId];
 	}
+	
+	// LƯU TRỮ LOCAL STORAGE
+	// 1. Hàm nén và lưu Users Map vào LocalStorage (chỉ lưu 5 trường tối thiểu)
+	function saveUsersMapToLocalStorage(orgId, usersArray) {
+		const usersMap = {};
+		usersArray.forEach(u => {
+			const key = u.code || u.id;
+			if (key) {
+				usersMap[key] = {
+					id: u.id,
+					code: u.code || u.id,
+					fullName: u.fullName || u.name || "",
+					category: u.category || "",
+					role: u.role || ""
+				};
+			}
+		});
+		localStorage.setItem(`cachedUsersMap_${orgId}`, JSON.stringify(usersMap));
+	}
+
+	// 2. Hàm đọc Users Map từ LocalStorage
+	function getUsersMapFromLocalStorage(orgId) {
+		const data = localStorage.getItem(`cachedUsersMap_${orgId}`);
+		return data ? JSON.parse(data) : null;
+	}
+
+	// 3. Ví dụ ghép vào Record / AuditLog (Tra cứu O(1))
+	function mapRecordWithUserInfo(record, usersMap) {
+		const userKey = record.userCode || record.userId;
+		const userInfo = usersMap[userKey] || {};
+		return {
+			...record,
+			fullName: userInfo.fullName || "N/A",
+			category: userInfo.category || "N/A"
+		};
+	}
+	
+	// ============================================================
+	// BỔ SUNG: Hàm kiểm tra & nạp cache Users từ LocalStorage vào RAM
+	// ============================================================
+
+	window.ensureUsersCacheLoaded = function(orgId) {
+		try {
+			const targetOrgId = orgId || window.currentOrgIdGlobal || "";
+			if (!targetOrgId) return {};
+
+			// 1. Kiểm tra RAM
+			if (window.cachedUsersMap && typeof window.cachedUsersMap === 'object' && Object.keys(window.cachedUsersMap).length > 0) {
+				return window.cachedUsersMap;
+			}
+
+			// 2. Đọc từ LocalStorage nếu RAM trống
+			const authUser = firebase.auth && firebase.auth().currentUser;
+			const email = (authUser && authUser.email) ? authUser.email.toLowerCase().trim() : "guest";
+			const storageKey = `cachedUsersMap_${targetOrgId}_${email}`;
+			
+			const rawData = localStorage.getItem(storageKey);
+			if (rawData) {
+				window.cachedUsersMap = JSON.parse(rawData) || {};
+				console.log("⚡ [EmployeeCache] Nạp lại users từ LocalStorage thành công khi F5!");
+			}
+		} catch (e) {
+			console.warn("Lỗi nạp cache từ LocalStorage:", e);
+			window.cachedUsersMap = window.cachedUsersMap || {};
+		}
+		return window.cachedUsersMap || {};
+	};
+
+
+
+
+
+	// KẾT THÚC KHỐI LƯU TRỮ LOCAL STORAGE
 	
 	// 1. Hàm khởi tạo danh sách nhiệm vụ / module từ collection `modules` của tổ chức
 	async function initEmployeeModules() {
@@ -15835,50 +15916,49 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 					"[EmployeeCache] Sang ngày mới, đã reset records."
 				);
 			}
-
-
 			// ========================================================
-			// 3. TẢI DANH SÁCH USERS CHỈ 1 LẦN
+			// 3. TẢI DANH SÁCH USERS (ƯU TIÊN LOCAL STORAGE / RAM)
 			// ========================================================
 
-			if (
-				!Array.isArray(cache.users) ||
-				cache.users.length === 0
-			) {
+			if (!Array.isArray(cache.users) || cache.users.length === 0) {
+				if (!forceRefresh) {
+					// Nạp an toàn từ LocalStorage
+					if (typeof window.ensureUsersCacheLoaded === "function") {
+						window.ensureUsersCacheLoaded(orgId);
+					}
 
-				console.log(
-					"[EmployeeCache] Đang tải danh sách users từ Firestore..."
-				);
+					// Chuyển đổi cachedUsersMap sang cache.users trên RAM
+					if (window.cachedUsersMap && typeof window.cachedUsersMap === 'object' && Object.keys(window.cachedUsersMap).length > 0) {
+						cache.users = Object.entries(window.cachedUsersMap).map(([id, u]) => ({
+							id: id,
+							code: (u && (u.code || u.memberId)) ? (u.code || u.memberId) : id,
+							fullName: (u && u.fullName) ? u.fullName : "",
+							category: (u && u.category) ? u.category : "",
+							role: (u && u.role) ? u.role : ""
+						}));
+						console.log(`⚡ [EmployeeCache] Đã nạp ${cache.users.length} users từ LocalStorage vào RAM.`);
+					}
 
-				const usersSnapshot = await db
-					.collection("organizations")
-					.doc(orgId)
-					.collection("users")
-					.get();
+				}
 
-				cache.users = [];
-
-				usersSnapshot.forEach(doc => {
-
-					const userData = doc.data();
-
-					cache.users.push({
-						id: doc.id,
-						code: userData.code || doc.id,
-						...userData
+				// Nếu vẫn trống (chưa có trong LocalStorage) mới đọc Firestore
+				if (!Array.isArray(cache.users) || cache.users.length === 0) {
+					console.log("[EmployeeCache] Đang tải danh sách users từ Firestore...");
+					const usersSnapshot = await db.collection("organizations").doc(orgId).collection("users").get();
+					cache.users = [];
+					window.cachedUsersMap = {};
+					usersSnapshot.forEach(doc => {
+						const userData = doc.data();
+						const uObj = { id: doc.id, code: userData.code || doc.id, ...userData };
+						cache.users.push(uObj);
+						window.cachedUsersMap[doc.id] = uObj;
 					});
-				});
-
-				console.log(
-					`[EmployeeCache] Đã cache ${cache.users.length} users.`
-				);
-
-			} else {
-
-				console.log(
-					`[EmployeeCache] Dùng ${cache.users.length} users từ RAM.`
-				);
+					if (typeof saveUsersToLocalStorage === "function") {
+						saveUsersToLocalStorage(window.cachedUsersMap);
+					}
+				}
 			}
+
 
 
 			// ========================================================
@@ -16302,15 +16382,20 @@ async function searchIndividualAuditSheet(forceRefresh = false) {
 						const isMyOptToday = isChecked && recordEmail === myEmail;
 						const isDisabled = isChecked && !isMyOptToday;
 
+						// 🌟 Kiểm tra xem Option có chứa từ khóa tìm kiếm (fieldKwParts) hay không
+						const isMatchedOpt = fieldKwParts.length > 0 && fieldKwParts.some(kw => String(opt).toLowerCase().includes(kw));
+						const optHighlightStyle = isMatchedOpt ? 'background-color: #ffeb3b; font-weight: bold; padding: 0 4px; border-radius: 2px;' : '';
+
 						cellHtml += `
 							<label style="font-size: 0.85em; display: flex; align-items: center; gap: 5px; ${isDisabled ? 'opacity: 0.6; cursor: not-allowed;' : 'cursor: pointer;'}"
 								   title="${isDisabled ? 'Đã tích bởi: ' + (matchRecord.by || recordEmail) : ''}">
 								<input type="checkbox" class="emp-dynamic-checkbox" data-id="${memberId}" data-field="${fieldKey}" value="${opt}" ${isChecked ? "checked" : ""} ${isDisabled ? "disabled" : ""}>
-								<span ${isDisabled ? 'style="color: #6c757d; text-decoration: line-through;"' : ''}>${opt}</span>
+								<span style="${optHighlightStyle} ${isDisabled ? 'color: #6c757d; text-decoration: line-through;' : ''}">${opt}</span>
 								${isDisabled ? `<small style="font-size: 0.75em; color: #dc3545; margin-left: auto;">${matchRecord.by || recordEmail}</small>` : ''}
 							</label>
 						`;
 					});
+
 					cellHtml += `</div>`;
 				} else {
 					cellHtml += `
